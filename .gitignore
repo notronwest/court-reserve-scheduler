@@ -1,0 +1,34 @@
+# Credentials — never commit
+.env
+
+# Claude Code internals
+.claude/
+
+# Exploration / scratch scripts
+explore_*.py
+
+# Cached schedule data
+schedule_*.json
+schedule_*.html
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Screenshots & booking logs (runtime artifacts)
+*.png
+booking_log_*.json
+
+# History data (fetched at runtime)
+history/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

@@ -1,0 +1,246 @@
+{
+  "meta": {
+    "version": "2026-04-08",
+    "approved_by": "Club Management",
+    "source_document": "Court Reserve Calendar — Business Decisions & Policies",
+    "notes": "Machine-readable expression of all business decisions governing automated recommendations and manual management of the court reserve calendar. Edit this file (not the code) when policies change."
+  },
+
+  "courts": {
+    "52349": { "number": 1, "label": "Pickleball-Court #1" },
+    "52350": { "number": 2, "label": "Pickleball-Court #2" },
+    "52351": { "number": 3, "label": "Pickleball-Court #3" },
+    "52352": { "number": 4, "label": "Pickleball-Court #4" }
+  },
+
+  "approved_events": {
+    "1717147": {
+      "name": "Co-Ed Beginner Open Play",
+      "level": "Beginner",
+      "default_duration_hours": 2
+    },
+    "1717131": {
+      "name": "Co-Ed Advanced Beginner Open Play",
+      "level": "Advanced Beginner",
+      "default_duration_hours": 2
+    },
+    "1931656": {
+      "name": "Co-ed Intermediate Open Play",
+      "level": "Intermediate",
+      "default_duration_hours": 2
+    },
+    "1672774": {
+      "name": "Co-ed Advanced Intermediate Open Play",
+      "level": "Advanced Intermediate",
+      "default_duration_hours": 2
+    },
+    "1633147": {
+      "name": "Co-ed Advanced Open Play",
+      "level": "Advanced",
+      "default_duration_hours": 2
+    }
+  },
+
+  "fixed_events": {
+    "note": "Type-2 fixed events: events that should ALWAYS be placed on the schedule regardless of utilization. The recommender places these first, before filling for utilization. Each entry needs: event_id, days_of_week, start_time, end_time, court_num.",
+    "status": "PENDING — list not yet defined. Scheduler will remind via Discord daily until complete.",
+    "pending_since": "2026-04-07",
+    "events": []
+  },
+
+  "utilization": {
+    "target_pct": 60,
+    "baseline_courts": 4,
+    "note": "Target = target_pct × (courts × window_hours). Recommender fills to target where feasible under hard constraints."
+  },
+
+  "operating_windows": {
+    "weekday": {
+      "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      "start": "09:00",
+      "end": "20:00",
+      "hours": 11,
+      "note": "Extended to 20:00 on 2026-04-07 to allow 6 PM event starts."
+    },
+    "weekend": {
+      "days": ["Saturday", "Sunday"],
+      "start": "08:00",
+      "end": "18:00",
+      "hours": 10
+    }
+  },
+
+  "required_levels": [
+    "Beginner",
+    "Advanced Beginner",
+    "Intermediate",
+    "Advanced Intermediate",
+    "Advanced"
+  ],
+
+  "hard_constraints": {
+    "precedence_order_note": "Constraints are enforced in the order listed below (1 = highest priority).",
+    "1_no_same_court_overlap": {
+      "enabled": true,
+      "description": "No recommendation may occupy a time window on a court that overlaps any existing event on that court on the target day."
+    },
+    "2_one_court_per_event": {
+      "enabled": true,
+      "description": "Each recommended event must be assigned to exactly one court."
+    },
+    "3_max_occurrences_per_event_per_day": {
+      "limit": 2,
+      "scope": "existing + recommended rows combined",
+      "description": "No eventId may appear more than twice on the same day across all events."
+    },
+    "4_required_level_coverage": {
+      "enabled": true,
+      "description": "Recommendations must collectively include all five levels when possible.",
+      "levels": ["Beginner", "Advanced Beginner", "Intermediate", "Advanced Intermediate", "Advanced"]
+    },
+    "5_utilization_optimization": {
+      "enabled": true,
+      "description": "Generate enough non-conflicting events to reach the utilization target if feasible under constraints 1–4."
+    }
+  },
+
+  "recommendation_rules": {
+    "min_recommendations": 5,
+    "event_duration_hours": {
+      "open_play": 2,
+      "note": "All Open Play sessions must be exactly 2 hours. This is a hard rule — do not recommend 1-hour open play slots."
+    },
+    "preferred_block_duration_hours": {
+      "weekday": 2,
+      "weekend": 2,
+      "note": "All blocks are 2 hours. 1-hour fallback removed."
+    },
+    "spread_throughout_day": {
+      "enabled": true,
+      "description": "Distribute recommendations evenly across morning, midday, afternoon, and evening rather than front-loading the earliest slots.",
+      "time_bands": {
+        "morning":   { "start": "09:00", "end": "12:00" },
+        "midday":    { "start": "12:00", "end": "15:00" },
+        "afternoon": { "start": "15:00", "end": "18:00" },
+        "evening":   { "start": "18:00", "end": "20:00" }
+      },
+      "strategy": "one_per_band_first_then_fill"
+    },
+    "court_fill_preference": "free_courts_first",
+    "preferred_court_when_free": 4,
+    "approved_event_ids_only": true,
+    "default_target_date": "2_weeks_from_today",
+    "target_date_note": "When no date is passed to run.py, defaults to 14 days from today. Override by passing a date argument: python run.py M/D/YYYY"
+  },
+
+  "scheduling": {
+    "history_fetch": {
+      "frequency": "weekly",
+      "day_of_week": "Monday",
+      "time": "07:00",
+      "lookback_months": 3,
+      "storage_path": "history/",
+      "retention_days": 60,
+      "launchd_label": "com.whitemountain.fetch-history"
+    },
+    "daily_scheduler": {
+      "frequency": "daily",
+      "time": "08:00",
+      "target_date_offset_days": 14,
+      "requires_discord_approval": true,
+      "discord_approval_timeout_minutes": 10,
+      "launchd_label": "com.whitemountain.scheduler"
+    }
+  },
+
+  "booking": {
+    "add_occurrence_url": "https://app.courtreserve.com/EventReservation/AddEventOccurrence?eventId={event_id}&source=EditOccurrences",
+    "edit_occurrence_url": "https://app.courtreserve.com/Reservation/UpdateReservation?reservationId={occurrence_id}",
+    "occurrences_list_url": "https://app.courtreserve.com/Events/Edit/{event_id}?page=occurrences",
+    "url_notes": {
+      "EditEventOccurrence": "Returns 404 — does not exist as a standalone page. Use UpdateReservation instead.",
+      "occurrence_id": "The 'Id' field returned by the schedule report API is the reservationId used in UpdateReservation. Same number, different name.",
+      "EditOnlyCurrentOccurrence": "Checkbox on UpdateReservation form — must be checked to edit only this date, not the full recurring series."
+    },
+    "form_fields": {
+      "add_form": {
+        "date":       { "id": "Date",      "kendo_widget": "kendoDatePicker" },
+        "start_time": { "id": "StartTime", "kendo_widget": "kendoTimePicker" },
+        "end_time":   { "id": "EndTime",   "kendo_widget": "kendoTimePicker" },
+        "courts":     { "id": "Courts",    "kendo_widget": "kendoMultiSelect" }
+      },
+      "edit_form": {
+        "start_time": { "id": "StartTime", "kendo_widget": "kendoTimePicker" },
+        "end_time":   { "id": "EndTime",   "kendo_widget": "kendoTimePicker" },
+        "courts":     { "id": "Courts",    "kendo_widget": "kendoMultiSelect" },
+        "edit_only_current": { "id": "EditOnlyCurrentOccurrence", "type": "checkbox", "must_be_checked": true }
+      }
+    },
+    "save_button_selector": "button:has-text('Save'):not(:has-text('Register'))"
+  },
+
+  "post_booking": {
+    "results_discord_post": {
+      "enabled": true,
+      "description": "After every booking session, results (success/failure per event) are posted back to Discord immediately."
+    },
+    "retry": {
+      "max_attempts": 3,
+      "retry_window_seconds": 180,
+      "description": "If any bookings fail, Discord is prompted with retry instructions. User can reply 'retry', 'retry 1,2', or 'skip'. Capped at 3 total attempts.",
+      "reply_commands": {
+        "retry": "Retry all failed events",
+        "retry 1,2": "Retry specific failed events by number",
+        "skip": "Accept failures and finish"
+      }
+    },
+    "verification": {
+      "description": "After booking (and after each retry), the live schedule is re-fetched and each booked event is verified.",
+      "match_strategy": "event_id + start_time — more reliable than court label string matching",
+      "statuses": {
+        "confirmed": "Event found at correct time on correct court",
+        "wrong_court": "Event found at correct time but on different court — auto-fix triggered",
+        "no_court": "Event found at correct time with no court assigned — auto-fix triggered",
+        "not_found": "Event not on schedule at all — re-add triggered"
+      },
+      "auto_remediation": {
+        "enabled": true,
+        "method": "fix_event_court() — navigates directly to UpdateReservation using occurrence_id if known, falls back to grid search, falls back to re-add",
+        "occurrence_id_source": "Preferred: Id field from live schedule API. Fallback: captured from occurrences grid after initial booking."
+      }
+    }
+  },
+
+  "cli": {
+    "main_command": "python run.py [date] [--book] [--dry-run]",
+    "fix_command": "python run.py fix <date> (--event-id ID | --name 'fragment') [--start 'H:MM AM'] --court N [--dry-run]",
+    "fix_command_description": "Manually update the court assignment for a specific event occurrence. Fetches live schedule to find the occurrence ID, then edits via UpdateReservation form.",
+    "examples": {
+      "default_run": "python run.py --book",
+      "specific_date": "python run.py 4/22/2026 --book",
+      "dry_run": "python run.py --dry-run",
+      "fix_by_id": "python run.py fix 4/22/2026 --event-id 1633147 --start '1:00 PM' --court 1",
+      "fix_by_name": "python run.py fix 4/22/2026 --name 'Advanced Open Play' --court 1"
+    }
+  },
+
+  "fallback_behavior": {
+    "when_utilization_unreachable": "Stop at maximal feasible utilization under hard constraints. Report remaining gap explicitly in court-hours and percent points.",
+    "report_fields_on_shortfall": ["achieved_court_hours", "target_court_hours", "gap_court_hours", "gap_pct_points"],
+    "relaxation_order": "TBD — requires explicit business approval before implementation. Suggested: relax constraint 5 first (utilization), then 4 (level coverage), never relax 1–3."
+  },
+
+  "traceability": {
+    "log_source_workbook_timestamp": true,
+    "log_report_generation_timestamp": true,
+    "source_data_pattern": "history/history_latest.json",
+    "note": "History is fetched weekly via fetch_history.py and stored locally. Scheduler run logs go to ~/Library/Logs/court_reserve/."
+  },
+
+  "governance": {
+    "eventid_whitelist_change_policy": "Approved event IDs may only be added or removed with explicit business approval. Update approved_events in this file; do not hardcode IDs in scheduler logic.",
+    "operating_window_change_policy": "Windows are configurable by day-of-week in this file.",
+    "fixed_events_change_policy": "Fixed events may only be added or removed with explicit business approval. Update fixed_events.events in this file.",
+    "version_control": "This file should be tracked in version control. Git history serves as the audit log for policy changes."
+  }
+}
