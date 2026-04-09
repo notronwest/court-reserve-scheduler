@@ -10,6 +10,7 @@ Usage:
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from history_analysis import load_popularity, popularity_score
 
 # ── Static configuration ─────────────────────────────────────────────────────
 
@@ -227,6 +228,12 @@ def recommend(
                     spread_order.append(bands[bk][i])
         free_slots = spread_order
 
+    # ── Load historical popularity scores ────────────────────────────────────
+    pop_scores = load_popularity()   # empty dict → scores all 0, no change in behaviour
+
+    def _pop(eid: int, slot_start: datetime) -> float:
+        return popularity_score(pop_scores, eid, day_name, slot_start)
+
     # ── Build recommendations ─────────────────────────────────────────────────
     recommendations: list[Recommendation] = []
     used: list[tuple[int, datetime, datetime]] = []  # (court_num, start, end)
@@ -253,20 +260,27 @@ def recommend(
         event_counts[eid] += 1
         levels_covered.add(APPROVED_EVENTS[eid]["level"])
 
-    # Constraint 4 — Pass 1: ensure all 5 levels are represented
+    # Constraint 4 — Pass 1: ensure all 5 levels are represented.
+    # For each missing level rank available slots by historical popularity so
+    # we place the event in the time band where it has drawn best attendance.
     for level in LEVEL_ORDER:
         if level in levels_covered:
             continue
         eid = LEVEL_TO_EVENT_ID[level]
         if event_counts[eid] >= max_occ:
             continue
-        for cn, ss, se in free_slots:
-            if rec_free(cn, ss, se):
-                add(eid, cn, ss, se)
-                break
+        candidates = [(cn, ss, se) for cn, ss, se in free_slots if rec_free(cn, ss, se)]
+        if not candidates:
+            continue
+        # Sort: highest popularity first; ties broken by time (earlier first)
+        candidates.sort(key=lambda s: (-_pop(eid, s[1]), s[1]))
+        cn, ss, se = candidates[0]
+        add(eid, cn, ss, se)
 
-    # Constraint 5 — Pass 2: fill toward utilization target
-    added_hrs       = sum((se - ss).total_seconds() / 3600 for _, ss, se in used)
+    # Constraint 5 — Pass 2: fill toward utilization target.
+    # For each free slot pick the event with the best popularity score for
+    # this day / time-band.  Fall back to fewest-recs if no history exists.
+    added_hrs        = sum((se - ss).total_seconds() / 3600 for _, ss, se in used)
     remaining_needed = needed_court_hours - added_hrs
 
     for cn, ss, se in free_slots:
@@ -274,14 +288,19 @@ def recommend(
             break
         if not rec_free(cn, ss, se):
             continue
-        # Pick the level with fewest recs so far (balanced fill)
-        for level in sorted(LEVEL_ORDER, key=lambda l: event_counts[LEVEL_TO_EVENT_ID[l]]):
-            eid = LEVEL_TO_EVENT_ID[level]
-            if event_counts[eid] < max_occ:
-                slot_hrs = (se - ss).total_seconds() / 3600
-                add(eid, cn, ss, se)
-                remaining_needed -= slot_hrs
-                break
+        eligible = [
+            (LEVEL_TO_EVENT_ID[l], l)
+            for l in LEVEL_ORDER
+            if event_counts[LEVEL_TO_EVENT_ID[l]] < max_occ
+        ]
+        if not eligible:
+            break
+        # Rank by popularity desc; ties broken by fewest existing occurrences
+        eligible.sort(key=lambda x: (-_pop(x[0], ss), event_counts[x[0]]))
+        eid, _ = eligible[0]
+        slot_hrs = (se - ss).total_seconds() / 3600
+        add(eid, cn, ss, se)
+        remaining_needed -= slot_hrs
 
     # Sort by time, then court
     recommendations.sort(key=lambda r: (r.start, r.court_num))
@@ -306,6 +325,7 @@ def recommend(
         "levels_missing":          [l for l in LEVEL_ORDER if l not in levels_covered],
         "min_recommendations_met": len(recommendations) >= policy["recommendation_rules"]["min_recommendations"],
         "n_recommendations":       len(recommendations),
+        "popularity_used":         bool(pop_scores),
     }
 
     return recommendations, stats
