@@ -42,10 +42,110 @@
   },
 
   "fixed_events": {
-    "note": "Type-2 fixed events: events that should ALWAYS be placed on the schedule regardless of utilization. The recommender places these first, before filling for utilization. Each entry needs: event_id, days_of_week, start_time, end_time, court_num.",
-    "status": "PENDING — list not yet defined. Scheduler will remind via Discord daily until complete.",
-    "pending_since": "2026-04-07",
-    "events": []
+    "note": "Recurring weekly events that are always on the schedule. Used by the recommender for saturation calculations and to avoid recommending conflicting events. Courts and max_participants are informational.",
+    "status": "ACTIVE",
+    "defined_on": "2026-04-09",
+    "events": [
+      {
+        "name": "Co-Ed 3.75+ Level Play",
+        "day_of_week": "Monday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Advanced"
+      },
+      {
+        "name": "Women's Advanced Contract Time",
+        "day_of_week": "Tuesday",
+        "start_time": "16:00",
+        "end_time": "18:00",
+        "courts": 1,
+        "level": "Advanced"
+      },
+      {
+        "name": "Co-ed 3.5-3.75+ Level Play",
+        "day_of_week": "Tuesday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Advanced Intermediate"
+      },
+      {
+        "name": "Women's Advanced Intermediate Open Play",
+        "day_of_week": "Wednesday",
+        "start_time": "15:00",
+        "end_time": "17:00",
+        "courts": 2,
+        "max_participants": 10,
+        "level": "Advanced Intermediate"
+      },
+      {
+        "name": "Mens Advanced Plus Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Advanced"
+      },
+      {
+        "name": "Co-Ed 3.25-3.5 Level Play",
+        "day_of_week": "Thursday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Intermediate"
+      },
+      {
+        "name": "Women's Intermediate Open Play",
+        "day_of_week": "Friday",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "courts": 1,
+        "level": "Intermediate"
+      },
+      {
+        "name": "Co-Ed up to 3.25 Level Play",
+        "day_of_week": "Friday",
+        "start_time": "12:00",
+        "end_time": "14:00",
+        "courts": 1,
+        "level": "Beginner"
+      },
+      {
+        "name": "Co-Ed Advanced Open Play",
+        "day_of_week": "Friday",
+        "start_time": "14:00",
+        "end_time": "16:00",
+        "courts": 2,
+        "max_participants": 8,
+        "level": "Advanced"
+      },
+      {
+        "name": "Co-Ed Advanced Open Play",
+        "day_of_week": "Saturday",
+        "start_time": "10:00",
+        "end_time": "12:00",
+        "courts": 1,
+        "level": "Advanced"
+      },
+      {
+        "name": "Co-Ed Advanced Intermediate Open Play",
+        "day_of_week": "Saturday",
+        "start_time": "16:00",
+        "end_time": "18:00",
+        "courts": 2,
+        "max_participants": 8,
+        "level": "Advanced Intermediate"
+      },
+      {
+        "name": "Co-Ed Advanced Open Play",
+        "day_of_week": "Sunday",
+        "start_time": "09:00",
+        "end_time": "11:00",
+        "courts": 1,
+        "level": "Advanced"
+      }
+    ]
   },
 
   "utilization": {

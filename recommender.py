@@ -171,21 +171,34 @@ def recommend(
 
     # ── Existing level saturation ─────────────────────────────────────────────
     # Count how many sessions of each skill level are ALREADY on the schedule
-    # today — including non-approved events (e.g. "Wednesday Afternoon
-    # Co-ed Intermediate Open Play").  Used to avoid over-recommending levels
-    # that are already well-covered.
+    # today — including non-approved events and fixed recurring events.
+    # Used to avoid over-recommending levels that are already well-covered.
     level_counts: dict[str, int] = {level: 0 for level in LEVEL_ORDER}
+
+    def _detect_level(name: str) -> str | None:
+        """Return the skill level for an event name, or None if unrecognised."""
+        n = name.lower()
+        for level in sorted(LEVEL_ORDER, key=len, reverse=True):
+            if level.lower() in n:
+                return level
+        return None
+
+    # Count from live schedule items
     for item in schedule_items:
         item_dt = datetime.fromisoformat(item["StartDateTime"])
         if item_dt.strftime("%Y-%m-%d") != date_str:
             continue
-        name = (item.get("EventName") or item.get("ReservationType") or "").lower()
-        # Match longest level name first so "Advanced Intermediate" is detected
-        # before "Advanced", and "Advanced Beginner" before "Beginner".
-        for level in sorted(LEVEL_ORDER, key=len, reverse=True):
-            if level.lower() in name:
-                level_counts[level] += 1
-                break
+        name = item.get("EventName") or item.get("ReservationType") or ""
+        level = _detect_level(name)
+        if level:
+            level_counts[level] += 1
+
+    # Also count fixed recurring events for this day of the week — these may
+    # not yet be on the live schedule if we're looking ahead, but we know
+    # they will be there.
+    for fe in policy.get("fixed_events", {}).get("events", []):
+        if fe.get("day_of_week") == day_name and fe.get("level") in level_counts:
+            level_counts[fe["level"]] += 1
 
     # ── Generate all free candidate slots ────────────────────────────────────
     preferred_court = policy["recommendation_rules"].get("preferred_court_when_free", 4)
