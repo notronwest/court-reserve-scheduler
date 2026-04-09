@@ -242,22 +242,31 @@ def main():
     # ── fix subcommand ────────────────────────────────────────────────────────
     fix_parser = subparsers.add_parser("fix", help="Fix the court assignment for a specific event")
     fix_parser.add_argument("fix_date", help="Date of the event  M/D/YYYY")
-    fix_parser.add_argument("--event-id", dest="event_id", type=int, help="Event ID (from policy or schedule)")
-    fix_parser.add_argument("--name",     dest="name",     help="Event name fragment (e.g. 'Advanced Open Play')")
-    fix_parser.add_argument("--start",    dest="start",    help="Start time  e.g. '1:00 PM'")
-    fix_parser.add_argument("--court",    dest="court",    type=int, required=True, help="Court number to assign (1-4)")
+    fix_parser.add_argument("--event-id", dest="event_id", type=int)
+    fix_parser.add_argument("--name",     dest="name")
+    fix_parser.add_argument("--start",    dest="start")
+    fix_parser.add_argument("--court",    dest="court", type=int, required=True)
     fix_parser.add_argument("--dry-run",  action="store_true")
 
     # ── default schedule+book command ─────────────────────────────────────────
-    parser.add_argument(
+    run_parser = subparsers.add_parser("run", help="Recommend and optionally book events (default)")
+    run_parser.add_argument(
         "date",
         nargs="?",
         default=two_weeks_out,
-        help=f"Target date M/D/YYYY (default: 2 weeks from today = {two_weeks_out})",
+        help=f"Target date M/D/YYYY (default: {two_weeks_out})",
     )
-    parser.add_argument("--book",    action="store_true", help="Book confirmed recommendations")
-    parser.add_argument("--dry-run", action="store_true", help="Fill forms but don't submit")
-    args = parser.parse_args()
+    run_parser.add_argument("--book",    action="store_true")
+    run_parser.add_argument("--dry-run", action="store_true")
+
+    # If no subcommand given, default to "run" and re-parse under it
+    argv = sys.argv[1:]
+    if argv and argv[0] not in ("fix", "run", "-h", "--help"):
+        argv = ["run"] + argv
+    elif not argv or argv[0] in ("--book", "--dry-run"):
+        argv = ["run"] + argv
+
+    args = parser.parse_args(argv)
 
     if args.command == "fix":
         cmd_fix(args)

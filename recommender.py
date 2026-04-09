@@ -276,6 +276,13 @@ def recommend(
                 return False
         return True
 
+    def already_on_schedule(court_num: int, ss: datetime, se: datetime) -> bool:
+        """True if an existing event already occupies this court/time."""
+        for e in existing:
+            if e["court_num"] == court_num and _overlaps(ss, se, e["start"], e["end"]):
+                return True
+        return False
+
     def add(eid: int, cn: int, ss: datetime, se: datetime):
         recommendations.append(Recommendation(
             event_id    = eid,
@@ -290,6 +297,44 @@ def recommend(
         used.append((cn, ss, se))
         event_counts[eid] += 1
         levels_covered.add(APPROVED_EVENTS[eid]["level"])
+
+    # ── Pass 0: Place fixed recurring events ─────────────────────────────────
+    # Fixed events are placed at their designated times/courts first.
+    # Each court listed for a multi-court fixed event gets its own recommendation.
+    # Skip any slot already occupied by a live schedule event.
+    name_to_event_id = {v["name"].lower(): k for k, v in APPROVED_EVENTS.items()}
+
+    for fe in policy.get("fixed_events", {}).get("events", []):
+        if fe.get("day_of_week") != day_name:
+            continue
+
+        fe_start = datetime.strptime(f"{date_str} {fe['start_time']}", "%Y-%m-%d %H:%M")
+        fe_end   = datetime.strptime(f"{date_str} {fe['end_time']}",   "%Y-%m-%d %H:%M")
+
+        # Find matching approved event by level (closest match)
+        fe_level = fe.get("level", "")
+        eid = LEVEL_TO_EVENT_ID.get(fe_level)
+        if not eid:
+            continue
+
+        # Determine courts to use — fixed events can span multiple courts
+        n_courts_needed = fe.get("courts", 1)
+        preferred = fe.get("preferred_courts", [])
+        courts_assigned = []
+
+        # Try preferred courts first, then fall back to court_order
+        search_order = preferred + [c for c in court_order if c not in preferred]
+        for cn in search_order:
+            if cn not in COURTS:
+                continue
+            if len(courts_assigned) >= n_courts_needed:
+                break
+            if not already_on_schedule(cn, fe_start, fe_end) and rec_free(cn, fe_start, fe_end):
+                courts_assigned.append(cn)
+
+        for cn in courts_assigned:
+            if event_counts[eid] < max_occ:
+                add(eid, cn, fe_start, fe_end)
 
     # Constraint 4 — Pass 1: ensure all 5 levels are represented.
     # Skip levels already saturated by existing events (configurable threshold).
