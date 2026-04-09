@@ -169,6 +169,24 @@ def recommend(
         if e["event_id"] in event_counts:
             event_counts[e["event_id"]] += 1
 
+    # ── Existing level saturation ─────────────────────────────────────────────
+    # Count how many sessions of each skill level are ALREADY on the schedule
+    # today — including non-approved events (e.g. "Wednesday Afternoon
+    # Co-ed Intermediate Open Play").  Used to avoid over-recommending levels
+    # that are already well-covered.
+    level_counts: dict[str, int] = {level: 0 for level in LEVEL_ORDER}
+    for item in schedule_items:
+        item_dt = datetime.fromisoformat(item["StartDateTime"])
+        if item_dt.strftime("%Y-%m-%d") != date_str:
+            continue
+        name = (item.get("EventName") or item.get("ReservationType") or "").lower()
+        # Match in reverse-specificity order so "Advanced Intermediate" is
+        # detected before "Intermediate", "Advanced Beginner" before "Beginner"
+        for level in reversed(LEVEL_ORDER):
+            if level.lower() in name:
+                level_counts[level] += 1
+                break
+
     # ── Generate all free candidate slots ────────────────────────────────────
     preferred_court = policy["recommendation_rules"].get("preferred_court_when_free", 4)
     court_order     = [preferred_court] + [c for c in sorted(COURTS) if c != preferred_court]
@@ -295,8 +313,15 @@ def recommend(
         ]
         if not eligible:
             break
-        # Rank by popularity desc; ties broken by fewest existing occurrences
-        eligible.sort(key=lambda x: (-_pop(x[0], ss), event_counts[x[0]]))
+        # Rank by:
+        #  1. Fewest existing sessions of that level today (fill gaps first)
+        #  2. Highest historical popularity (tiebreaker)
+        #  3. Fewest recommended occurrences so far (balance within level)
+        eligible.sort(key=lambda x: (
+            level_counts[APPROVED_EVENTS[x[0]]["level"]] + event_counts[x[0]],
+            -_pop(x[0], ss),
+            event_counts[x[0]],
+        ))
         eid, _ = eligible[0]
         slot_hrs = (se - ss).total_seconds() / 3600
         add(eid, cn, ss, se)
@@ -326,6 +351,7 @@ def recommend(
         "min_recommendations_met": len(recommendations) >= policy["recommendation_rules"]["min_recommendations"],
         "n_recommendations":       len(recommendations),
         "popularity_used":         bool(pop_scores),
+        "existing_level_counts":   dict(level_counts),
     }
 
     return recommendations, stats
