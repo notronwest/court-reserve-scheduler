@@ -82,8 +82,14 @@ def print_existing(items: list[dict], target_date: str):
 
 
 def print_recommendations(recs, stats: dict):
+    source = stats.get("rec_source", "rule_based")
+    source_tag = {
+        "llm":        " [Claude API]",
+        "fallback":   " [rule-based — LLM failed]",
+        "rule_based": "",
+    }.get(source, "")
     print(f"{'─'*60}")
-    print(f"  Recommendations")
+    print(f"  Recommendations{source_tag}")
     print(f"{'─'*60}")
 
     if not recs:
@@ -258,6 +264,8 @@ def main():
     )
     run_parser.add_argument("--book",    action="store_true")
     run_parser.add_argument("--dry-run", action="store_true")
+    run_parser.add_argument("--llm",     action="store_true",
+                            help="Use Claude API for Pass 1+2 recommendations (requires ANTHROPIC_API_KEY)")
 
     # If no subcommand given, default to "run" and re-parse under it
     argv = sys.argv[1:]
@@ -286,7 +294,7 @@ def main():
 
         print_existing(items, target_date)
 
-        recs, stats = recommend(items, target_date, policy)
+        recs, stats = recommend(items, target_date, policy, llm=getattr(args, "llm", False))
 
         print_recommendations(recs, stats)
 

@@ -100,6 +100,8 @@ def recommend(
     schedule_items: list[dict],
     target_date: str,
     policy: dict,
+    *,
+    llm: bool = False,
 ) -> tuple[list[Recommendation], dict]:
     """
     Returns (recommendations, stats).
@@ -110,6 +112,9 @@ def recommend(
       3. Max N occurrences of same EventId per day (existing + recommended)
       4. All five levels covered when possible
       5. Fill to utilization target
+
+    Pass llm=True to replace Pass 1+2 with a Claude API call.
+    Falls back to rule-based automatically if the API call fails.
     """
 
     td = _parse_date(target_date)
@@ -355,69 +360,102 @@ def recommend(
             if event_counts[eid] < max_occ:
                 add(eid, cn, fe_start, fe_end)
 
-    # Constraint 4 — Pass 1: ensure all 5 levels are represented.
-    # Skip levels already saturated by existing events (configurable threshold).
-    # For each missing level rank available slots by historical popularity so
-    # we place the event in the time band where it has drawn best attendance.
-    saturation_threshold = (
-        policy["hard_constraints"]["4_required_level_coverage"].get("saturation_threshold", 2)
-    )
+    # ── LLM path: replace Pass 1 + Pass 2 with Claude API call ──────────────
+    llm_source = "rule_based"
+    if llm:
+        try:
+            import logging as _logging
+            from llm_ranker import call_llm_ranker
+            _current_free = [(cn, ss, se) for cn, ss, se in free_slots if rec_free(cn, ss, se)]
+            _llm_recs = call_llm_ranker(
+                pass0_recs           = list(recommendations),
+                free_slots           = _current_free,
+                pop_scores           = pop_scores,
+                policy               = policy,
+                date_str             = date_str,
+                day_name             = day_name,
+                event_counts         = dict(event_counts),
+                level_counts         = dict(level_counts),
+                target_court_hours   = target_court_hours,
+                existing_court_hours = existing_court_hours,
+            )
+            for rec in _llm_recs:
+                # Re-validate before committing — guard against hallucinations
+                if rec_free(rec.court_num, rec.start, rec.end) and event_counts.get(rec.event_id, 0) < max_occ:
+                    add(rec.event_id, rec.court_num, rec.start, rec.end)
+            llm_source = "llm"
+        except Exception as _exc:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "LLM ranker failed (%s: %s) — falling back to rule-based", type(_exc).__name__, _exc
+            )
+            llm_source = "fallback"
+            llm = False  # fall through to Pass 1 + Pass 2 below
 
-    for level in LEVEL_ORDER:
-        if level in levels_covered:
-            continue
-        # Skip if this level is already well-covered by existing events
-        if saturation_threshold > 0 and level_counts.get(level, 0) >= saturation_threshold:
-            levels_covered.add(level)  # count as covered — no new rec needed
-            continue
-        eid = LEVEL_TO_EVENT_ID[level]
-        if event_counts[eid] >= max_occ:
-            continue
-        candidates = [(cn, ss, se) for cn, ss, se in free_slots if rec_free(cn, ss, se)]
-        if not candidates:
-            continue
-        # Sort: highest popularity first; ties broken by time-of-day preference
-        # (peak hours over early morning); further ties by earliest slot.
-        candidates.sort(key=lambda s: (-_pop(eid, s[1]), -_time_pref(s[1]), s[1]))
-        cn, ss, se = candidates[0]
-        add(eid, cn, ss, se)
+    if not llm:
+        # Constraint 4 — Pass 1: ensure all 5 levels are represented.
+        # Skip levels already saturated by existing events (configurable threshold).
+        # For each missing level rank available slots by historical popularity so
+        # we place the event in the time band where it has drawn best attendance.
+        saturation_threshold = (
+            policy["hard_constraints"]["4_required_level_coverage"].get("saturation_threshold", 2)
+        )
 
-    # Constraint 5 — Pass 2: fill toward utilization target.
-    # Sort slots by desirability first (peak hours > early morning) so we fill
-    # the best time windows before falling back to fringe hours like 8 AM.
-    # Within the same preference tier, earlier slots come first.
-    added_hrs        = sum((se - ss).total_seconds() / 3600 for _, ss, se in used)
-    remaining_needed = needed_court_hours - added_hrs
+        for level in LEVEL_ORDER:
+            if level in levels_covered:
+                continue
+            # Skip if this level is already well-covered by existing events
+            if saturation_threshold > 0 and level_counts.get(level, 0) >= saturation_threshold:
+                levels_covered.add(level)  # count as covered — no new rec needed
+                continue
+            eid = LEVEL_TO_EVENT_ID[level]
+            if event_counts[eid] >= max_occ:
+                continue
+            candidates = [(cn, ss, se) for cn, ss, se in free_slots if rec_free(cn, ss, se)]
+            if not candidates:
+                continue
+            # Sort: highest popularity first; ties broken by time-of-day preference
+            # (peak hours over early morning); further ties by earliest slot.
+            candidates.sort(key=lambda s: (-_pop(eid, s[1]), -_time_pref(s[1]), s[1]))
+            cn, ss, se = candidates[0]
+            add(eid, cn, ss, se)
 
-    fill_slots = sorted(free_slots, key=lambda s: (-_time_pref(s[1]), s[1]))
-    for cn, ss, se in fill_slots:
-        if remaining_needed <= 0:
-            break
-        if not rec_free(cn, ss, se):
-            continue
-        eligible = [
-            (LEVEL_TO_EVENT_ID[l], l)
-            for l in LEVEL_ORDER
-            if event_counts[LEVEL_TO_EVENT_ID[l]] < max_occ
-        ]
-        if not eligible:
-            break
-        # Rank by:
-        #  1. Fewest existing sessions of that level today (fill gaps first)
-        #  2. Highest historical popularity for this time slot
-        #  3. Time-of-day preference (peak hours > early morning) — tiebreaker
-        #     when no history exists for this event/day/band combination
-        #  4. Fewest recommended occurrences so far (balance within level)
-        eligible.sort(key=lambda x: (
-            level_counts[APPROVED_EVENTS[x[0]]["level"]] + event_counts[x[0]],
-            -_pop(x[0], ss),
-            -_time_pref(ss),
-            event_counts[x[0]],
-        ))
-        eid, _ = eligible[0]
-        slot_hrs = (se - ss).total_seconds() / 3600
-        add(eid, cn, ss, se)
-        remaining_needed -= slot_hrs
+        # Constraint 5 — Pass 2: fill toward utilization target.
+        # Sort slots by desirability first (peak hours > early morning) so we fill
+        # the best time windows before falling back to fringe hours like 8 AM.
+        # Within the same preference tier, earlier slots come first.
+        added_hrs        = sum((se - ss).total_seconds() / 3600 for _, ss, se in used)
+        remaining_needed = needed_court_hours - added_hrs
+
+        fill_slots = sorted(free_slots, key=lambda s: (-_time_pref(s[1]), s[1]))
+        for cn, ss, se in fill_slots:
+            if remaining_needed <= 0:
+                break
+            if not rec_free(cn, ss, se):
+                continue
+            eligible = [
+                (LEVEL_TO_EVENT_ID[l], l)
+                for l in LEVEL_ORDER
+                if event_counts[LEVEL_TO_EVENT_ID[l]] < max_occ
+            ]
+            if not eligible:
+                break
+            # Rank by:
+            #  1. Fewest existing sessions of that level today (fill gaps first)
+            #  2. Highest historical popularity for this time slot
+            #  3. Time-of-day preference (peak hours > early morning) — tiebreaker
+            #     when no history exists for this event/day/band combination
+            #  4. Fewest recommended occurrences so far (balance within level)
+            eligible.sort(key=lambda x: (
+                level_counts[APPROVED_EVENTS[x[0]]["level"]] + event_counts[x[0]],
+                -_pop(x[0], ss),
+                -_time_pref(ss),
+                event_counts[x[0]],
+            ))
+            eid, _ = eligible[0]
+            slot_hrs = (se - ss).total_seconds() / 3600
+            add(eid, cn, ss, se)
+            remaining_needed -= slot_hrs
 
     # Sort by time, then court
     recommendations.sort(key=lambda r: (r.start, r.court_num))
@@ -444,6 +482,7 @@ def recommend(
         "n_recommendations":       len(recommendations),
         "popularity_used":         bool(pop_scores),
         "existing_level_counts":   dict(level_counts),
+        "rec_source":              llm_source,
     }
 
     return recommendations, stats
