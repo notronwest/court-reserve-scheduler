@@ -52,9 +52,16 @@ def _build_embed(
     rec_lines = []
     for i, r in enumerate(recs, 1):
         emoji = LEVEL_EMOJI.get(r.level, "⚪")
+        all_courts = [r.court_num] + list(r.extra_court_nums or [])
+        court_str = (
+            "Courts #" + " & #".join(str(c) for c in sorted(all_courts))
+            if len(all_courts) > 1
+            else f"Court #{r.court_num}"
+        )
+        suffix = "  *(max 8)*" if r.is_multi_court else ""
         rec_lines.append(
             f"`{i}.` {emoji} **{r.start.strftime('%-I:%M %p')} – {r.end.strftime('%-I:%M %p')}** "
-            f"Court #{r.court_num} — {r.event_name}"
+            f"{court_str} — {r.event_name}{suffix}"
         )
 
     fields.append({

@@ -98,62 +98,88 @@ def book_event(
 
     try:
         save_btn.click()
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(2000)
+        # Wait for Court Reserve to redirect away from the add form.
+        # The redirect can take several seconds — use wait_for_url to avoid
+        # a fixed sleep that times out before the navigation completes.
+        page.wait_for_url(
+            lambda url: "AddEventOccurrence" not in url,
+            timeout=12000,
+        )
     except Exception:
-        pass
+        pass  # timeout = still on form (failure); navigation away = success
 
     try:
         current_url = page.url
     except Exception:
         current_url = "unknown"
 
-    # Check for explicit error messages
-    try:
-        error_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
-        if error_el and error_el.is_visible():
-            error_text = error_el.inner_text().strip()
-            page.screenshot(path=screenshot_path.replace("logs/screenshots/booking_", "logs/screenshots/error_booking_"))
-            return {"success": False, "url": current_url, "error": error_text, "screenshot": screenshot_path}
-    except Exception:
-        pass
+    # Check for explicit error messages (only relevant if still on the form)
+    if "AddEventOccurrence" in current_url:
+        try:
+            error_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
+            if error_el and error_el.is_visible():
+                error_text = error_el.inner_text().strip()
+                page.screenshot(path=screenshot_path.replace("logs/screenshots/booking_", "logs/screenshots/error_booking_"))
+                return {"success": False, "url": current_url, "error": error_text, "screenshot": screenshot_path}
+        except Exception:
+            pass
 
     # Success = navigated away from the add-occurrence form.
-    # Court Reserve redirects to the occurrences page on success, e.g.:
-    #   /Events/Edit/{id}?page=occurrences  OR  /EventReservation/...
-    # We treat anything that left AddEventOccurrence as success.
     success = "AddEventOccurrence" not in current_url
 
     # ── Capture occurrence ID ─────────────────────────────────────────────────
-    # After a successful save we land on the occurrences list.  Each row has an
-    # edit link like /EventReservation/EditEventOccurrence?occurrenceId=XXXXXX.
-    # Find the row whose date matches our booking and pull the ID from its link.
+    # After a successful save Court Reserve redirects to the occurrences list.
+    # Court Reserve uses Bootstrap modals for editing — the edit links carry the
+    # reservationId in a data-remote attribute or in onclick handlers rather than
+    # in plain href links.  We look for the row matching our booking date and
+    # extract the reservationId from whichever attribute is present.
     occurrence_id = None
     if success:
+        # Give the Kendo grid time to load its rows via AJAX before scanning
+        page.wait_for_timeout(3000)
         try:
             occurrence_id = page.evaluate(f"""
                 (function() {{
-                    var links = Array.from(document.querySelectorAll('a[href*="occurrenceId"]'));
-                    // Build date variants to match against row text
                     var d = new Date({_year}, {_month0}, {_day});
                     var pad = function(n) {{ return n < 10 ? '0'+n : ''+n; }};
                     var variants = [
                         (d.getMonth()+1) + '/' + d.getDate() + '/' + d.getFullYear(),
                         pad(d.getMonth()+1) + '/' + pad(d.getDate()) + '/' + d.getFullYear(),
                     ];
-                    for (var link of links) {{
-                        var row = link.closest('tr');
-                        if (!row) continue;
+
+                    var rows = Array.from(document.querySelectorAll('tr'));
+                    for (var row of rows) {{
                         var text = row.innerText || '';
-                        if (variants.some(function(v) {{ return text.indexOf(v) !== -1; }})) {{
-                            var m = link.href.match(/occurrenceId=([0-9]+)/);
+                        if (!variants.some(function(v) {{ return text.indexOf(v) !== -1; }})) continue;
+
+                        // Strategy 1: data-remote="/Reservation/UpdateReservation?reservationId=NNN"
+                        var drLink = row.querySelector('a[data-remote*="UpdateReservation"]');
+                        if (drLink) {{
+                            var dr = drLink.getAttribute('data-remote') || '';
+                            var m = dr.match(/reservationId=([0-9]+)/);
                             if (m) return parseInt(m[1]);
                         }}
+
+                        // Strategy 2: onclick="revertReservationToSeries(NNN, eventId)"
+                        var onclickLinks = Array.from(row.querySelectorAll('a[onclick]'));
+                        for (var ol of onclickLinks) {{
+                            var oc = ol.getAttribute('onclick') || '';
+                            var m2 = oc.match(/revertReservationToSeries\\s*\\(\\s*([0-9]+)/);
+                            if (m2) return parseInt(m2[1]);
+                        }}
+
+                        // Strategy 3: legacy href occurrenceId
+                        var hrefLink = row.querySelector('a[href*="occurrenceId"]');
+                        if (hrefLink) {{
+                            var m3 = hrefLink.href.match(/occurrenceId=([0-9]+)/);
+                            if (m3) return parseInt(m3[1]);
+                        }}
                     }}
-                    // Fallback: return the ID from the most-recently-added link
-                    // (highest occurrenceId number, as CR appends new rows)
-                    var ids = links.map(function(l) {{
-                        var m = l.href.match(/occurrenceId=([0-9]+)/);
+
+                    // Fallback: largest reservationId from any UpdateReservation data-remote on page
+                    var allDr = Array.from(document.querySelectorAll('a[data-remote*="UpdateReservation"]'));
+                    var ids = allDr.map(function(l) {{
+                        var m = (l.getAttribute('data-remote') || '').match(/reservationId=([0-9]+)/);
                         return m ? parseInt(m[1]) : 0;
                     }}).filter(function(n) {{ return n > 0; }});
                     return ids.length ? Math.max.apply(null, ids) : null;
@@ -178,15 +204,21 @@ UPDATE_RESERVATION_URL = (
 
 
 def edit_occurrence_multi_court(
-    page:            Page,
-    occurrence_id:   int,
-    all_court_ids:   list,  # ALL court IDs including the primary (e.g. [52351, 52352])
+    page:             Page,
+    occurrence_id:    int,
+    all_court_ids:    list,   # ALL court IDs including the primary (e.g. [52351, 52352])
+    event_id:         int = 0,
     max_participants: int = 0,
-    dry_run:         bool = False,
+    dry_run:          bool = False,
 ) -> dict:
     """
     Edit an existing occurrence to assign multiple courts and optionally
     set the maximum number of participants (MaxPeople field).
+
+    UpdateReservation is rendered as a Bootstrap modal inside the occurrences
+    grid — it does not function as a standalone page (jQuery/Kendo are missing).
+    This function opens the modal by navigating to the occurrences grid and
+    clicking the edit button for the matching occurrence_id row.
 
     Call this after book_event() returns a successful occurrence_id for a
     fixed event that spans more than one court.
@@ -205,36 +237,69 @@ def edit_occurrence_multi_court(
             "error": None,
         }
 
-    url = UPDATE_RESERVATION_URL.format(occurrence_id=occurrence_id)
-    page.goto(url)
-    page.wait_for_load_state("domcontentloaded")
-    page.wait_for_timeout(2500)
-
-    # Verify we landed on the edit form
-    has_form = page.evaluate(
-        "() => typeof $ !== 'undefined' && !!$('#Courts').data('kendoMultiSelect')"
-    )
-    if not has_form:
-        page.screenshot(path=f"{shot_base}_no_form.png")
+    # Navigate to the occurrences grid so jQuery+Kendo are available,
+    # then trigger the edit modal by clicking the data-remote link.
+    occ_url = OCCURRENCES_URL.format(event_id=event_id) if event_id else None
+    if not occ_url:
         return {
             "success": False, "method": "edit_multi_court",
             "screenshot": f"{shot_base}_no_form.png",
-            "error": f"Edit form not found at {url}",
+            "error": "event_id required to open edit modal via occurrences grid",
         }
 
-    # Build JS array of court IDs
-    court_ids_js = ", ".join(str(c) for c in all_court_ids)
+    page.goto(occ_url)
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(2000)
+
+    # Click the edit (UpdateReservation) modal link for this occurrence_id
+    clicked = page.evaluate(f"""
+        (function() {{
+            var links = Array.from(document.querySelectorAll('a[data-remote*="UpdateReservation"]'));
+            for (var l of links) {{
+                if (l.getAttribute('data-remote').indexOf('{occurrence_id}') !== -1) {{
+                    l.click();
+                    return true;
+                }}
+            }}
+            return false;
+        }})()
+    """)
+
+    if not clicked:
+        page.screenshot(path=f"{shot_base}_no_edit_link.png")
+        return {
+            "success": False, "method": "edit_multi_court",
+            "screenshot": f"{shot_base}_no_edit_link.png",
+            "error": f"Edit link for occurrence_id={occurrence_id} not found in occurrences grid",
+        }
+
+    # Wait for the modal to be fully open (.action-modal.in = Bootstrap "shown" state)
+    # Note: Kendo replaces #Courts <select> with its own widget, so the original
+    # element has offsetParent=null — we wait for the modal overlay instead.
+    try:
+        page.wait_for_selector(".action-modal.in", timeout=10000)
+    except Exception:
+        page.screenshot(path=f"{shot_base}_modal_timeout.png")
+        return {
+            "success": False, "method": "edit_multi_court",
+            "screenshot": f"{shot_base}_modal_timeout.png",
+            "error": "Timed out waiting for edit modal to open",
+        }
+    page.wait_for_timeout(1500)  # let Kendo fully initialize inside the modal
+
+    # Build JS values
+    court_ids_js  = ", ".join(str(c) for c in all_court_ids)
     max_people_js = str(max_participants) if max_participants > 0 else ""
 
     page.evaluate(f"""
         (function() {{
-            // Ensure we're editing only this occurrence, not the whole series
+            // Check "Edit Only Current Occurrence" so we don't affect the whole series
             var cb = $('#EditOnlyCurrentOccurrence');
             if (cb.length && !cb.is(':checked')) {{
                 cb.prop('checked', true).trigger('change');
             }}
 
-            // Set all courts on the multiselect
+            // Set all courts on the Kendo multiselect
             var ms = $('#Courts').data('kendoMultiSelect');
             if (ms) {{
                 ms.value([]);
@@ -242,7 +307,7 @@ def edit_occurrence_multi_court(
                 ms.trigger('change');
             }}
 
-            // Set max participants if specified
+            // Set max participants
             {"var maxEl = $('#MaxPeople'); if (maxEl.length) { maxEl.val('" + max_people_js + "').trigger('change'); }" if max_people_js else ""}
         }})();
     """)
@@ -250,30 +315,28 @@ def edit_occurrence_multi_court(
     page.screenshot(path=f"{shot_base}_before_save.png")
 
     save_btn = page.query_selector(
-        "button.btn-success:not(:has-text('Register')), "
-        "button:has-text('Save'):not(:has-text('Register'))"
+        ".action-modal button.btn-success:not(:has-text('Register')), "
+        ".modal button:has-text('Save'):not(:has-text('Register'))"
     )
     if not save_btn:
-        save_btn = page.query_selector("button:has-text('Save')")
+        save_btn = page.query_selector(".action-modal button:has-text('Save'), .modal button:has-text('Save')")
+    if not save_btn:
+        # Fallback: any visible Save button on the page
+        save_btn = page.query_selector("button:has-text('Save'):not(:has-text('Register'))")
     if not save_btn:
         return {
             "success": False, "method": "edit_multi_court",
             "screenshot": f"{shot_base}_before_save.png",
-            "error": "Save button not found",
+            "error": "Save button not found in modal",
         }
 
     try:
         save_btn.click()
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(3000)
     except Exception:
         pass
 
-    try:
-        current_url = page.url
-    except Exception:
-        current_url = "unknown"
-
+    # Check for visible errors in the modal
     try:
         err_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
         if err_el and err_el.is_visible():
@@ -289,8 +352,7 @@ def edit_occurrence_multi_court(
 
     page.screenshot(path=f"{shot_base}_after_save.png")
     return {
-        "success": True, "method": "edit_multi_court",
-        "url": current_url,
+        "success": True, "method": "edit_multi_court_modal",
         "screenshot": f"{shot_base}_after_save.png",
         "error": None,
     }

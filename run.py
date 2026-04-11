@@ -381,6 +381,7 @@ def main():
                             page             = page,
                             occurrence_id    = occ_id,
                             all_court_ids    = all_ids,
+                            event_id         = r.event_id,
                             max_participants = r.max_participants,
                             dry_run          = dry_run,
                         )
@@ -453,7 +454,11 @@ def main():
                 print(f"\n  Retrying {len(to_retry)} event(s) (attempt {attempt + 1}/{MAX_RETRY_ROUNDS})...")
 
                 # Refresh conflict data before retry
-                live_items[:] = fetch_schedule(target_date, target_date, page=page)
+                try:
+                    live_items[:] = fetch_schedule(target_date, target_date, page=page)
+                except Exception as e:
+                    print(f"  ⚠  Could not refresh schedule before retry ({e}) — using cached data")
+                    # live_items already has stale data; retrying with it is better than crashing
 
                 # Remove old failed entries for the ones we're retrying so results
                 # reflects the latest outcome

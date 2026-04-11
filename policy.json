@@ -1,6 +1,6 @@
 {
   "meta": {
-    "version": "2026-04-08",
+    "version": "2026-04-11",
     "approved_by": "Club Management",
     "source_document": "Court Reserve Calendar — Business Decisions & Policies",
     "notes": "Machine-readable expression of all business decisions governing automated recommendations and manual management of the court reserve calendar. Edit this file (not the code) when policies change."
@@ -151,7 +151,7 @@
   "utilization": {
     "target_pct": 60,
     "baseline_courts": 4,
-    "note": "Target = target_pct × (courts × window_hours). Recommender fills to target where feasible under hard constraints."
+    "note": "Target = target_pct × (courts × window_hours). Multi-court events count N courts × duration hours toward utilization. Recommender fills to target where feasible under hard constraints."
   },
 
   "operating_windows": {
@@ -186,7 +186,7 @@
     },
     "2_one_court_per_event": {
       "enabled": true,
-      "description": "Each recommended event must be assigned to exactly one court."
+      "description": "Each recommended event must be assigned to at least one court. Multi-court events are booked on a primary court then edited to include all courts in a single occurrence."
     },
     "3_max_occurrences_per_event_per_day": {
       "limit": 2,
@@ -228,6 +228,12 @@
       },
       "strategy": "one_per_band_first_then_fill"
     },
+    "time_of_day_preference": {
+      "preferred_window": "12:00–17:00",
+      "preferred_score": 1.0,
+      "off_peak_score": 0.0,
+      "description": "When historical attendance is equal (or absent), noon–5 PM slots are preferred over early morning. Used as a tiebreaker in Pass 1 and Pass 2 slot ordering. Prevents stacking of 8 AM recommendations when the schedule has no history for those slots."
+    },
     "court_fill_preference": "free_courts_first",
     "preferred_court_when_free": 4,
     "two_court_priority_pairs": [
@@ -236,9 +242,40 @@
       [1, 2],
       [2, 3]
     ],
+    "two_court_pair_note": "For 2-court events, try pairs in priority order. Both courts in the pair must be free at the same time. If no pair is free, fall back to the best available single court.",
     "approved_event_ids_only": true,
     "default_target_date": "2_weeks_from_today",
     "target_date_note": "When no date is passed to run.py, defaults to 14 days from today. Override by passing a date argument: python run.py M/D/YYYY"
+  },
+
+  "recommendation_engine": {
+    "default": "rule_based",
+    "llm_option": {
+      "enabled": true,
+      "flag": "--llm",
+      "model": "claude-sonnet-4-6",
+      "max_tokens": 1024,
+      "estimated_cost_per_run": "$0.001",
+      "description": "Replaces rule-based Pass 1 and Pass 2 with a single Claude API call that reasons over all constraints simultaneously. Pass 0 (fixed events) always runs rule-based before the LLM call.",
+      "fallback": "If the API call fails for any reason (network, quota, key missing), the engine falls back to rule-based logic automatically and logs a warning.",
+      "tool_use": "Uses Claude tool_choice forced to 'book_slots' for structured output. Response is re-validated by _parse_bookings() to drop any hallucinated slots or event IDs.",
+      "api_key_config": "Set ANTHROPIC_API_KEY in .env at project root. load_dotenv(override=True) is required to ensure .env values overwrite any pre-existing empty shell env vars."
+    }
+  },
+
+  "history_analysis": {
+    "time_bands": {
+      "granularity": "2_hours",
+      "bands": ["0600", "0800", "1000", "1200", "1400", "1600", "1800", "2000"],
+      "note": "Each band represents a 2-hour window starting at that hour. Finer granularity vs. the prior 3-hour bands reduces false ties and improves time-slot selection."
+    },
+    "event_id_matching": {
+      "primary": "exact event_id match against approved_events",
+      "fallback": "title-based level detection — only applied to events whose title contains 'open play' (case-insensitive). Maps detected level to the canonical approved event ID for that level.",
+      "reason": "Historical records sometimes reference event IDs that differ from current approved IDs. Title matching recovers useful attendance data that would otherwise be lost."
+    },
+    "useful_history_entries": 57,
+    "note": "History is fetched weekly and stored in history/. The recommender reads history/history_latest.json."
   },
 
   "scheduling": {
@@ -270,6 +307,14 @@
       "occurrence_id": "The 'Id' field returned by the schedule report API is the reservationId used in UpdateReservation. Same number, different name.",
       "EditOnlyCurrentOccurrence": "Checkbox on UpdateReservation form — must be checked to edit only this date, not the full recurring series."
     },
+    "multi_court_workflow": {
+      "description": "Two-court events require two steps: (1) add the occurrence on the primary court, (2) immediately edit that occurrence to assign all courts and set MaxPeople.",
+      "step_1": "Book via AddEventOccurrence on the primary court only. Capture the occurrence_id from the URL or occurrences grid after saving.",
+      "step_2": "Navigate to UpdateReservation using the captured occurrence_id. Check EditOnlyCurrentOccurrence, set Courts multiselect to all court IDs, set MaxPeople to the configured limit, save.",
+      "max_participants_per_two_court_event": 8,
+      "max_participants_note": "MaxPeople = 8 (4 per court) for all 2-court open play events. This field is only available on the edit (UpdateReservation) form, not the add form.",
+      "reason": "Court Reserve does not expose MaxPeople on the AddEventOccurrence form. Editing after booking is the only way to set it."
+    },
     "form_fields": {
       "add_form": {
         "date":       { "id": "Date",      "kendo_widget": "kendoDatePicker" },
@@ -278,9 +323,10 @@
         "courts":     { "id": "Courts",    "kendo_widget": "kendoMultiSelect" }
       },
       "edit_form": {
-        "start_time": { "id": "StartTime", "kendo_widget": "kendoTimePicker" },
-        "end_time":   { "id": "EndTime",   "kendo_widget": "kendoTimePicker" },
-        "courts":     { "id": "Courts",    "kendo_widget": "kendoMultiSelect" },
+        "start_time":        { "id": "StartTime",               "kendo_widget": "kendoTimePicker" },
+        "end_time":          { "id": "EndTime",                 "kendo_widget": "kendoTimePicker" },
+        "courts":            { "id": "Courts",                  "kendo_widget": "kendoMultiSelect" },
+        "max_participants":  { "id": "MaxPeople",               "type": "number", "note": "Only available on edit form. Set to 8 for 2-court events (4 per court)." },
         "edit_only_current": { "id": "EditOnlyCurrentOccurrence", "type": "checkbox", "must_be_checked": true }
       }
     },
@@ -291,6 +337,10 @@
     "results_discord_post": {
       "enabled": true,
       "description": "After every booking session, results (success/failure per event) are posted back to Discord immediately."
+    },
+    "dry_run_discord_preview": {
+      "enabled": true,
+      "description": "When run with --dry-run, recommendations are posted to Discord immediately as a preview (labeled '👀 Preview — not booking') without waiting for an approval reply. Allows reviewing what would be booked before committing."
     },
     "retry": {
       "max_attempts": 3,
@@ -320,15 +370,56 @@
   },
 
   "cli": {
-    "main_command": "python run.py [date] [--book] [--dry-run]",
+    "main_command": "python run.py [date] [--book] [--dry-run] [--llm]",
     "fix_command": "python run.py fix <date> (--event-id ID | --name 'fragment') [--start 'H:MM AM'] --court N [--dry-run]",
     "fix_command_description": "Manually update the court assignment for a specific event occurrence. Fetches live schedule to find the occurrence ID, then edits via UpdateReservation form.",
+    "flags": {
+      "--book": "Execute bookings in Court Reserve after generating recommendations. Without this flag, recommendations are printed (and Discord preview posted) but nothing is booked.",
+      "--dry-run": "Generate recommendations and post a Discord preview labeled '👀 Preview — not booking'. Does not book anything.",
+      "--llm": "Use the Claude API (claude-sonnet-4-6) for Pass 1 + Pass 2 recommendation selection instead of rule-based logic. Requires ANTHROPIC_API_KEY in .env. Falls back to rule-based automatically on failure."
+    },
     "examples": {
       "default_run": "python run.py --book",
       "specific_date": "python run.py 4/22/2026 --book",
       "dry_run": "python run.py --dry-run",
+      "llm_run": "python run.py 4/22/2026 --llm --book",
+      "llm_dry_run": "python run.py 4/22/2026 --llm --dry-run",
       "fix_by_id": "python run.py fix 4/22/2026 --event-id 1633147 --start '1:00 PM' --court 1",
       "fix_by_name": "python run.py fix 4/22/2026 --name 'Advanced Open Play' --court 1"
+    }
+  },
+
+  "project_layout": {
+    "description": "Directory structure as of 2026-04-11. Reorganized from root-dumping to structured subdirectories.",
+    "directories": {
+      "history/": "Historical schedule data fetched from Court Reserve. history_latest.json is the canonical input to the recommender.",
+      "logs/": "Runtime logs from booking sessions. JSON booking logs named booking_log_YYYY-MM-DD.json.",
+      "logs/screenshots/": "Playwright screenshots taken during booking and court-fix operations.",
+      "cache/": "Temporary browser profile and session data used by Playwright.",
+      "scripts/": "Shell scripts and launchd helpers for scheduling automation.",
+      "ops/": "Operational configuration files (launchd plists, cron, etc.).",
+      "docs/": "Documentation and reference screenshots.",
+      "archive/": "Retired or superseded files kept for reference."
+    },
+    "core_files": {
+      "run.py": "Main CLI entry point",
+      "recommender.py": "Recommendation engine (Pass 0 rule-based + Pass 1/2 rule-based or LLM)",
+      "llm_ranker.py": "Claude API integration for Pass 1 + Pass 2",
+      "book_event.py": "Playwright automation for booking and editing Court Reserve occurrences",
+      "cr_client.py": "Court Reserve API client (schedule fetch, history fetch)",
+      "discord_notify.py": "Discord webhook integration for recommendations and approval flow",
+      "history_analysis.py": "Historical attendance analysis and popularity scoring",
+      "fetch_history.py": "Fetches 3-month history from Court Reserve and writes to history/",
+      "policy.json": "Single source of truth for all business rules and scheduling policy"
+    }
+  },
+
+  "browser_automation": {
+    "playwright_setup": {
+      "browser": "Persistent Chrome profile via launch_persistent_context for session persistence across runs.",
+      "chrome_detection": "Prefers system Chrome (detected via shutil.which('google-chrome') or 'chrome'). Falls back to Playwright's bundled Chromium if system Chrome is not installed.",
+      "profile_path": "cache/chrome_profile/",
+      "note": "Using a persistent profile avoids re-authenticating to Court Reserve on every run."
     }
   },
 
@@ -342,13 +433,16 @@
     "log_source_workbook_timestamp": true,
     "log_report_generation_timestamp": true,
     "source_data_pattern": "history/history_latest.json",
-    "note": "History is fetched weekly via fetch_history.py and stored locally. Scheduler run logs go to ~/Library/Logs/court_reserve/."
+    "note": "History is fetched weekly via fetch_history.py and stored locally. Scheduler run logs go to logs/."
   },
 
   "governance": {
     "eventid_whitelist_change_policy": "Approved event IDs may only be added or removed with explicit business approval. Update approved_events in this file; do not hardcode IDs in scheduler logic.",
     "operating_window_change_policy": "Windows are configurable by day-of-week in this file.",
     "fixed_events_change_policy": "Fixed events may only be added or removed with explicit business approval. Update fixed_events.events in this file.",
+    "multi_court_max_participants_change_policy": "MaxPeople limit for 2-court events is set in booking.multi_court_workflow.max_participants_per_two_court_event. Update here; do not hardcode in book_event.py.",
+    "two_court_priority_change_policy": "Court pair priority order is set in recommendation_rules.two_court_priority_pairs. Update here; do not hardcode in recommender.py.",
+    "llm_model_change_policy": "The Claude model used for LLM recommendations is set in recommendation_engine.llm_option.model. Update here and in llm_ranker.py MODEL constant together.",
     "version_control": "This file should be tracked in version control. Git history serves as the audit log for policy changes."
   }
 }
