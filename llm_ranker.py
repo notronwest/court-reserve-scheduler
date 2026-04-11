@@ -110,7 +110,17 @@ def call_llm_ranker(
     Returns list[Recommendation] — does NOT include pass0_recs.
     Raises on API failure; recommender.py catches and falls back.
     """
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    # Load .env from the project root (same dir as this file)
+    try:
+        from dotenv import load_dotenv
+        from pathlib import Path
+        load_dotenv(Path(__file__).parent / ".env", override=True)
+    except ImportError:
+        pass
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set — add it to .env or your shell environment")
+    client = anthropic.Anthropic(api_key=api_key)
 
     system_msg = _system_prompt(policy)
     user_msg   = _user_prompt(
@@ -196,7 +206,11 @@ def _user_prompt(
     max_occ  = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
     sat_thr  = policy["hard_constraints"]["4_required_level_coverage"].get("saturation_threshold", 2)
 
-    pass0_hrs    = sum((r.end - r.start).total_seconds() / 3600 for r in pass0_recs)
+    # Multi-court recs count N courts × duration
+    pass0_hrs    = sum(
+        (r.end - r.start).total_seconds() / 3600 * (1 + len(r.extra_court_ids))
+        for r in pass0_recs
+    )
     already_hrs  = existing_court_hours + pass0_hrs
     needed_hrs   = max(0.0, target_court_hours - already_hrs)
     needed_slots = max(0, -(-int(needed_hrs) // 2))  # ceil divide by 2

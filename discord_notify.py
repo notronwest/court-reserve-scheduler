@@ -87,18 +87,25 @@ def _build_embed(
         "inline": False,
     })
 
-    # Instructions
-    fields.append({
-        "name": "✅ How to approve",
-        "value": (
-            "Reply in this channel with:\n"
-            "`all` — book all recommendations\n"
-            "`1,3,5` — book specific numbers\n"
-            "`none` — skip all\n\n"
-            "_This message will be monitored for 10 minutes._"
-        ),
-        "inline": False,
-    })
+    # Instructions — swapped out for preview mode
+    if stats.get("_preview_only"):
+        fields.append({
+            "name": "👀 Preview — not booking",
+            "value": "_This is a dry run. Run with `--book` to book these recommendations._",
+            "inline": False,
+        })
+    else:
+        fields.append({
+            "name": "✅ How to approve",
+            "value": (
+                "Reply in this channel with:\n"
+                "`all` — book all recommendations\n"
+                "`1,3,5` — book specific numbers\n"
+                "`none` — skip all\n\n"
+                "_This message will be monitored for 10 minutes._"
+            ),
+            "inline": False,
+        })
 
     color = 0x2ECC71 if not stats.get("levels_missing") else 0xF39C12  # green or orange
 
@@ -184,7 +191,8 @@ def send_recommendations(
     target_date: str,
     recs: list[Recommendation],
     stats: dict,
-) -> str | None:
+    preview_only: bool = False,
+) -> str:
     """
     Post recommendations to Discord via webhook.
     Returns the message_id if BOT_TOKEN is available (needed for polling),
@@ -193,7 +201,9 @@ def send_recommendations(
     if not WEBHOOK_URL:
         raise ValueError("DISCORD_WEBHOOK_URL not set in .env")
 
-    payload = _build_embed(target_date, recs, stats)
+    # Inject preview flag so _build_embed can adjust the instructions field
+    display_stats = dict(stats, _preview_only=preview_only)
+    payload = _build_embed(target_date, recs, display_stats)
 
     # If we have a bot token we can get the message ID back for reply tracking
     params = {"wait": "true"} if BOT_TOKEN else {}
@@ -225,7 +235,7 @@ def _get_recent_messages(after_id: str = None) -> list[dict]:
     return resp.json()
 
 
-def _parse_booking_reply(content: str) -> list[int] | str | None:
+def _parse_booking_reply(content: str) -> object:
     """
     Parse a Discord reply. Accepts flexible formats:
       all / book all               → book everything
@@ -260,7 +270,7 @@ def wait_for_reply(
     after_message_id: str,
     n_recs: int,
     timeout: int = POLL_TIMEOUT_SECS,
-) -> list[int] | None:
+) -> object:
     """
     Poll the Discord channel for a 'book ...' reply.
     Returns list of 0-based indices to book, or None on timeout.
@@ -305,7 +315,7 @@ def send_booking_results(
     target_date: str,
     attempt: int = 1,
     max_attempts: int = 3,
-) -> str | None:
+) -> str:
     """
     Post booking results to Discord.
     Returns message_id if bot token available, else None.
@@ -383,7 +393,7 @@ def send_booking_results(
     return None
 
 
-def _parse_retry_reply(content: str, n_failed: int) -> list[int] | str | None:
+def _parse_retry_reply(content: str, n_failed: int) -> object:
     """
     Parse a retry reply.
       retry / retry all → [0, 1, ...] (all failed indices within failed list)
@@ -410,7 +420,7 @@ def wait_for_retry_reply(
     after_message_id: str,
     n_failed: int,
     timeout: int = 180,  # 3 minutes for retries
-) -> list[int] | str | None:
+) -> object:
     """
     Poll for a retry/skip reply after a results post.
     Returns list of 0-based failed-list positions to retry, 'skip', or None on timeout.
@@ -447,14 +457,21 @@ def send_and_wait(
     target_date: str,
     recs: list[Recommendation],
     stats: dict,
-) -> list[int] | None:
+    preview_only: bool = False,
+) -> object:
     """
-    Send recommendations and wait for reply.
-    Returns selected indices (0-based), or None on timeout.
-    Falls back to terminal input if bot credentials not configured.
+    Post recommendations to Discord and optionally wait for a reply.
+
+    preview_only=True: posts with a "dry run" label and returns immediately
+      without waiting — used when --book was not passed.
+    preview_only=False (default): posts and waits for member reply; returns
+      selected indices (0-based), or None on timeout.
     """
-    msg_id = send_recommendations(target_date, recs, stats)
+    msg_id = send_recommendations(target_date, recs, stats, preview_only=preview_only)
     print(f"  Recommendations posted to Discord.")
+
+    if preview_only:
+        return None
 
     if BOT_TOKEN and CHANNEL_ID and msg_id:
         return wait_for_reply(msg_id, len(recs))

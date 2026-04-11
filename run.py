@@ -15,7 +15,7 @@ from pathlib import Path
 
 from cr_client import browser_session, fetch_schedule
 from recommender import recommend, APPROVED_EVENTS, COURTS, _overlaps, _parse_court_nums
-from book_event import book_event, fix_event_court
+from book_event import book_event, fix_event_court, edit_occurrence_multi_court
 from discord_notify import (
     send_and_wait, maybe_send_fixed_events_reminder, WEBHOOK_URL,
     send_booking_results, wait_for_retry_reply, BOT_TOKEN, CHANNEL_ID,
@@ -25,7 +25,7 @@ from discord_notify import (
 POLICY_FILE = Path(__file__).parent / "policy.json"
 
 
-def _check_conflict(rec, live_items: list[dict]) -> str | None:
+def _check_conflict(rec, live_items):
     """
     Check if a recommendation conflicts with any live schedule item on the same court.
     Returns a description string if conflict found, None if clear.
@@ -305,7 +305,13 @@ def main():
             return
 
         if not do_book:
-            print("  (Run with --book to book recommendations, --dry-run to test form fills)")
+            # Still post to Discord so the team can see what would be booked,
+            # but don't wait for a reply — just notify and exit.
+            if WEBHOOK_URL:
+                print("\n  Sending recommendations to Discord (preview — not booking)...")
+                send_and_wait(target_date, recs, stats, preview_only=True)
+            else:
+                print("  (Run with --book to book recommendations, --dry-run to test form fills)")
             return
 
         # Get selection — via Discord if webhook configured, else terminal
@@ -360,6 +366,32 @@ def main():
                 )
                 status = "✓ Booked" if result["success"] else f"✗ Failed: {result.get('error','')}"
                 print(f"    {status}  (screenshot: {result.get('screenshot','')})")
+
+                # ── Multi-court edit step ─────────────────────────────────────
+                # Fixed events spanning 2+ courts: book primary court first,
+                # then edit the occurrence to assign all courts + set max participants.
+                if result["success"] and r.is_multi_court:
+                    occ_id = result.get("occurrence_id")
+                    all_ids = [r.court_id] + r.extra_court_ids
+                    courts_display = ", ".join(f"#{n}" for n in [r.court_num] + r.extra_court_nums)
+                    print(f"    Editing to assign courts {courts_display}"
+                          + (f" + max {r.max_participants} players" if r.max_participants else "") + "...")
+                    if occ_id:
+                        edit_result = edit_occurrence_multi_court(
+                            page             = page,
+                            occurrence_id    = occ_id,
+                            all_court_ids    = all_ids,
+                            max_participants = r.max_participants,
+                            dry_run          = dry_run,
+                        )
+                        if edit_result["success"]:
+                            print(f"    ✓ Multi-court edit done  (screenshot: {edit_result.get('screenshot','')})")
+                        else:
+                            print(f"    ✗ Multi-court edit failed: {edit_result.get('error','')}")
+                        result["multi_court_edit"] = edit_result
+                    else:
+                        print(f"    ⚠  No occurrence_id returned — skipping multi-court edit")
+
                 round_results.append({"recommendation": r.to_dict(), "result": result})
 
                 if result["success"] and not dry_run:

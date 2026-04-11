@@ -52,24 +52,47 @@ class Recommendation:
     court_label: str
     start:       datetime
     end:         datetime
+    # Multi-court fixed events: book primary court first, then edit to add these
+    extra_court_ids:  list = None   # additional court IDs to add via edit step
+    extra_court_nums: list = None   # matching court numbers (for display)
+    max_participants: int  = 0      # set MaxPeople on edit form if > 0
+
+    def __post_init__(self):
+        if self.extra_court_ids is None:
+            self.extra_court_ids = []
+        if self.extra_court_nums is None:
+            self.extra_court_nums = []
+
+    @property
+    def is_multi_court(self) -> bool:
+        return bool(self.extra_court_ids)
 
     def display(self) -> str:
+        if self.extra_court_nums:
+            courts_str = ", ".join(f"#{n}" for n in [self.court_num] + self.extra_court_nums)
+            court_part = f"Courts {courts_str}"
+        else:
+            court_part = f"Court #{self.court_num}"
+        suffix = f"  (max {self.max_participants})" if self.max_participants else ""
         return (
             f"{self.start.strftime('%-I:%M %p')} – {self.end.strftime('%-I:%M %p')}  "
-            f"Court #{self.court_num}  [{self.level:<22}]  {self.event_name}"
+            f"{court_part}  [{self.level:<22}]  {self.event_name}{suffix}"
         )
 
     def to_dict(self) -> dict:
         return {
-            "event_id":    self.event_id,
-            "event_name":  self.event_name,
-            "level":       self.level,
-            "court_num":   self.court_num,
-            "court_id":    self.court_id,
-            "court_label": self.court_label,
-            "date":        self.start.strftime("%-m/%-d/%Y"),
-            "start_time":  self.start.strftime("%-I:%M %p"),
-            "end_time":    self.end.strftime("%-I:%M %p"),
+            "event_id":        self.event_id,
+            "event_name":      self.event_name,
+            "level":           self.level,
+            "court_num":       self.court_num,
+            "court_id":        self.court_id,
+            "court_label":     self.court_label,
+            "extra_court_ids": self.extra_court_ids,
+            "extra_court_nums":self.extra_court_nums,
+            "max_participants":self.max_participants,
+            "date":            self.start.strftime("%-m/%-d/%Y"),
+            "start_time":      self.start.strftime("%-I:%M %p"),
+            "end_time":        self.end.strftime("%-I:%M %p"),
         }
 
 
@@ -307,24 +330,32 @@ def recommend(
                 return True
         return False
 
-    def add(eid: int, cn: int, ss: datetime, se: datetime):
+    def add(eid: int, cn: int, ss: datetime, se: datetime,
+            extra_court_nums=None, max_participants=0):
+        extra = extra_court_nums or []
         recommendations.append(Recommendation(
-            event_id    = eid,
-            event_name  = APPROVED_EVENTS[eid]["name"],
-            level       = APPROVED_EVENTS[eid]["level"],
-            court_num   = cn,
-            court_id    = COURTS[cn]["id"],
-            court_label = COURTS[cn]["label"],
-            start       = ss,
-            end         = se,
+            event_id         = eid,
+            event_name       = APPROVED_EVENTS[eid]["name"],
+            level            = APPROVED_EVENTS[eid]["level"],
+            court_num        = cn,
+            court_id         = COURTS[cn]["id"],
+            court_label      = COURTS[cn]["label"],
+            start            = ss,
+            end              = se,
+            extra_court_ids  = [COURTS[c]["id"] for c in extra],
+            extra_court_nums = list(extra),
+            max_participants = max_participants,
         ))
+        # Mark ALL courts (primary + extra) as used so Pass 1/2 won't double-book them
         used.append((cn, ss, se))
+        for ecn in extra:
+            used.append((ecn, ss, se))
         event_counts[eid] += 1
         levels_covered.add(APPROVED_EVENTS[eid]["level"])
 
     # ── Pass 0: Place fixed recurring events ─────────────────────────────────
-    # Fixed events are placed at their designated times/courts first.
-    # Each court listed for a multi-court fixed event gets its own recommendation.
+    # Multi-court fixed events are booked as ONE occurrence on the primary court,
+    # then edited to add extra courts and set max participants.
     # Skip any slot already occupied by a live schedule event.
     name_to_event_id = {v["name"].lower(): k for k, v in APPROVED_EVENTS.items()}
 
@@ -356,9 +387,18 @@ def recommend(
             if not already_on_schedule(cn, fe_start, fe_end) and rec_free(cn, fe_start, fe_end):
                 courts_assigned.append(cn)
 
-        for cn in courts_assigned:
-            if event_counts[eid] < max_occ:
-                add(eid, cn, fe_start, fe_end)
+        if not courts_assigned:
+            continue
+
+        # Book as ONE occurrence on the primary court, then edit to add extras.
+        # This matches Court Reserve's workflow: add date → edit to assign all
+        # courts and set max participants.
+        if event_counts[eid] < max_occ:
+            primary = courts_assigned[0]
+            extras  = courts_assigned[1:]
+            max_p   = fe.get("max_participants", 0)
+            add(eid, primary, fe_start, fe_end,
+                extra_court_nums=extras, max_participants=max_p)
 
     # ── LLM path: replace Pass 1 + Pass 2 with Claude API call ──────────────
     llm_source = "rule_based"
@@ -461,7 +501,11 @@ def recommend(
     recommendations.sort(key=lambda r: (r.start, r.court_num))
 
     # ── Stats ─────────────────────────────────────────────────────────────────
-    added_total = sum((r.end - r.start).total_seconds() / 3600 for r in recommendations)
+    # Multi-court recommendations count N courts × duration (not 1 × duration)
+    def _rec_hrs(r):
+        return (r.end - r.start).total_seconds() / 3600 * (1 + len(r.extra_court_ids))
+
+    added_total = sum(_rec_hrs(r) for r in recommendations)
     achieved    = existing_court_hours + added_total
     max_possible = n_courts * win_hours
 

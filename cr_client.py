@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, Page, Browser
 from playwright_stealth import Stealth
 
-load_dotenv()
+load_dotenv(override=True)
 
 LOGIN_URL    = os.environ["CR_LOGIN_URL"]
 USERNAME     = os.environ["CR_USERNAME"]
@@ -46,12 +46,17 @@ def browser_session(headless: bool = False):  # headless=True breaks Cloudflare 
         with sync_playwright() as p:
             # launch_persistent_context gives an isolated profile — completely
             # separate from the user's normal Chrome windows
-            context = p.chromium.launch_persistent_context(
+            # Use installed Chrome if available, otherwise fall back to
+            # the playwright-managed Chromium build (also works with stealth).
+            import shutil as _shutil
+            launch_kwargs = dict(
                 user_data_dir=profile_dir,
-                channel="chrome",
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
+            if _shutil.which("google-chrome") or _shutil.which("chrome"):
+                launch_kwargs["channel"] = "chrome"
+            context = p.chromium.launch_persistent_context(**launch_kwargs)
             page = context.new_page()
             Stealth().apply_stealth_sync(page)
             login(page)

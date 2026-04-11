@@ -177,6 +177,125 @@ UPDATE_RESERVATION_URL = (
 )
 
 
+def edit_occurrence_multi_court(
+    page:            Page,
+    occurrence_id:   int,
+    all_court_ids:   list,  # ALL court IDs including the primary (e.g. [52351, 52352])
+    max_participants: int = 0,
+    dry_run:         bool = False,
+) -> dict:
+    """
+    Edit an existing occurrence to assign multiple courts and optionally
+    set the maximum number of participants (MaxPeople field).
+
+    Call this after book_event() returns a successful occurrence_id for a
+    fixed event that spans more than one court.
+
+    Returns {"success", "method", "screenshot", "error"}
+    """
+    import os as _os
+    _os.makedirs("logs/screenshots", exist_ok=True)
+    shot_base = f"logs/screenshots/multicourt_{occurrence_id}"
+
+    if dry_run:
+        return {
+            "success": True, "dry_run": True,
+            "method": "dry_run",
+            "screenshot": f"{shot_base}_dryrun.png",
+            "error": None,
+        }
+
+    url = UPDATE_RESERVATION_URL.format(occurrence_id=occurrence_id)
+    page.goto(url)
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(2500)
+
+    # Verify we landed on the edit form
+    has_form = page.evaluate(
+        "() => typeof $ !== 'undefined' && !!$('#Courts').data('kendoMultiSelect')"
+    )
+    if not has_form:
+        page.screenshot(path=f"{shot_base}_no_form.png")
+        return {
+            "success": False, "method": "edit_multi_court",
+            "screenshot": f"{shot_base}_no_form.png",
+            "error": f"Edit form not found at {url}",
+        }
+
+    # Build JS array of court IDs
+    court_ids_js = ", ".join(str(c) for c in all_court_ids)
+    max_people_js = str(max_participants) if max_participants > 0 else ""
+
+    page.evaluate(f"""
+        (function() {{
+            // Ensure we're editing only this occurrence, not the whole series
+            var cb = $('#EditOnlyCurrentOccurrence');
+            if (cb.length && !cb.is(':checked')) {{
+                cb.prop('checked', true).trigger('change');
+            }}
+
+            // Set all courts on the multiselect
+            var ms = $('#Courts').data('kendoMultiSelect');
+            if (ms) {{
+                ms.value([]);
+                ms.value([{court_ids_js}]);
+                ms.trigger('change');
+            }}
+
+            // Set max participants if specified
+            {"var maxEl = $('#MaxPeople'); if (maxEl.length) { maxEl.val('" + max_people_js + "').trigger('change'); }" if max_people_js else ""}
+        }})();
+    """)
+    page.wait_for_timeout(1500)
+    page.screenshot(path=f"{shot_base}_before_save.png")
+
+    save_btn = page.query_selector(
+        "button.btn-success:not(:has-text('Register')), "
+        "button:has-text('Save'):not(:has-text('Register'))"
+    )
+    if not save_btn:
+        save_btn = page.query_selector("button:has-text('Save')")
+    if not save_btn:
+        return {
+            "success": False, "method": "edit_multi_court",
+            "screenshot": f"{shot_base}_before_save.png",
+            "error": "Save button not found",
+        }
+
+    try:
+        save_btn.click()
+        page.wait_for_load_state("domcontentloaded")
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
+    try:
+        current_url = page.url
+    except Exception:
+        current_url = "unknown"
+
+    try:
+        err_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
+        if err_el and err_el.is_visible():
+            err_text = err_el.inner_text().strip()
+            page.screenshot(path=f"{shot_base}_error.png")
+            return {
+                "success": False, "method": "edit_multi_court",
+                "screenshot": f"{shot_base}_error.png",
+                "error": err_text,
+            }
+    except Exception:
+        pass
+
+    page.screenshot(path=f"{shot_base}_after_save.png")
+    return {
+        "success": True, "method": "edit_multi_court",
+        "url": current_url,
+        "screenshot": f"{shot_base}_after_save.png",
+        "error": None,
+    }
+
+
 def fix_event_court(
     page:          Page,
     event_id:      int,
@@ -184,7 +303,7 @@ def fix_event_court(
     start_time:    str,            # '9:00 AM'
     end_time:      str,            # '11:00 AM'
     court_id:      int,
-    occurrence_id: int | None = None,  # if known, skip grid search entirely
+    occurrence_id = None,  # if known, skip grid search entirely
     dry_run:       bool = False,
 ) -> dict:
     """
