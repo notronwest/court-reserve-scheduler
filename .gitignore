@@ -4,12 +4,11 @@
 # Claude Code internals
 .claude/
 
-# Exploration / scratch scripts
-explore_*.py
+# Prototype scripts (moved to archive/)
+archive/
 
-# Cached schedule data
-schedule_*.json
-schedule_*.html
+# Cached schedule data (moved to cache/)
+cache/
 
 # Python
 venv/
@@ -19,9 +18,8 @@ __pycache__/
 *.pyd
 .Python
 
-# Screenshots & booking logs (runtime artifacts)
-*.png
-booking_log_*.json
+# Runtime artifacts (moved to logs/)
+logs/
 
 # History data (fetched at runtime)
 history/

@@ -78,7 +78,9 @@ def book_event(
     page.wait_for_timeout(1500)
 
     # Screenshot before submit (always, for audit trail)
-    screenshot_path = f"booking_{event_id}_{date.replace('/', '-')}_{start_time.replace(':', '').replace(' ', '')}.png"
+    import os as _os
+    _os.makedirs("logs/screenshots", exist_ok=True)
+    screenshot_path = f"logs/screenshots/booking_{event_id}_{date.replace('/', '-')}_{start_time.replace(':', '').replace(' ', '')}.png"
     page.screenshot(path=screenshot_path)
 
     if dry_run:
@@ -111,7 +113,7 @@ def book_event(
         error_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
         if error_el and error_el.is_visible():
             error_text = error_el.inner_text().strip()
-            page.screenshot(path=f"error_{screenshot_path}")
+            page.screenshot(path=screenshot_path.replace("logs/screenshots/booking_", "logs/screenshots/error_booking_"))
             return {"success": False, "url": current_url, "error": error_text, "screenshot": screenshot_path}
     except Exception:
         pass
@@ -207,8 +209,10 @@ def fix_event_court(
         d.strftime("%m/%d/%Y"),     # 04/22/2026
         d.strftime("%-m/%-d/%y"),   # 4/22/26
     ]
+    import os as _os
+    _os.makedirs("logs/screenshots", exist_ok=True)
     shot_base = (
-        f"fixcourt_{event_id}_{date.replace('/', '-')}"
+        f"logs/screenshots/fixcourt_{event_id}_{date.replace('/', '-')}"
         f"_{start_time.replace(':', '').replace(' ', '')}"
     )
 

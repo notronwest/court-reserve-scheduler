@@ -542,7 +542,8 @@ def main():
                         print(f"    ✗ Fix failed ({method}): {fix_err}")
 
         # Save booking log
-        log_path = f"booking_log_{target_date.replace('/', '-')}.json"
+        import os as _os; _os.makedirs("logs", exist_ok=True)
+        log_path = f"logs/booking_log_{target_date.replace('/', '-')}.json"
         with open(log_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
         print(f"\n  Log saved: {log_path}")

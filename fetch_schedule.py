@@ -87,7 +87,8 @@ def fetch_schedule(start: str, end: str):
                     )
                 print("--- END ---")
 
-                out_file = f"schedule_{start.replace('/', '-')}_{end.replace('/', '-')}.json"
+                import os as _os; _os.makedirs("cache", exist_ok=True)
+                out_file = f"cache/schedule_{start.replace('/', '-')}_{end.replace('/', '-')}.json"
                 with open(out_file, "w") as f:
                     json.dump(data, f, indent=2)
                 print(f"\nFull data saved to: {out_file}")
@@ -99,8 +100,9 @@ def fetch_schedule(start: str, end: str):
 
         except PlaywrightTimeoutError as e:
             print(f"Timeout: {e}")
-            page.screenshot(path="error_screenshot.png")
-            print("Screenshot saved to error_screenshot.png")
+            import os as _os; _os.makedirs("logs/screenshots", exist_ok=True)
+            page.screenshot(path="logs/screenshots/error_screenshot.png")
+            print("Screenshot saved to logs/screenshots/error_screenshot.png")
             raise
         finally:
             browser.close()
