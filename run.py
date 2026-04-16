@@ -22,7 +22,24 @@ from discord_notify import (
 )
 
 
-POLICY_FILE = Path(__file__).parent / "policy.json"
+POLICY_FILE    = Path(__file__).parent / "policy.json"
+PENDING_FILE   = Path(__file__).parent / "logs" / "pending_approval.json"
+LISTENER_STATE = Path(__file__).parent / "logs" / "listener_state.json"
+
+
+def _save_pending_approval(target_date, recs, stats, message_id):
+    """Save recommendation state for the Discord listener to pick up."""
+    import json as _json
+    from datetime import datetime as _dt
+    PENDING_FILE.parent.mkdir(exist_ok=True)
+    payload = {
+        "target_date":  target_date,
+        "message_id":   message_id,
+        "posted_at":    _dt.now().isoformat(),
+        "stats":        stats,
+        "recommendations": [r.to_dict() for r in recs],
+    }
+    PENDING_FILE.write_text(_json.dumps(payload, indent=2))
 
 
 def _check_conflict(rec, live_items):
@@ -314,12 +331,20 @@ def main():
                 print("  (Run with --book to book recommendations, --dry-run to test form fills)")
             return
 
-        # Get selection — via Discord if webhook configured, else terminal
-        if WEBHOOK_URL:
+        # Get selection — via Discord listener (zero-timeout) or terminal fallback
+        if WEBHOOK_URL and BOT_TOKEN and CHANNEL_ID:
+            print("\n  Sending recommendations to Discord...")
+            msg_id = send_and_wait(target_date, recs, stats)
+            # Save pending state for the persistent listener — it will poll
+            # indefinitely at zero token cost and trigger booking when approved.
+            _save_pending_approval(target_date, recs, stats, msg_id)
+            print("  Pending approval saved — listener will book when you reply in Discord.")
+            print("  (Run with --no-listener to fall back to terminal input instead.)")
+            return
+        elif WEBHOOK_URL:
             print("\n  Sending recommendations to Discord...")
             selected_indices = send_and_wait(target_date, recs, stats)
             if selected_indices is None:
-                # Discord bot not configured or timed out — fall back to terminal
                 selected_indices = prompt_selection(recs)
         else:
             selected_indices = prompt_selection(recs)

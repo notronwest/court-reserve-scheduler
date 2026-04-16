@@ -95,6 +95,29 @@ class Recommendation:
             "end_time":        self.end.strftime("%-I:%M %p"),
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Recommendation":
+        """Reconstruct a Recommendation from a to_dict() snapshot."""
+        from datetime import datetime as _dt
+        date_str  = d["date"]
+        start_str = d["start_time"]
+        end_str   = d["end_time"]
+        start = _dt.strptime(f"{date_str} {start_str}", "%m/%d/%Y %I:%M %p")
+        end   = _dt.strptime(f"{date_str} {end_str}",   "%m/%d/%Y %I:%M %p")
+        return cls(
+            event_id        = d["event_id"],
+            event_name      = d["event_name"],
+            level           = d["level"],
+            court_num       = d["court_num"],
+            court_id        = d["court_id"],
+            court_label     = d.get("court_label", f"Pickleball-Court #{d['court_num']}"),
+            start           = start,
+            end             = end,
+            extra_court_ids = d.get("extra_court_ids", []),
+            extra_court_nums= d.get("extra_court_nums", []),
+            max_participants= d.get("max_participants", 0),
+        )
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
