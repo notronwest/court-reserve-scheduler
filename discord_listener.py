@@ -325,6 +325,103 @@ def _execute_single_booking(params: dict):
         log.warning("Ad-hoc booking failed: %s", result.get("error"))
 
 
+# ── Date parser (shared by !schedule) ────────────────────────────────────────
+
+def _parse_date(text: str):
+    """
+    Parse flexible date text into M/D/YYYY string.
+    Accepts: 4/29  ·  4/29/2026  ·  wednesday  ·  tomorrow  ·  today
+    Returns None if unrecognised.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    t = text.strip().lower()
+    today = _dt.now()
+
+    if t == "today":
+        return today.strftime("%-m/%-d/%Y")
+    if t == "tomorrow":
+        return (today + _td(days=1)).strftime("%-m/%-d/%Y")
+
+    # Day-name → next occurrence (never today, always ≥ tomorrow)
+    _days = {
+        "monday": 0, "mon": 0,
+        "tuesday": 1, "tue": 1,
+        "wednesday": 2, "wed": 2,
+        "thursday": 3, "thu": 3,
+        "friday": 4, "fri": 4,
+        "saturday": 5, "sat": 5,
+        "sunday": 6, "sun": 6,
+    }
+    if t in _days:
+        delta = (_days[t] - today.weekday()) % 7 or 7
+        return (today + _td(days=delta)).strftime("%-m/%-d/%Y")
+
+    # M/D or M/D/YYYY (also handle M-D-YYYY)
+    normalised = text.strip().replace("-", "/")
+    for fmt in ("%m/%d/%Y", "%m/%d"):
+        try:
+            d = _dt.strptime(normalised, fmt)
+            if d.year == 1900:
+                d = d.replace(year=today.year)
+                if d.date() < today.date():
+                    d = d.replace(year=today.year + 1)
+            return d.strftime("%-m/%-d/%Y")
+        except ValueError:
+            pass
+
+    return None
+
+
+# ── !schedule command handler ─────────────────────────────────────────────────
+
+def _handle_schedule_command(text: str):
+    """
+    Kick off run.py for the requested date.
+    Posts a 'generating…' message immediately; run.py posts the
+    recommendations embed to Discord when it finishes.
+    """
+    import subprocess
+
+    date_str = _parse_date(text)
+    if not date_str:
+        _post_message(
+            f"❌ Couldn't parse date: `{text}`\n"
+            "Try: `!schedule wednesday`  ·  `!schedule 4/30`  ·  `!schedule 4/30/2026`"
+        )
+        return
+
+    # Warn if an approval is already waiting
+    if PENDING_FILE.exists():
+        _post_message(
+            f"⚠️ There's already a pending approval in Discord — reply to that first, "
+            f"then try `!schedule {date_str}` again."
+        )
+        return
+
+    from datetime import datetime as _dt
+    try:
+        day_label = _dt.strptime(date_str, "%m/%d/%Y").strftime("%A, %B %-d %Y")
+    except Exception:
+        day_label = date_str
+
+    log.info("!schedule command: generating recommendations for %s", date_str)
+    _post_message(f"⏳ Generating recommendations for **{day_label}**…")
+
+    proj_root = Path(__file__).parent
+    python    = proj_root / "venv" / "bin" / "python"
+    log_path  = proj_root / "logs" / f"run_{date_str.replace('/', '-')}.log"
+
+    log_fh = open(log_path, "w")
+    proc = subprocess.Popen(
+        [str(python), str(proj_root / "run.py"), date_str, "--llm", "--book"],
+        cwd=str(proj_root),
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+    )
+    log_fh.close()   # parent closes its copy; child keeps the fd
+    log.info("run.py started (pid=%d) for %s", proc.pid, date_str)
+
+
 # ── !book command handler ─────────────────────────────────────────────────────
 
 def _handle_book_command(text: str):
@@ -452,6 +549,60 @@ def main():
 
             # Skip our own messages
             if bot_id and author_id == bot_id:
+                continue
+
+            # ── Check for !help command ──────────────────────────────────────
+            if content.lower().strip() in ("!help", "!commands"):
+                _post_embed({"embeds": [{
+                    "title": "🏓 White Mountain Pickleball — Bot Commands",
+                    "color": 0x3498DB,
+                    "fields": [
+                        {
+                            "name": "Daily recommendation approval",
+                            "value": (
+                                "`all` — book everything\n"
+                                "`1,3,5` — book specific items by number\n"
+                                "`none` — skip all"
+                            ),
+                            "inline": False,
+                        },
+                        {
+                            "name": "!schedule <date>",
+                            "value": (
+                                "Generate recommendations for any day\n"
+                                "`!schedule wednesday`\n"
+                                "`!schedule 4/30`  ·  `!schedule 4/30/2026`"
+                            ),
+                            "inline": False,
+                        },
+                        {
+                            "name": "!book <request>",
+                            "value": (
+                                "Add a single event ad-hoc\n"
+                                "`!book Intermediate open play 4/28 at 2pm Court 3`\n"
+                                "`!book Advanced Saturday 5/2 noon Courts 3 and 4`\n"
+                                "Then reply `confirm` to book or `cancel` to skip."
+                            ),
+                            "inline": False,
+                        },
+                    ],
+                    "footer": {"text": "White Mountain Pickleball • Court Reserve Scheduler"},
+                }]})
+                _save_state()
+                continue
+
+            # ── Check for !schedule command ──────────────────────────────────
+            if content.lower().startswith("!schedule"):
+                date_text = content[9:].strip()
+                if date_text:
+                    _handle_schedule_command(date_text)
+                else:
+                    _post_message(
+                        "Usage: `!schedule <date>`\n"
+                        "Examples: `!schedule wednesday`  ·  "
+                        "`!schedule 4/30`  ·  `!schedule 4/30/2026`"
+                    )
+                _save_state()
                 continue
 
             # ── Check for !book command ──────────────────────────────────────
