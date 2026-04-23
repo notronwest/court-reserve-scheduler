@@ -214,11 +214,18 @@ def recommend(
     needed_court_hours = max(0.0, target_court_hours - existing_court_hours)
 
     # ── Existing event occurrence counts ─────────────────────────────────────
-    max_occ = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    max_occ  = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    min_gap  = timedelta(hours=policy["hard_constraints"]["3b_min_gap_same_event_hours"]["hours"])
+
     event_counts: dict[int, int] = {eid: 0 for eid in APPROVED_EVENTS}
+    # Track (start, end) for every session of each event (existing + recommended)
+    # so we can enforce the minimum gap between same-event occurrences.
+    event_sessions: dict[int, list] = {eid: [] for eid in APPROVED_EVENTS}
+
     for e in existing:
         if e["event_id"] in event_counts:
             event_counts[e["event_id"]] += 1
+            event_sessions[e["event_id"]].append((e["start"], e["end"]))
 
     # ── Existing level saturation ─────────────────────────────────────────────
     # Count how many sessions of each skill level are ALREADY on the schedule
@@ -346,6 +353,15 @@ def recommend(
                 return False
         return True
 
+    def event_gap_ok(eid: int, ss: datetime, se: datetime) -> bool:
+        """True if this session is at least min_gap away from every other session
+        of the same event (both existing and already-recommended)."""
+        for us, ue in event_sessions.get(eid, []):
+            # Gap between [ss,se] and [us,ue] must be >= min_gap on at least one side
+            if not (se + min_gap <= us or ue + min_gap <= ss):
+                return False
+        return True
+
     def already_on_schedule(court_num: int, ss: datetime, se: datetime) -> bool:
         """True if an existing event already occupies this court/time."""
         for e in existing:
@@ -374,6 +390,7 @@ def recommend(
         for ecn in extra:
             used.append((ecn, ss, se))
         event_counts[eid] += 1
+        event_sessions[eid].append((ss, se))
         levels_covered.add(APPROVED_EVENTS[eid]["level"])
 
     # ── Pass 0: Place fixed recurring events ─────────────────────────────────
@@ -462,7 +479,9 @@ def recommend(
             )
             for rec in _llm_recs:
                 # Re-validate before committing — guard against hallucinations
-                if rec_free(rec.court_num, rec.start, rec.end) and event_counts.get(rec.event_id, 0) < max_occ:
+                if (rec_free(rec.court_num, rec.start, rec.end)
+                        and event_counts.get(rec.event_id, 0) < max_occ
+                        and event_gap_ok(rec.event_id, rec.start, rec.end)):
                     add(rec.event_id, rec.court_num, rec.start, rec.end)
             llm_source = "llm"
         except Exception as _exc:
@@ -492,7 +511,10 @@ def recommend(
             eid = LEVEL_TO_EVENT_ID[level]
             if event_counts[eid] >= max_occ:
                 continue
-            candidates = [(cn, ss, se) for cn, ss, se in free_slots if rec_free(cn, ss, se)]
+            candidates = [
+                (cn, ss, se) for cn, ss, se in free_slots
+                if rec_free(cn, ss, se) and event_gap_ok(eid, ss, se)
+            ]
             if not candidates:
                 continue
             # Sort: highest popularity first; ties broken by time-of-day preference
@@ -518,6 +540,7 @@ def recommend(
                 (LEVEL_TO_EVENT_ID[l], l)
                 for l in LEVEL_ORDER
                 if event_counts[LEVEL_TO_EVENT_ID[l]] < max_occ
+                and event_gap_ok(LEVEL_TO_EVENT_ID[l], ss, se)
             ]
             if not eligible:
                 break

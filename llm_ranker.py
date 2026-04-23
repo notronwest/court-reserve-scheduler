@@ -165,6 +165,7 @@ def call_llm_ranker(
 
 def _system_prompt(policy: dict) -> str:
     max_occ  = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    min_gap  = policy["hard_constraints"]["3b_min_gap_same_event_hours"]["hours"]
     sat_thr  = policy["hard_constraints"]["4_required_level_coverage"].get("saturation_threshold", 2)
     tgt_pct  = policy["utilization"]["target_pct"]
     n_courts = policy["utilization"]["baseline_courts"]
@@ -176,7 +177,9 @@ def _system_prompt(policy: dict) -> str:
         f"1. Never double-book a court/time combination\n"
         f"2. Each booking is exactly 2 hours on exactly one court\n"
         f"3. Each event_id may appear at most {max_occ} times total (existing + your bookings)\n"
-        f"4. Only use the 5 approved event IDs\n\n"
+        f"4. Two bookings of the SAME event_id must be separated by at least {min_gap} hours "
+        f"(end of first to start of next) — no back-to-back sessions of the same type\n"
+        f"5. Only use the 5 approved event IDs\n\n"
         f"GOALS (priority order):\n"
         f"1. Cover all 5 skill levels; skip levels already at {sat_thr}+ sessions today\n"
         f"2. Fill toward {tgt_pct}% utilization across {n_courts} courts\n"
@@ -299,15 +302,18 @@ def _parse_bookings(
     Convert raw booking dicts to Recommendation objects.
     Re-validates every booking — silently drops hallucinations.
     """
-    max_occ = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    from datetime import timedelta as _td
+    max_occ  = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    min_gap  = _td(hours=policy["hard_constraints"]["3b_min_gap_same_event_hours"]["hours"])
 
     # Build slot lookup: (court_num, "HH:MM") -> (start_dt, end_dt)
     slot_lookup: dict[tuple[int, str], tuple] = {}
     for cn, ss, se in free_slots:
         slot_lookup[(cn, ss.strftime("%H:%M"))] = (ss, se)
 
-    used_slots:   set[tuple[int, str]] = set()
-    local_counts: dict[int, int] = dict(event_counts)
+    used_slots:    set[tuple[int, str]] = set()
+    local_counts:  dict[int, int] = dict(event_counts)
+    local_sessions: dict[int, list] = {eid: [] for eid in APPROVED_EVENTS}
     results: list[Recommendation] = []
 
     for b in bookings:
@@ -334,6 +340,19 @@ def _parse_bookings(
             continue
 
         ss, se = slot_lookup[slot_key]
+
+        # Gap check: no two suggestions of same event_id back-to-back
+        gap_ok = all(
+            se + min_gap <= us or ue + min_gap <= ss
+            for us, ue in local_sessions.get(eid, [])
+        )
+        if not gap_ok:
+            log.warning(
+                "LLM: event_id=%s at %s violates %dh gap rule — dropped",
+                eid, start_hhmm, int(min_gap.total_seconds() / 3600),
+            )
+            continue
+
         reasoning = b.get("reasoning", "")
         if reasoning:
             level_abbr = _ABBREV.get(APPROVED_EVENTS[eid]["level"], "?")
@@ -351,5 +370,6 @@ def _parse_bookings(
         ))
         used_slots.add(slot_key)
         local_counts[eid] = local_counts.get(eid, 0) + 1
+        local_sessions[eid].append((ss, se))
 
     return results

@@ -193,6 +193,11 @@
       "scope": "existing + recommended rows combined",
       "description": "No eventId may appear more than twice on the same day across all events."
     },
+    "3b_min_gap_same_event_hours": {
+      "hours": 2,
+      "scope": "existing + recommended combined",
+      "description": "Two occurrences of the same eventId must be separated by at least this many hours (end of one to start of the next). Prevents back-to-back sessions of the same event type."
+    },
     "4_required_level_coverage": {
       "enabled": true,
       "description": "Recommendations must collectively include all five levels when possible. Levels already well-covered by existing events are skipped.",
