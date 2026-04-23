@@ -50,19 +50,48 @@ python -m playwright install chromium
 ```
 
 ### 4. Create .env
+
 ```bash
 cp .env.example .env
 # Edit .env and fill in all four values
 ```
 
-Required values in `.env`:
+#### `DISCORD_WEBHOOK_URL`
+The webhook is used to post recommendation and booking result embeds to your channel.
 
-| Key | Where to get it |
-|---|---|
-| `DISCORD_WEBHOOK_URL` | Server Settings → Integrations → Webhooks → New Webhook |
-| `DISCORD_BOT_TOKEN` | [discord.com/developers](https://discord.com/developers/applications) → New Application → Bot → Reset Token. Enable **Message Content Intent** under Privileged Gateway Intents. |
-| `DISCORD_CHANNEL_ID` | Right-click the channel → Copy Channel ID (requires Developer Mode: User Settings → Advanced → Developer Mode) |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+1. Open your Discord server → right-click the channel you want to use → **Edit Channel**
+2. Go to **Integrations** → **Webhooks** → **New Webhook**
+3. Give it a name (e.g. "Pickleball Scheduler"), confirm the channel, click **Copy Webhook URL**
+4. Paste that URL as the value of `DISCORD_WEBHOOK_URL`
+
+#### `DISCORD_BOT_TOKEN`
+The bot token lets the listener read replies in the channel so it can detect approvals and commands.
+
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application** → give it a name → **Create**
+2. In the left sidebar, click **Bot**
+3. Click **Reset Token** → confirm → copy the token that appears
+4. On the same page, scroll down to **Privileged Gateway Intents** and enable **Message Content Intent** (required to read message text)
+5. Click **Save Changes**
+6. To add the bot to your server: left sidebar → **OAuth2** → **URL Generator** → check `bot` scope → check `Read Messages/View Channels` + `Read Message History` permissions → open the generated URL and authorize it for your server
+7. Paste the token as the value of `DISCORD_BOT_TOKEN`
+
+#### `DISCORD_CHANNEL_ID`
+This tells the listener which channel to watch for replies.
+
+1. In Discord: **User Settings** → **Advanced** → turn on **Developer Mode**
+2. Right-click the channel you're using → **Copy Channel ID**
+3. Paste it as the value of `DISCORD_CHANNEL_ID`
+
+> The webhook channel and the bot channel should be the same channel.
+
+#### `ANTHROPIC_API_KEY`
+Used for LLM-powered daily recommendations and `!book` / `!move` command parsing.
+
+1. Go to [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+2. Click **Create Key** → give it a name → copy the key (shown only once)
+3. Paste it as the value of `ANTHROPIC_API_KEY`
+
+> Cost: ~$0.001/day for daily recommendations (Claude Sonnet), ~$0.0002 per `!book`/`!move` command (Claude Haiku). Approval polling is free.
 
 ### 5. Create runtime directories
 ```bash
