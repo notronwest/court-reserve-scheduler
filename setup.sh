@@ -33,9 +33,66 @@ INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLIST_DIR="$HOME/Library/LaunchAgents"
 VENV="$INSTALL_DIR/venv"
 PYTHON_MIN="3.9"
+RESTORE_BUNDLE=""
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --restore)
+            shift
+            RESTORE_BUNDLE="${1:-}"
+            [[ -z "$RESTORE_BUNDLE" ]] && { echo "Usage: ./setup.sh --restore <bundle.tar.gz>"; exit 1; }
+            shift
+            ;;
+        *) echo "Unknown argument: $1"; exit 1 ;;
+    esac
+done
 
 step "── White Mountain Pickleball — Scheduler Setup ─────────────────────────"
 info "Install directory: $INSTALL_DIR"
+
+# ── 0. Restore migration bundle (if provided) ─────────────────────────────────
+if [[ -n "$RESTORE_BUNDLE" ]]; then
+    step "0. Restoring migration bundle"
+
+    [[ ! -f "$RESTORE_BUNDLE" ]] && err "Bundle not found: $RESTORE_BUNDLE"
+
+    STAGING="$(mktemp -d)"
+    tar -xzf "$RESTORE_BUNDLE" -C "$STAGING"
+
+    # .env
+    if [[ -f "$STAGING/.env" ]]; then
+        cp "$STAGING/.env" "$INSTALL_DIR/.env"
+        ok ".env restored"
+    else
+        warn "No .env in bundle — you will be prompted to fill it in"
+    fi
+
+    # History data
+    if [[ -d "$STAGING/history" ]]; then
+        mkdir -p "$INSTALL_DIR/history"
+        cp -r "$STAGING/history/." "$INSTALL_DIR/history/"
+        n=$(ls "$INSTALL_DIR/history/"*.json 2>/dev/null | wc -l | tr -d ' ')
+        ok "History restored ($n file(s))"
+    fi
+
+    # Chrome profile (Court Reserve session)
+    if [[ -d "$STAGING/chrome_profile" ]]; then
+        mkdir -p "$INSTALL_DIR/cache"
+        cp -r "$STAGING/chrome_profile" "$INSTALL_DIR/cache/chrome_profile"
+        ok "Browser profile restored — will attempt to reuse Court Reserve session"
+    fi
+
+    # Booking logs
+    if [[ -d "$STAGING/booking_logs" ]]; then
+        mkdir -p "$INSTALL_DIR/logs"
+        cp "$STAGING/booking_logs/"*.json "$INSTALL_DIR/logs/" 2>/dev/null || true
+        ok "Booking logs restored"
+    fi
+
+    rm -rf "$STAGING"
+    info "Bundle applied — continuing with setup"
+fi
 
 # ── 1. Platform check ─────────────────────────────────────────────────────────
 step "1. Checking prerequisites"
