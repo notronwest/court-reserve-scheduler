@@ -645,22 +645,42 @@ def _handle_book_command(text: str):
 def _parse_approval(text: str, n_recs: int):
     """
     Returns list of 0-based indices, 'none', or None if not recognised.
-    Accepts: all / book all / 1,3,5 / book 1,3,5 / none / skip
+    Accepts:
+      all / yes / ok / sure / go / approve / book all / book them / yep / yeah → all
+      1,3,5 / book 1,3,5 → specific items
+      none / no / skip / cancel / pass → none
     """
     t = text.strip().lower()
-    if t.startswith("skip"):
-        return "none"
-    if t.startswith("book"):
-        t = t[4:].strip()
-    if t in ("all", ""):
+
+    # Strip leading "book" / "approve"
+    for prefix in ("book", "approve"):
+        if t.startswith(prefix):
+            t = t[len(prefix):].strip()
+            break
+
+    # Positive affirmations → book all
+    _all_words = {"all", "yes", "y", "yep", "yeah", "ok", "okay", "sure",
+                  "go", "do it", "sounds good", "great", "perfect",
+                  "them", "them all", "everything", ""}
+    if t in _all_words:
         return list(range(n_recs))
-    if t in ("none", "no"):
+
+    # Negative → skip
+    if t in ("none", "no", "nope", "skip", "cancel", "pass", "not today", "nevermind", "nvm"):
         return "none"
+
+    # Numeric list: "1,3,5" or "1 3 5"
     try:
-        indices = [int(x.strip()) - 1 for x in t.split(",") if x.strip()]
-        return [i for i in indices if 0 <= i < n_recs]
+        # Accept comma or space as separator
+        parts = t.replace(",", " ").split()
+        indices = [int(x) - 1 for x in parts if x]
+        valid = [i for i in indices if 0 <= i < n_recs]
+        if valid:
+            return valid
     except ValueError:
-        return None
+        pass
+
+    return None
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -850,7 +870,8 @@ def main():
                 n = len(pending["recommendations"])
                 result = _parse_approval(content, n)
                 if result is None:
-                    continue   # unrecognised message — keep polling
+                    log.info("Unrecognised reply while approval pending: %r (try: all / 1,3 / none)", content[:80])
+                    continue   # keep polling
                 if result == "none" or result == []:
                     _post_message("🚫 Booking skipped.")
                     _clear_pending()

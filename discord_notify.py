@@ -465,20 +465,22 @@ def send_and_wait(
     recs: list[Recommendation],
     stats: dict,
     preview_only: bool = False,
+    listener_mode: bool = False,
 ) -> object:
     """
     Post recommendations to Discord and optionally wait for a reply.
 
-    preview_only=True: posts with a "dry run" label and returns immediately
-      without waiting — used when --book was not passed.
-    preview_only=False (default): posts and waits for member reply; returns
-      selected indices (0-based), or None on timeout.
+    preview_only=True: posts with a "dry run" label and returns immediately.
+    listener_mode=True: posts and returns the Discord message ID immediately —
+      the persistent listener (discord_listener.py) handles approval polling.
+    preview_only=False, listener_mode=False: posts and blocks up to 600s
+      waiting for a reply; returns selected indices (0-based) or None.
     """
     msg_id = send_recommendations(target_date, recs, stats, preview_only=preview_only)
     print(f"  Recommendations posted to Discord.")
 
-    if preview_only:
-        return None
+    if preview_only or listener_mode:
+        return msg_id   # caller saves this as the pending message ID
 
     if BOT_TOKEN and CHANNEL_ID and msg_id:
         return wait_for_reply(msg_id, len(recs))

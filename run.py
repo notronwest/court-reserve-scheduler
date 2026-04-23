@@ -334,9 +334,9 @@ def main():
         # Get selection — via Discord listener (zero-timeout) or terminal fallback
         if WEBHOOK_URL and BOT_TOKEN and CHANNEL_ID:
             print("\n  Sending recommendations to Discord...")
-            msg_id = send_and_wait(target_date, recs, stats)
-            # Save pending state for the persistent listener — it will poll
-            # indefinitely at zero token cost and trigger booking when approved.
+            # listener_mode=True → returns Discord message ID immediately;
+            # the persistent listener (discord_listener.py) handles approval.
+            msg_id = send_and_wait(target_date, recs, stats, listener_mode=True)
             _save_pending_approval(target_date, recs, stats, msg_id)
             print("  Pending approval saved — listener will book when you reply in Discord.")
             print("  (Run with --no-listener to fall back to terminal input instead.)")
