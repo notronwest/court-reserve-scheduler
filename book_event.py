@@ -30,24 +30,54 @@ def book_event(
     Fill and submit the Add Event Date form.
     Returns {"success": bool, "url": str, "error": str|None}
     """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
     url = ADD_OCCURRENCE_URL.format(event_id=event_id)
+    _log.info("Navigating to: %s", url)
     page.goto(url)
-    page.wait_for_load_state("domcontentloaded")
-    page.wait_for_timeout(2000)
+    # networkidle ensures jQuery/Kendo scripts have fully loaded (domcontentloaded is too early)
+    page.wait_for_load_state("networkidle", timeout=20000)
+    page.wait_for_timeout(1000)
+
+    # Log where we actually landed (could be a login redirect)
+    landed_url = page.url
+    page_title  = page.title()
+    _log.info("Landed at: %s  title=%r", landed_url, page_title)
+    if "login" in landed_url.lower() or "login" in page_title.lower():
+        _log.error("Redirected to login page — session may have expired")
+        return {"success": False, "error": "Redirected to login — session expired", "url": landed_url}
 
     # Parse date into parts for unambiguous JS Date constructor
     from datetime import datetime as _dt
     _d = _dt.strptime(date, "%m/%d/%Y") if "/" in date else _dt.strptime(date, "%Y-%m-%d")
     _year, _month0, _day = _d.year, _d.month - 1, _d.day  # JS months are 0-indexed
 
-    # Set all Kendo widgets in a single evaluate call to avoid timing issues
-    page.evaluate(f"""
+    # Check which Kendo widgets are present before filling
+    widget_state = page.evaluate("""
+        (function() {
+            return {
+                jquery:    typeof $ !== 'undefined',
+                datePicker: !!$("#Date").data("kendoDatePicker"),
+                startTime:  !!$("#StartTime").data("kendoTimePicker"),
+                endTime:    !!$("#EndTime").data("kendoTimePicker"),
+                courts:     !!$("#Courts").data("kendoMultiSelect"),
+            };
+        })()
+    """)
+    _log.info("Kendo widget state: %s", widget_state)
+
+    # Set all Kendo widgets
+    filled = page.evaluate(f"""
         (function() {{
+            var filled = {{}};
+
             // Date
             var dp = $("#Date").data("kendoDatePicker");
             if (dp) {{
                 dp.value(new Date({_year}, {_month0}, {_day}));
                 dp.trigger("change");
+                filled.date = dp.value() ? dp.value().toString() : null;
             }}
 
             // Start time
@@ -55,6 +85,7 @@ def book_event(
             if (tp1) {{
                 tp1.value("{start_time}");
                 tp1.trigger("change");
+                filled.startTime = tp1.value() ? tp1.value().toString() : null;
             }}
 
             // End time
@@ -62,6 +93,7 @@ def book_event(
             if (tp2) {{
                 tp2.value("{end_time}");
                 tp2.trigger("change");
+                filled.endTime = tp2.value() ? tp2.value().toString() : null;
             }}
 
             // Courts — clear first, then set
@@ -70,9 +102,13 @@ def book_event(
                 ms.value([]);
                 ms.value([{court_id}]);
                 ms.trigger("change");
+                filled.courts = ms.value();
             }}
+
+            return filled;
         }})();
     """)
+    _log.info("Form filled: %s", filled)
 
     # Wait for Kendo to re-render after all changes
     page.wait_for_timeout(1500)
@@ -117,14 +153,31 @@ def book_event(
 
     # Check for explicit error messages (only relevant if still on the form)
     if "AddEventOccurrence" in current_url:
+        error_text = "Still on form — possible validation error (check screenshot)"
         try:
-            error_el = page.query_selector(".alert-danger, .validation-summary-errors, .field-validation-error")
-            if error_el and error_el.is_visible():
-                error_text = error_el.inner_text().strip()
-                page.screenshot(path=screenshot_path.replace("logs/screenshots/booking_", "logs/screenshots/error_booking_"))
-                return {"success": False, "url": current_url, "error": error_text, "screenshot": screenshot_path}
+            # Try multiple selectors for Court Reserve error display
+            for selector in [
+                ".alert-danger",
+                ".validation-summary-errors",
+                ".field-validation-error",
+                ".alert-warning",
+                "[data-valmsg-summary]",
+            ]:
+                error_el = page.query_selector(selector)
+                if error_el and error_el.is_visible():
+                    error_text = error_el.inner_text().strip()
+                    break
         except Exception:
             pass
+
+        fail_shot = str(_SCREENSHOTS / f"FAILED_{event_id}_{date.replace('/', '-')}_{start_time.replace(':', '').replace(' ', '')}.png")
+        try:
+            page.screenshot(path=fail_shot, full_page=True)
+        except Exception:
+            fail_shot = screenshot_path
+
+        _log.error("Booking failed — still on form. URL=%s error=%r screenshot=%s", current_url, error_text, fail_shot)
+        return {"success": False, "url": current_url, "error": error_text, "screenshot": fail_shot}
 
     # Success = navigated away from the add-occurrence form.
     success = "AddEventOccurrence" not in current_url
