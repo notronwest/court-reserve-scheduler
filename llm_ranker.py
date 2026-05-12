@@ -18,7 +18,7 @@ from datetime import datetime
 
 import anthropic
 
-from history_analysis import PopularityKey, summary as pop_summary
+from history_analysis import PopularityKey, PopularityStats, load_popularity_full, summary as pop_summary
 from recommender import (
     APPROVED_EVENTS,
     COURTS,
@@ -29,8 +29,8 @@ from recommender import (
 log = logging.getLogger(__name__)
 
 MODEL      = "claude-sonnet-4-6"
-MAX_TOKENS = 1024
-TOP_SCORES = 20   # top N historical scores to include per day
+MAX_TOKENS = 1500
+TOP_SCORES = 20   # kept for legacy summary(), not used in main prompt
 
 # Level abbreviations for compact prompt rendering
 _ABBREV = {
@@ -122,6 +122,8 @@ def call_llm_ranker(
         raise ValueError("ANTHROPIC_API_KEY not set — add it to .env or your shell environment")
     client = anthropic.Anthropic(api_key=api_key)
 
+    global _DOW_WORD
+    _DOW_WORD  = day_name
     system_msg = _system_prompt(policy)
     user_msg   = _user_prompt(
         pass0_recs, free_slots, pop_scores, policy,
@@ -170,22 +172,47 @@ def _system_prompt(policy: dict) -> str:
     tgt_pct  = policy["utilization"]["target_pct"]
     n_courts = policy["utilization"]["baseline_courts"]
     return (
-        f"You are a court scheduling assistant for White Mountain Pickleball Club.\n"
-        f"Select open play events to book into available slots to maximize member engagement "
-        f"and skill-level diversity.\n\n"
-        f"HARD CONSTRAINTS (always enforce):\n"
-        f"1. Never double-book a court/time combination\n"
-        f"2. Each booking is exactly 2 hours on exactly one court\n"
-        f"3. Each event_id may appear at most {max_occ} times total (existing + your bookings)\n"
-        f"4. Two bookings of the SAME event_id must be separated by at least {min_gap} hours "
-        f"(end of first to start of next) — no back-to-back sessions of the same type\n"
+        f"You are the head scheduler for White Mountain Pickleball Club. "
+        f"You've been running this club for years and you know your members well.\n\n"
+
+        f"Your job is to build the best possible open-play schedule for the day — "
+        f"'best' means the most members actually show up and have a good experience. "
+        f"You have 3 months of real attendance data. Use it as your primary guide.\n\n"
+
+        f"HOW TO USE THE HISTORY:\n"
+        f"- avg attendance tells you how popular a slot typically is\n"
+        f"- peak attendance shows the ceiling — how many can show up when conditions are right\n"
+        f"- session count shows how reliable the pattern is (10 sessions is solid; 2 is a hint)\n"
+        f"- A level with avg=8 is genuinely in demand; avg=1 means members aren't interested "
+        f"in that slot regardless of whether we schedule it\n"
+        f"- If a level has almost no history, it means it rarely gets scheduled — "
+        f"don't automatically skip it, but don't force it if better options exist\n\n"
+
+        f"REASONING APPROACH:\n"
+        f"Think like a club manager, not an algorithm. Ask yourself:\n"
+        f"- Which levels do members actually want today based on past {_DOW_WORD} data?\n"
+        f"- What times have historically drawn the biggest crowds for each level?\n"
+        f"- If I only have room for one more slot, which level and time will get the most people on court?\n"
+        f"- Am I giving a popular level a second session because demand justifies it, "
+        f"or just to fill court-hours?\n\n"
+
+        f"HARD RULES (always enforce — no exceptions):\n"
+        f"1. Never double-book a court/time slot\n"
+        f"2. Each booking is exactly 2 hours on one court\n"
+        f"3. Each event_id may appear at most {max_occ}x total (existing + new)\n"
+        f"4. Two bookings of the SAME event_id must be ≥{min_gap}h apart (end-to-start)\n"
         f"5. Only use the 5 approved event IDs\n\n"
-        f"GOALS (priority order):\n"
-        f"1. Cover all 5 skill levels; skip levels already at {sat_thr}+ sessions today\n"
-        f"2. Fill toward {tgt_pct}% utilization across {n_courts} courts\n"
-        f"3. Weight toward historically popular time bands\n"
-        f"4. Vary times — spread sessions across the day rather than stacking the same hour"
+
+        f"SOFT TARGETS (use judgment):\n"
+        f"- Aim to cover all 5 skill levels when attendance history supports it; "
+        f"skip a level only if history shows consistently low demand on this day\n"
+        f"- A level already at {sat_thr}+ sessions today is saturated — don't add more\n"
+        f"- Fill toward {tgt_pct}% court utilization across {n_courts} courts, "
+        f"but never schedule a low-demand slot just to hit a number\n"
+        f"- Spread sessions across the day — avoid stacking the same hour"
     )
+
+_DOW_WORD = "this day of week"  # replaced dynamically in call
 
 
 def _user_prompt(
@@ -272,18 +299,45 @@ def _user_prompt(
         lines.append(f"  {tkey}  [{courts_str}]")
     lines.append("")
 
-    # ── Historical popularity ─────────────────────────────────────────────
-    all_scores = pop_summary(pop_scores)
-    day_scores = [s for s in all_scores if s["day_of_week"] == day_name][:TOP_SCORES]
-    if day_scores:
-        lines.append(f"HISTORICAL ATTENDANCE for {day_name} (top {len(day_scores)}, avg members):")
-        for s in day_scores:
-            eid  = s["event_id"]
-            abbr = _ABBREV.get(APPROVED_EVENTS.get(eid, {}).get("level", ""), "?")
+    # ── Historical attendance — full profile per level for this day ───────
+    full_stats = load_popularity_full()
+    day_data: dict[int, list[tuple]] = {eid: [] for eid in APPROVED_EVENTS}
+
+    for key, stats in full_stats.items():
+        if key.day_of_week == day_name and key.event_id in APPROVED_EVENTS:
+            day_data[key.event_id].append((key.time_band, stats))
+
+    has_history = any(rows for rows in day_data.values())
+    if has_history:
+        lines.append(f"ATTENDANCE HISTORY — {day_name}s (avg / peak / sessions):")
+        for eid, info in APPROVED_EVENTS.items():
+            level = info["level"]
+            abbr  = _ABBREV[level]
+            rows  = sorted(day_data[eid], key=lambda x: -x[1].avg)
+            if not rows:
+                lines.append(f"  {abbr:>2} ({eid})  {level}: NO DATA for {day_name}s — schedule with caution")
+                continue
+            total_sessions = sum(s.sessions for _, s in rows)
+            best_avg  = rows[0][1].avg
+            best_peak = max(s.peak for _, s in rows)
             lines.append(
-                f"  {abbr}({eid})  band {s['time_band']}  avg={s['avg_attendance']:.1f}"
+                f"  {abbr:>2} ({eid})  {level}  "
+                f"[{total_sessions} sessions tracked, best avg={best_avg:.1f}, peak={best_peak}]"
             )
+            for band, stats in rows:
+                h = int(band) // 100
+                time_label = f"{h % 12 or 12}{'am' if h < 12 else 'pm'}–{(h+2) % 12 or 12}{'am' if h+2 < 12 else 'pm'}"
+                lines.append(
+                    f"      {time_label:>12}  avg={stats.avg:.1f}  peak={stats.peak}  ({stats.sessions} sessions)"
+                )
         lines.append("")
+        lines.append(
+            "Use this data to decide: which levels draw well on this day, "
+            "and which specific time slots get the most members on court."
+        )
+    else:
+        lines.append("ATTENDANCE HISTORY: No data available yet — use general scheduling judgment.")
+    lines.append("")
 
     lines.append("Call book_slots with your selections.")
     return "\n".join(lines)

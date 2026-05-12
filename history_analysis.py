@@ -98,10 +98,24 @@ def _time_band(dt: datetime) -> str:
     return "2000"
 
 
+class PopularityStats(NamedTuple):
+    avg:      float
+    peak:     int
+    sessions: int
+
+
 def load_popularity(history_file: Path = HISTORY_FILE) -> dict[PopularityKey, float]:
     """
     Load history and return a dict mapping PopularityKey → avg MembersCount.
     Returns an empty dict (all scores implicitly 0) when no history exists.
+    """
+    return {k: v.avg for k, v in load_popularity_full(history_file).items()}
+
+
+def load_popularity_full(history_file: Path = HISTORY_FILE) -> dict[PopularityKey, PopularityStats]:
+    """
+    Load history and return full stats (avg, peak, session count) per key.
+    Returns an empty dict when no history exists.
     """
     if not history_file.exists():
         return {}
@@ -126,7 +140,14 @@ def load_popularity(history_file: Path = HISTORY_FILE) -> dict[PopularityKey, fl
 
         buckets[PopularityKey(eid, dow, band)].append(count)
 
-    return {key: sum(vals) / len(vals) for key, vals in buckets.items()}
+    return {
+        key: PopularityStats(
+            avg=round(sum(vals) / len(vals), 1),
+            peak=max(vals),
+            sessions=len(vals),
+        )
+        for key, vals in buckets.items()
+    }
 
 
 def popularity_score(
