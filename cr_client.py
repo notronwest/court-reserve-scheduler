@@ -134,7 +134,9 @@ def fetch_schedule(start: str, end: str, page: Page = None) -> list[dict]:
 
     def _fetch(pg: Page) -> list[dict]:
         pg.goto(url)
-        pg.wait_for_load_state("networkidle", timeout=30000)
+        # 'load' is sufficient for a JSON endpoint — no jQuery/Kendo needed,
+        # and 'networkidle' hangs on Court Reserve's background polling.
+        pg.wait_for_load_state("load", timeout=30000)
         raw = pg.inner_text("body").strip()
         data = json.loads(raw)
         items = data if isinstance(data, list) else data.get("Data", [])

@@ -181,7 +181,7 @@ def maybe_send_fixed_events_reminder(policy: dict):
         }]
     }
 
-    requests.post(WEBHOOK_URL, json=payload, timeout=10).raise_for_status()
+    requests.post(WEBHOOK_URL, json=payload, timeout=20).raise_for_status()
     print("  ⚠  Fixed events reminder posted to Discord.")
 
 
@@ -218,7 +218,7 @@ def send_recommendations(
     # If we have a bot token we can get the message ID back for reply tracking
     params = {"wait": "true"} if BOT_TOKEN else {}
 
-    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=10)
+    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
     resp.raise_for_status()
 
     if BOT_TOKEN and resp.status_code == 200:
@@ -239,7 +239,7 @@ def _get_recent_messages(after_id: str = None) -> list[dict]:
         f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages",
         headers=headers,
         params=params,
-        timeout=10,
+        timeout=20,
     )
     resp.raise_for_status()
     return resp.json()
@@ -395,7 +395,7 @@ def send_booking_results(
     }
 
     params = {"wait": "true"} if BOT_TOKEN else {}
-    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=10)
+    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
     resp.raise_for_status()
 
     if BOT_TOKEN and resp.status_code == 200:

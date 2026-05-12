@@ -7,6 +7,41 @@ import json as _json
 from playwright.sync_api import Page
 
 
+def _page_ready(page: Page, timeout: int = 20000):
+    """
+    Wait for a Court Reserve page to be interactive.
+
+    Court Reserve pages run background polling requests that prevent
+    'networkidle' from ever firing. Strategy:
+      1. Wait for 'domcontentloaded' (fast, reliable).
+      2. Give networkidle a short window (6s) to settle — enough for
+         most pages, not long enough to hang on background polling.
+      3. If networkidle times out, verify jQuery is available.
+         If jQuery is present the page is ready for interaction.
+      4. Always add a small fixed pause so Kendo widgets can initialise.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    page.wait_for_load_state("domcontentloaded", timeout=timeout)
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=6000)
+    except Exception:
+        # networkidle timed out — check jQuery is available before continuing
+        try:
+            has_jquery = page.evaluate("typeof $ !== 'undefined'")
+            if not has_jquery:
+                _log.warning("networkidle timed out and jQuery not yet available — waiting 2s")
+                page.wait_for_timeout(2000)
+            else:
+                _log.debug("networkidle timed out but jQuery is ready — proceeding")
+        except Exception:
+            page.wait_for_timeout(2000)
+
+    page.wait_for_timeout(800)  # let Kendo widgets finish rendering
+
+
 ADD_OCCURRENCE_URL = (
     "https://app.courtreserve.com/EventReservation/AddEventOccurrence"
     "?eventId={event_id}&source=EditOccurrences"
@@ -36,9 +71,7 @@ def book_event(
     url = ADD_OCCURRENCE_URL.format(event_id=event_id)
     _log.info("Navigating to: %s", url)
     page.goto(url)
-    # networkidle ensures jQuery/Kendo scripts have fully loaded (domcontentloaded is too early)
-    page.wait_for_load_state("networkidle", timeout=20000)
-    page.wait_for_timeout(1000)
+    _page_ready(page, timeout=20000)
 
     # Dismiss any announcement popup that might be blocking the form
     from cr_client import dismiss_popups
@@ -309,8 +342,7 @@ def edit_occurrence_multi_court(
         }
 
     page.goto(occ_url)
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2000)
+    _page_ready(page)
 
     # Click the edit (UpdateReservation) modal link for this occurrence_id
     clicked = page.evaluate(f"""
@@ -445,8 +477,7 @@ def move_occurrence(
 
     # Navigate to occurrences grid (jQuery + Kendo available here)
     page.goto(OCCURRENCES_URL.format(event_id=event_id))
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(2000)
+    _page_ready(page)
 
     # Click the UpdateReservation modal link for this occurrence
     clicked = page.evaluate(f"""
