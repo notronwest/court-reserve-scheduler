@@ -241,15 +241,17 @@ def recommend(
                 return level
         return None
 
-    # Count from live schedule items
+    # Count from live schedule items — only approved event IDs count toward
+    # level saturation. Text-matching event names catches Women's Advanced,
+    # Rating Sessions, Contract Times, etc. that shouldn't block our recs.
+    approved_ids = set(APPROVED_EVENTS.keys())
     for item in schedule_items:
         item_dt = datetime.fromisoformat(item["StartDateTime"])
         if item_dt.strftime("%Y-%m-%d") != date_str:
             continue
-        name = item.get("EventName") or item.get("ReservationType") or ""
-        level = _detect_level(name)
-        if level:
-            level_counts[level] += 1
+        eid = item.get("EventId")
+        if eid in approved_ids:
+            level_counts[APPROVED_EVENTS[eid]["level"]] += 1
 
     # Also count fixed recurring events for this day of the week — these may
     # not yet be on the live schedule if we're looking ahead, but we know
@@ -271,13 +273,30 @@ def recommend(
                 return False
         return True
 
+    max_concurrent = policy.get("hard_constraints", {}).get(
+        "6_max_concurrent_courts", {}
+    ).get("limit", 4)
+
+    def courts_occupied_at(ss: datetime, se: datetime) -> int:
+        """Count how many courts have existing events overlapping this window."""
+        return sum(
+            1 for e in existing
+            if _overlaps(ss, se, e["start"], e["end"])
+        )
+
     free_slots: list[tuple[int, datetime, datetime]] = []
     t = win_start
     while t + block <= win_end:
         se = t + block
+        existing_at = courts_occupied_at(t, se)
+        available_slots = max_concurrent - existing_at  # how many new courts we can offer
+        added = 0
         for cn in court_order:
+            if added >= available_slots:
+                break  # adding more would hit the concurrent-courts limit
             if existing_free(cn, t, se):
                 free_slots.append((cn, t, se))
+                added += 1
         t += block
 
     # ── Spread: bucket free slots into time bands ─────────────────────────────

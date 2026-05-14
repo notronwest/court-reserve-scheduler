@@ -201,7 +201,9 @@ def _system_prompt(policy: dict) -> str:
         f"2. Each booking is exactly 2 hours on one court\n"
         f"3. Each event_id may appear at most {max_occ}x total (existing + new)\n"
         f"4. Two bookings of the SAME event_id must be ≥{min_gap}h apart (end-to-start)\n"
-        f"5. Only use the 5 approved event IDs\n\n"
+        f"5. Only use the 5 approved event IDs\n"
+        f"6. Never fill all 4 courts at the same time — at least 1 court must stay free "
+        f"at every time slot across the whole day\n\n"
 
         f"SOFT TARGETS (use judgment):\n"
         f"- Aim to cover all 5 skill levels when attendance history supports it; "

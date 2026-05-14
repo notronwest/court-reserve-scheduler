@@ -209,6 +209,10 @@
     "5_utilization_optimization": {
       "enabled": true,
       "description": "Generate enough non-conflicting events to reach the utilization target if feasible under constraints 1–4."
+    },
+    "6_max_concurrent_courts": {
+      "limit": 3,
+      "description": "No more than 3 of the 4 courts may be occupied by recommended events at the same time. At least one court must always remain free at every time slot."
     }
   },
 

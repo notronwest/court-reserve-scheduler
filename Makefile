@@ -25,6 +25,8 @@ help:
 	@echo "    make run DATE=5/7/2026"
 	@echo "    make dry-run         Preview recommendations (no booking)"
 	@echo "    make dry-run DATE=5/7/2026"
+	@echo "    make show-prompt     Print the AI prompt without calling the API"
+	@echo "    make show-prompt DATE=5/7/2026"
 	@echo "    make history         Fetch 3 months of attendance history now"
 	@echo ""
 	@echo "  Setup & maintenance:"
@@ -70,6 +72,9 @@ run:
 
 dry-run:
 	$(PYTHON) run.py $(DATE) --llm --dry-run
+
+show-prompt:
+	$(PYTHON) run.py $(DATE) --llm --show-prompt
 
 history:
 	$(PYTHON) fetch_history.py

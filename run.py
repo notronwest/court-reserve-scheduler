@@ -27,6 +27,66 @@ PENDING_FILE   = Path(__file__).parent / "logs" / "pending_approval.json"
 LISTENER_STATE = Path(__file__).parent / "logs" / "listener_state.json"
 
 
+def _show_llm_prompt(target_date: str, policy: dict):
+    """
+    Fetch the live schedule, build the LLM prompt, and print it — without
+    calling the API or booking anything. Useful for debugging recommendations.
+    """
+    from datetime import datetime as _dt
+    from cr_client import browser_session, fetch_schedule
+    from llm_ranker import _system_prompt, _user_prompt, _DOW_WORD
+    import llm_ranker
+    from recommender import APPROVED_EVENTS, COURTS, _build_free_slots  # type: ignore
+
+    day_name = _dt.strptime(target_date, "%m/%d/%Y").strftime("%A")
+    date_str = _dt.strptime(target_date, "%m/%d/%Y").strftime("%Y-%m-%d")
+
+    print(f"\nFetching live schedule for {target_date} to build prompt...")
+    with browser_session() as page:
+        items = fetch_schedule(target_date, target_date, page=page)
+
+    print(f"  {len(items)} event(s) on schedule.")
+
+    # Build free slots the same way the recommender does
+    from recommender import recommend as _recommend
+    # Run recommend() but intercept the LLM prompt instead of calling the API
+    # We do this by temporarily monkey-patching call_llm_ranker
+    captured = {}
+
+    def _capture(pass0_recs, free_slots, pop_scores, pol, ds, dn,
+                 event_counts, level_counts, target_court_hours, existing_court_hours):
+        llm_ranker._DOW_WORD = dn
+        captured["system"] = _system_prompt(pol)
+        captured["user"]   = _user_prompt(
+            pass0_recs, free_slots, pop_scores, pol, ds, dn,
+            event_counts, level_counts, target_court_hours, existing_court_hours,
+        )
+        return []   # return no recs so recommend() falls back to rule-based
+
+    import llm_ranker as _lr
+    _orig = _lr.call_llm_ranker
+    _lr.call_llm_ranker = _capture
+    try:
+        _recommend(items, target_date, policy, llm=True)
+    finally:
+        _lr.call_llm_ranker = _orig
+
+    if not captured:
+        print("  Could not capture prompt (no LLM call was made).")
+        return
+
+    sep = "═" * 72
+    print(f"\n{sep}")
+    print("  SYSTEM PROMPT")
+    print(sep)
+    print(captured["system"])
+    print(f"\n{sep}")
+    print("  USER PROMPT")
+    print(sep)
+    print(captured["user"])
+    print(sep)
+
+
 def _save_pending_approval(target_date, recs, stats, message_id):
     """Save recommendation state for the Discord listener to pick up."""
     import json as _json
@@ -279,9 +339,11 @@ def main():
         default=two_weeks_out,
         help=f"Target date M/D/YYYY (default: {two_weeks_out})",
     )
-    run_parser.add_argument("--book",    action="store_true")
-    run_parser.add_argument("--dry-run", action="store_true")
-    run_parser.add_argument("--llm",     action="store_true",
+    run_parser.add_argument("--book",        action="store_true")
+    run_parser.add_argument("--dry-run",     action="store_true")
+    run_parser.add_argument("--show-prompt", action="store_true",
+                            help="Print the system + user prompt that would be sent to the AI, then exit")
+    run_parser.add_argument("--llm",         action="store_true",
                             help="Use Claude API for Pass 1+2 recommendations (requires ANTHROPIC_API_KEY)")
 
     # If no subcommand given, default to "run" and re-parse under it
@@ -297,11 +359,16 @@ def main():
         cmd_fix(args)
         return
 
-    target_date = args.date
-    do_book     = args.book or args.dry_run
-    dry_run     = args.dry_run
+    target_date  = args.date
+    do_book      = args.book or args.dry_run
+    dry_run      = args.dry_run
+    show_prompt  = getattr(args, "show_prompt", False)
 
     policy = load_policy()
+
+    if show_prompt:
+        _show_llm_prompt(target_date, policy)
+        return
 
     print(f"\nFetching schedule for {fmt_date(target_date)}...")
 
