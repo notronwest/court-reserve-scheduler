@@ -326,14 +326,18 @@ def _user_prompt(
             )
             for band, stats in rows:
                 h = int(band) // 100
-                time_label = f"{h % 12 or 12}{'am' if h < 12 else 'pm'}–{(h+2) % 12 or 12}{'am' if h+2 < 12 else 'pm'}"
+                time_label = f"{h % 12 or 12}{'am' if h < 12 else 'pm'}"
                 lines.append(
-                    f"      {time_label:>12}  avg={stats.avg:.1f}  peak={stats.peak}  ({stats.sessions} sessions)"
+                    f"      {time_label:>6} start  avg={stats.avg:.1f}  peak={stats.peak}  ({stats.sessions} sessions)"
                 )
         lines.append("")
         lines.append(
             "Use this data to decide: which levels draw well on this day, "
-            "and which specific time slots get the most members on court."
+            "and which specific time slots get the most members on court.\n"
+            "NOTE: Historical sessions show their actual start hour. "
+            "Free slots are on 2-hour boundaries (8am, 10am, 12pm, 2pm, 4pm…). "
+            "Map history to the nearest available slot — e.g. if 9am is popular, "
+            "prefer the 10am slot over 8am since 9am sessions run 9–11am."
         )
     else:
         lines.append("ATTENDANCE HISTORY: No data available yet — use general scheduling judgment.")

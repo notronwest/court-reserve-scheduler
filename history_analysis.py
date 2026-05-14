@@ -24,16 +24,24 @@ from typing import NamedTuple
 
 HISTORY_FILE = Path(__file__).parent / "history" / "history_latest.json"
 
-# 2-hour time bands aligned to our 2-hour event blocks.
-# Finer granularity lets us distinguish 8 AM from 10 AM in history.
+# 1-hour time bands so history reflects actual session start hours.
+# Using 2-hour bands caused 9am sessions to appear as "8am band",
+# leading the AI to recommend 8am slots for levels that never ran at 8am.
 TIME_BANDS = [
-    ("0600",  6,  8),
-    ("0800",  8, 10),
-    ("1000", 10, 12),
-    ("1200", 12, 14),
-    ("1400", 14, 16),
-    ("1600", 16, 18),
-    ("1800", 18, 20),
+    ("0600",  6,  7),
+    ("0700",  7,  8),
+    ("0800",  8,  9),
+    ("0900",  9, 10),
+    ("1000", 10, 11),
+    ("1100", 11, 12),
+    ("1200", 12, 13),
+    ("1300", 13, 14),
+    ("1400", 14, 15),
+    ("1500", 15, 16),
+    ("1600", 16, 17),
+    ("1700", 17, 18),
+    ("1800", 18, 19),
+    ("1900", 19, 20),
     ("2000", 20, 24),
 ]
 
