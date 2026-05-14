@@ -164,9 +164,10 @@
     },
     "weekend": {
       "days": ["Saturday", "Sunday"],
-      "start": "08:00",
+      "start": "09:00",
       "end": "18:00",
-      "hours": 10
+      "hours": 9,
+      "note": "Changed from 08:00 — only 1 eight-am session in 3 months of history (4 members). 9am is the earliest real start."
     }
   },
 
