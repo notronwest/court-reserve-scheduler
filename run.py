@@ -34,9 +34,8 @@ def _show_llm_prompt(target_date: str, policy: dict):
     """
     from datetime import datetime as _dt
     from cr_client import browser_session, fetch_schedule
-    from llm_ranker import _system_prompt, _user_prompt, _DOW_WORD
+    from llm_ranker import _system_prompt, _user_prompt
     import llm_ranker
-    from recommender import APPROVED_EVENTS, COURTS, _build_free_slots  # type: ignore
 
     day_name = _dt.strptime(target_date, "%m/%d/%Y").strftime("%A")
     date_str = _dt.strptime(target_date, "%m/%d/%Y").strftime("%Y-%m-%d")
