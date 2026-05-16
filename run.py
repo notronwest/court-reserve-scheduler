@@ -52,13 +52,22 @@ def _show_llm_prompt(target_date: str, policy: dict):
     # We do this by temporarily monkey-patching call_llm_ranker
     captured = {}
 
-    def _capture(pass0_recs, free_slots, pop_scores, pol, ds, dn,
-                 event_counts, level_counts, target_court_hours, existing_court_hours):
+    def _capture(**kwargs):
+        dn  = kwargs["day_name"]
+        pol = kwargs["policy"]
         llm_ranker._DOW_WORD = dn
         captured["system"] = _system_prompt(pol)
         captured["user"]   = _user_prompt(
-            pass0_recs, free_slots, pop_scores, pol, ds, dn,
-            event_counts, level_counts, target_court_hours, existing_court_hours,
+            kwargs["pass0_recs"],
+            kwargs["free_slots"],
+            kwargs["pop_scores"],
+            pol,
+            kwargs["date_str"],
+            dn,
+            kwargs["event_counts"],
+            kwargs["level_counts"],
+            kwargs["target_court_hours"],
+            kwargs["existing_court_hours"],
         )
         return []   # return no recs so recommend() falls back to rule-based
 
