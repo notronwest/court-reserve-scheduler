@@ -336,10 +336,8 @@ def _user_prompt(
         lines.append(
             "Use this data to decide: which levels draw well on this day, "
             "and which specific time slots get the most members on court.\n"
-            "NOTE: Historical sessions show their actual start hour. "
-            "Free slots are on 2-hour boundaries (8am, 10am, 12pm, 2pm, 4pm…). "
-            "Map history to the nearest available slot — e.g. if 9am is popular, "
-            "prefer the 10am slot over 8am since 9am sessions run 9–11am."
+            "NOTE: Historical start hours may not align exactly with the free slot boundaries — "
+            "map each to the nearest available slot in the FREE SLOTS list above."
         )
     else:
         lines.append("ATTENDANCE HISTORY: No data available yet — use general scheduling judgment.")
