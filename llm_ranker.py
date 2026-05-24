@@ -18,7 +18,7 @@ from datetime import datetime
 
 import anthropic
 
-from history_analysis import PopularityKey, PopularityStats, load_popularity_full, summary as pop_summary
+from history_analysis import PopularityKey, PopularityStats, load_popularity_full, load_time_patterns, summary as pop_summary
 from recommender import (
     APPROVED_EVENTS,
     COURTS,
@@ -211,7 +211,9 @@ def _system_prompt(policy: dict) -> str:
         f"- A level already at {sat_thr}+ sessions today is saturated — don't add more\n"
         f"- Fill toward {tgt_pct}% court utilization across {n_courts} courts, "
         f"but never schedule a low-demand slot just to hit a number\n"
-        f"- Spread sessions across the day — avoid stacking the same hour"
+        f"- Spread sessions across the day — avoid stacking the same hour\n"
+        f"- Respect scheduling patterns when free slots allow it: members build habits "
+        f"around consistent start times — a Tuesday group expecting noon will show up at noon"
     )
 
 _DOW_WORD = "this day of week"  # replaced dynamically in call
@@ -342,6 +344,33 @@ def _user_prompt(
     else:
         lines.append("ATTENDANCE HISTORY: No data available yet — use general scheduling judgment.")
     lines.append("")
+
+    # ── Time patterns (scheduling consistency) ────────────────────────────
+    time_patterns = load_time_patterns()
+    day_patterns = {
+        eid: tp
+        for (eid, dow), tp in time_patterns.items()
+        if dow == day_name and eid in APPROVED_EVENTS
+    }
+    if day_patterns:
+        lines.append(f"SCHEDULING PATTERNS — {day_name} tendencies (not hard rules, but worth preserving):")
+        lines.append(
+            "Members build habits. If a level has consistently started at the same time, "
+            "try to match it — schedule predictability matters for member experience."
+        )
+        for eid, tp in sorted(day_patterns.items(),
+                               key=lambda x: APPROVED_EVENTS[x[0]]["level"]):
+            level = APPROVED_EVENTS[eid]["level"]
+            abbr  = _ABBREV[level]
+            h     = tp.modal_hour
+            strength = "strong" if tp.consistency_pct >= 80 else "moderate"
+            time_label = f"{h % 12 or 12}{'am' if h < 12 else 'pm'}"
+            lines.append(
+                f"  {abbr:>2}  {level}: usually {time_label}  "
+                f"({tp.consistency_pct:.0f}% of {tp.n_sessions} sessions — {strength} pattern, "
+                f"avg {tp.avg_at_modal:.1f} members)"
+            )
+        lines.append("")
 
     lines.append("Call book_slots with your selections.")
     return "\n".join(lines)

@@ -158,6 +158,82 @@ def load_popularity_full(history_file: Path = HISTORY_FILE) -> dict[PopularityKe
     }
 
 
+class TimePattern(NamedTuple):
+    modal_hour:      int    # most common start hour (0-23)
+    consistency_pct: float  # % of sessions at modal hour
+    n_sessions:      int    # total sessions for this (event, day)
+    avg_at_modal:    float  # avg attendance at the modal time
+
+
+def load_time_patterns(
+    history_file: Path = HISTORY_FILE,
+    min_sessions: int = 3,
+    min_consistency: float = 0.60,
+) -> dict[tuple[int, str], TimePattern]:
+    """
+    Identify recurring start-time tendencies from history.
+
+    Returns a dict keyed by (event_id, day_of_week) where the pattern is
+    strong enough to be worth surfacing to the AI:
+      - at least min_sessions total sessions for that (event, day)
+      - the modal start hour accounts for >= min_consistency of those sessions
+
+    Only approved event IDs are included.
+    """
+    if not history_file.exists():
+        return {}
+
+    with open(history_file) as f:
+        items = json.load(f)
+
+    # Accumulate start hours and attendance per (event_id, day_of_week, hour)
+    hour_counts:      dict[tuple, list[int]] = defaultdict(list)   # key=(eid,dow,hour) → [attendance]
+    session_totals:   dict[tuple, int]       = defaultdict(int)    # key=(eid,dow) → total sessions
+
+    for item in items:
+        event_name = item.get("EventName") or ""
+        raw_eid    = item.get("EventId")
+        eid = _canonical_event_id(raw_eid, event_name)
+        if eid is None:
+            continue
+
+        dt    = datetime.fromisoformat(item["StartDateTime"])
+        dow   = item.get("DayOfTheWeek") or dt.strftime("%A")
+        hour  = dt.hour
+        count = int(item.get("MembersCount") or 0)
+
+        hour_counts[(eid, dow, hour)].append(count)
+        session_totals[(eid, dow)] += 1
+
+    patterns: dict[tuple[int, str], TimePattern] = {}
+
+    for (eid, dow), total in session_totals.items():
+        if total < min_sessions:
+            continue
+
+        # Find the modal hour and its session count
+        modal_hour = max(
+            (h for e, d, h in hour_counts if e == eid and d == dow),
+            key=lambda h: len(hour_counts[(eid, dow, h)]),
+        )
+        modal_n    = len(hour_counts[(eid, dow, modal_hour)])
+        consistency = modal_n / total
+
+        if consistency < min_consistency:
+            continue
+
+        avg_at_modal = sum(hour_counts[(eid, dow, modal_hour)]) / modal_n
+
+        patterns[(eid, dow)] = TimePattern(
+            modal_hour      = modal_hour,
+            consistency_pct = round(consistency * 100, 0),
+            n_sessions      = total,
+            avg_at_modal    = round(avg_at_modal, 1),
+        )
+
+    return patterns
+
+
 def popularity_score(
     scores: dict[PopularityKey, float],
     event_id: int,
