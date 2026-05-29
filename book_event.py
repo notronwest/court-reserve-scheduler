@@ -772,21 +772,15 @@ def cancel_occurrence(                  # noqa: C901
     dry_run:       bool = False,
 ) -> dict:
     """
-    Cancel a single occurrence.
+    Cancel a single occurrence using the 'Cancel Date' link on the occurrences grid.
 
-    The per-occurrence cancel is in the 'More Actions' dropdown INSIDE the
-    UpdateReservation modal (not on the grid page itself).
+    Each row in the Kendo grid has:
+      <a title="Cancel Date" class="meta-icon delete small only btn-modal"
+         data-href="/Reservation/CancelReservation?reservationId=NNN&eventId=NNN">
 
-    Flow:
-      1. Navigate to the occurrences grid
-      2. Open the UpdateReservation modal for this occurrence_id
-      3. Click 'More Actions' inside the modal
-      4. Click the cancel/delete option from the dropdown
-      5. Confirm any dialog that appears
+    Clicking it (via JavaScript trigger) opens a confirmation modal.
 
-    SAFETY: verify MembersCount == 0 before calling — this function does not
-    re-check membership.
-
+    SAFETY: verify MembersCount == 0 before calling.
     Returns {"success": bool, "method": str, "screenshot": str, "error": str|None}
     """
     import logging as _logging
@@ -807,126 +801,63 @@ def cancel_occurrence(                  # noqa: C901
     _log.info("Navigating to occurrences grid for event %s", event_id)
     page.goto(occ_url)
     _page_ready(page)
-    page.wait_for_timeout(3000)  # let Kendo grid rows load
+    page.wait_for_timeout(3000)
     page.screenshot(path=f"{shot_base}_grid.png")
 
-    # ── Step 2: Open UpdateReservation modal for this occurrence ──────────────
-    opened = page.evaluate(f"""
+    # ── Step 2: Click the 'Cancel Date' link for this occurrence ──────────────
+    # The link uses data-href (not href/data-remote) and has class btn-modal.
+    # We trigger it via JavaScript to fire the btn-modal handler.
+    cancel_link = page.evaluate(f"""
         (function() {{
-            var links = Array.from(
-                document.querySelectorAll('a[data-remote*="UpdateReservation"][data-remote*="{occurrence_id}"]')
+            // Find by data-href containing CancelReservation + occurrence_id
+            var link = document.querySelector(
+                'a[data-href*="CancelReservation"][data-href*="{occurrence_id}"]'
             );
-            if (links.length > 0) {{ links[0].click(); return true; }}
-            return false;
+            if (!link) {{
+                // Fallback: title="Cancel Date" in same row as occurrence_id
+                var rows = Array.from(document.querySelectorAll('tr'));
+                for (var row of rows) {{
+                    if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
+                    link = row.querySelector('a[title="Cancel Date"], a.delete');
+                    if (link) break;
+                }}
+            }}
+            if (!link) return {{found: false}};
+
+            var href = link.getAttribute('data-href') || link.getAttribute('href') || '';
+            // Fire the btn-modal click handler (jQuery)
+            if (window.$) {{
+                $(link).trigger('click');
+            }} else {{
+                link.click();
+            }}
+            return {{found: true, href: href, title: link.title, classes: link.className}};
         }})()
     """)
-    if not opened:
-        page.screenshot(path=f"{shot_base}_no_edit_link.png")
+    _log.info("Cancel Date link: %s", cancel_link)
+
+    if not (isinstance(cancel_link, dict) and cancel_link.get("found")):
+        page.screenshot(path=f"{shot_base}_no_link.png")
         return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_no_edit_link.png",
-                "error": f"UpdateReservation link for occurrence {occurrence_id} not found"}
+                "screenshot": f"{shot_base}_no_link.png",
+                "error": f"Cancel Date link for occurrence {occurrence_id} not found in grid"}
 
-    try:
-        page.wait_for_selector("#action-modal.in, .action-modal.in", timeout=10000)
-    except Exception:
-        page.screenshot(path=f"{shot_base}_modal_timeout.png")
-        return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_modal_timeout.png",
-                "error": "Timed out waiting for UpdateReservation modal"}
-    page.wait_for_timeout(1500)
-    page.screenshot(path=f"{shot_base}_modal_open.png")
-
-    # ── Step 3: Click 'More Actions' inside the modal ─────────────────────────
-    more_btn = page.query_selector(
-        "#action-modal .btn-dropdown, #action-modal button.dropdown-toggle, "
-        ".action-modal.in .btn-dropdown, .action-modal.in button.dropdown-toggle"
-    )
-    if not more_btn:
-        page.screenshot(path=f"{shot_base}_no_more_actions.png")
-        return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_no_more_actions.png",
-                "error": "More Actions button not found inside UpdateReservation modal"}
-
-    _log.info("Clicking More Actions: %s", more_btn.get_attribute("class"))
-    more_btn.click()
-    page.wait_for_timeout(800)
-    page.screenshot(path=f"{shot_base}_dropdown.png")
-
-    # Log ALL dropdown items (no visibility filter — modal z-index can fool offsetParent)
-    dropdown_items = page.evaluate("""
-        (function() {
-            var items = [];
-            document.querySelectorAll('.dropdown-menu a, .dropdown-menu button, .dropdown-menu li').forEach(function(el) {
-                var text = (el.innerText || '').trim();
-                if (text) items.push({tag: el.tagName, text: text, href: el.getAttribute('href') || ''});
-            });
-            return items;
-        })()
-    """)
-    _log.info("More Actions dropdown items:\n%s", "\n".join(f"  {i}" for i in (dropdown_items or [])))
-
-    # ── Step 4: Click the cancel item ────────────────────────────────────────
-    # In the UpdateReservation modal (scoped to a specific date), "Cancel Event"
-    # means "cancel this occurrence" — not the whole series.
-    clicked = page.evaluate("""
-        (function() {
-            var els = Array.from(document.querySelectorAll(
-                '.dropdown-menu a, .dropdown-menu button, .dropdown-menu li a, .dropdown-menu li button'
-            ));
-            var allTexts = els.map(function(e){ return (e.innerText||'').trim(); });
-            for (var el of els) {
-                var text = (el.innerText || '').trim().toLowerCase();
-                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')) {
-                    el.click();
-                    return {clicked: true, text: text};
-                }
-            }
-            return {clicked: false, available: allTexts};
-        })()
-    """)
-    _log.info("Cancel item: %s", clicked)
-    page.wait_for_timeout(1000)
-    page.screenshot(path=f"{shot_base}_after_click.png")
-
-    if not (isinstance(clicked, dict) and clicked.get("clicked")):
-        return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_after_click.png",
-                "error": f"Cancel option not in More Actions dropdown. Available: {clicked.get('available', [])}"}
-
-    # ── Step 5: Handle confirmation ───────────────────────────────────────────
+    # ── Step 3: Confirm the modal ─────────────────────────────────────────────
     page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_confirm.png")
 
-    # Log what appeared after clicking — dialog, new modal, or redirect
-    post_click_state = page.evaluate("""
-        (function() {
-            var url = window.location.href;
-            var allBtns = Array.from(document.querySelectorAll('button, .btn')).map(function(b) {
-                return {text: (b.innerText||'').trim(), cls: b.className, visible: b.offsetParent !== null};
-            }).filter(function(b){ return b.text && b.visible; });
-            var modalVisible = !!document.querySelector('.modal.in, .action-modal.in');
-            return {url: url, modalVisible: modalVisible, buttons: allBtns.slice(0, 10)};
-        })()
-    """)
-    _log.info("Post-cancel state: %s", post_click_state)
-
-    # Register JS dialog handler BEFORE looking for confirmation buttons
     def _accept(dialog):
         _log.info("JS dialog: %s", dialog.message[:80])
         dialog.accept()
     page.on("dialog", _accept)
 
-    # Look for a confirmation button — try broad selectors
     confirmed = False
-    for sel in [
-        "button.btn-danger:visible", "button.confirm:visible",
-        "button:has-text('Yes'):visible", "button:has-text('Confirm'):visible",
-        "button:has-text('OK'):visible",
-    ]:
+    for sel in ["button.btn-danger", "button.btn-primary",
+                "button:has-text('Yes')", "button:has-text('Confirm')", "button:has-text('OK')"]:
         try:
             btn = page.query_selector(sel)
             if btn and btn.is_visible():
-                _log.info("Confirming with: %s  text=%s", sel, btn.inner_text().strip())
+                _log.info("Confirming with: %s  text=%r", sel, btn.inner_text().strip())
                 btn.click()
                 page.wait_for_timeout(2000)
                 confirmed = True
@@ -935,25 +866,25 @@ def cancel_occurrence(                  # noqa: C901
             pass
 
     if not confirmed:
-        _log.info("No confirmation button found — cancel may not need one (or already dismissed)")
+        _log.info("No confirmation button — may not need one")
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
 
-    # Navigate back to the grid and check whether occurrence_id is still there
-    page.goto(OCCURRENCES_URL.format(event_id=event_id))
+    # ── Step 4: Reload grid and verify occurrence is gone ─────────────────────
+    page.goto(occ_url)
     _page_ready(page)
     page.wait_for_timeout(3000)
-    page.screenshot(path=f"{shot_base}_grid_after.png")
 
     still_present = page.evaluate(f"""
         (function() {{
-            return (document.body.innerHTML || '').indexOf('reservationId={occurrence_id}') !== -1;
+            return document.body.innerHTML.indexOf('{occurrence_id}') !== -1;
         }})()
     """)
     if still_present:
+        page.screenshot(path=f"{shot_base}_still_present.png")
         return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_grid_after.png",
+                "screenshot": f"{shot_base}_still_present.png",
                 "error": "Occurrence still in grid after cancel — check screenshots"}
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
