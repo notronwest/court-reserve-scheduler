@@ -192,7 +192,14 @@
     "3_max_occurrences_per_event_per_day": {
       "limit": 2,
       "scope": "existing + recommended rows combined",
-      "description": "No eventId may appear more than twice on the same day across all events."
+      "description": "No eventId may appear more than twice on the same day across all events.",
+      "per_event_overrides": {
+        "1672774": {
+          "limit": 1,
+          "level": "Advanced Intermediate",
+          "note": "Capped at 1/day — everyone self-identifies as AI, reducing Intermediate attendance. Vary start times across days to build pattern data."
+        }
+      }
     },
     "3b_min_gap_same_event_hours": {
       "hours": 2,

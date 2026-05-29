@@ -8,7 +8,7 @@ PIP    := venv/bin/pip
 # Default DATE is 14 days out (the scheduler's booking horizon)
 DATE   ?= $(shell python3 -c "from datetime import date,timedelta; d=date.today()+timedelta(14); print(f'{d.month}/{d.day}/{d.year}')")
 
-.PHONY: help setup check test run dry-run history logs status restart migrate push uninstall
+.PHONY: help setup check test run dry-run show-prompt history logs status restart migrate push uninstall fix-imbalance fix-imbalance-execute
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
@@ -27,6 +27,8 @@ help:
 	@echo "    make dry-run DATE=5/7/2026"
 	@echo "    make show-prompt     Print the AI prompt without calling the API"
 	@echo "    make show-prompt DATE=5/7/2026"
+	@echo "    make fix-imbalance         Preview AI/Intermediate fixes for next 14 days"
+	@echo "    make fix-imbalance-execute Apply the fixes (cancel excess AI, add Intermediate)"
 	@echo "    make history         Fetch 3 months of attendance history now"
 	@echo ""
 	@echo "  Setup & maintenance:"
@@ -82,6 +84,13 @@ history:
 # ── Migration ─────────────────────────────────────────────────────────────────
 migrate:
 	chmod +x migrate.sh && ./migrate.sh
+
+# ── Imbalance fix ─────────────────────────────────────────────────────────────
+fix-imbalance:
+	$(PYTHON) fix_imbalance.py
+
+fix-imbalance-execute:
+	$(PYTHON) fix_imbalance.py --execute
 
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 uninstall:

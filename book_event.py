@@ -762,3 +762,166 @@ def fix_event_court(
         )
         result["method"] = f"re_add (edit_row: {debug})"
         return result
+
+
+def cancel_occurrence(
+    page:          Page,
+    event_id:      int,
+    occurrence_id: int,
+    date:          str,  # 'M/D/YYYY' — used for screenshot naming
+    dry_run:       bool = False,
+) -> dict:
+    """
+    Cancel a single occurrence via the occurrences grid.
+
+    Court Reserve shows a cancel link (data-remote containing 'CancelReservation'
+    or a 'Delete'/'Cancel' button) in each occurrence row. We open the grid,
+    find the row for this occurrence_id, click the cancel link, and confirm any
+    dialog that appears.
+
+    SAFETY: call this only after verifying MembersCount == 0 on the occurrence.
+    This function does NOT re-check membership — the caller is responsible.
+
+    Returns {"success": bool, "method": str, "screenshot": str, "error": str|None}
+    """
+    import logging as _logging
+    import os as _os
+    from pathlib import Path as _Path
+    _log = _logging.getLogger(__name__)
+
+    _SCREENSHOTS = _Path(__file__).parent / "logs" / "screenshots"
+    _os.makedirs(_SCREENSHOTS, exist_ok=True)
+    shot_base = str(_SCREENSHOTS / f"cancel_{occurrence_id}_{date.replace('/', '-')}")
+
+    if dry_run:
+        _log.info("[dry-run] Would cancel occurrence %s on %s", occurrence_id, date)
+        return {"success": True, "dry_run": True, "method": "dry_run", "screenshot": None, "error": None}
+
+    occ_url = OCCURRENCES_URL.format(event_id=event_id)
+    _log.info("Navigating to occurrences grid for event %s", event_id)
+    page.goto(occ_url)
+    _page_ready(page)
+
+    # Allow the Kendo grid rows to load
+    page.wait_for_timeout(3000)
+    page.screenshot(path=f"{shot_base}_grid.png")
+
+    # Find and click the cancel link for this occurrence_id.
+    # Court Reserve typically renders one of:
+    #   a[data-remote*="CancelReservation?reservationId=NNN"]
+    #   a[data-remote*="DeleteOccurrence?..."]
+    #   a button/link in the same row with text Cancel/Delete
+    cancel_result = page.evaluate(f"""
+        (function() {{
+            var occId = {occurrence_id};
+
+            // Strategy 1: direct data-remote containing CancelReservation + occurrenceId
+            var cancelSelectors = [
+                'a[data-remote*="CancelReservation"][data-remote*="{occurrence_id}"]',
+                'a[data-remote*="DeleteOccurrence"][data-remote*="{occurrence_id}"]',
+                'a[data-remote*="Cancel"][data-remote*="{occurrence_id}"]',
+            ];
+            for (var sel of cancelSelectors) {{
+                var el = document.querySelector(sel);
+                if (el) {{ el.click(); return {{status: 'clicked', selector: sel}}; }}
+            }}
+
+            // Strategy 2: find the row containing this occurrence_id in any link/attr,
+            // then find a cancel/delete anchor in that row
+            var rows = Array.from(document.querySelectorAll('tr'));
+            for (var row of rows) {{
+                var html = row.innerHTML || '';
+                if (html.indexOf(String(occId)) === -1) continue;
+
+                // Look for cancel link by data-remote
+                var links = Array.from(row.querySelectorAll('a[data-remote]'));
+                for (var l of links) {{
+                    var dr = (l.getAttribute('data-remote') || '').toLowerCase();
+                    if (dr.indexOf('cancel') !== -1 || dr.indexOf('delete') !== -1) {{
+                        l.click();
+                        return {{status: 'clicked_in_row', href: l.getAttribute('data-remote')}};
+                    }}
+                }}
+
+                // Look for a text-based cancel/delete button
+                var btns = Array.from(row.querySelectorAll('a, button'));
+                for (var b of btns) {{
+                    var txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+                    if (txt === 'cancel' || txt === 'delete' || txt === 'remove') {{
+                        b.click();
+                        return {{status: 'clicked_text', text: txt}};
+                    }}
+                }}
+            }}
+
+            return {{status: 'not_found'}};
+        }})()
+    """)
+
+    _log.info("Cancel click result: %s", cancel_result)
+    page.screenshot(path=f"{shot_base}_after_click.png")
+
+    if isinstance(cancel_result, dict) and cancel_result.get("status") == "not_found":
+        return {
+            "success": False, "method": "cancel",
+            "screenshot": f"{shot_base}_after_click.png",
+            "error": f"Cancel link for occurrence {occurrence_id} not found in grid — screenshot saved",
+        }
+
+    # Handle confirmation dialog (JavaScript confirm() or Bootstrap modal)
+    try:
+        # Accept a JS confirm() dialog if it appears
+        page.on("dialog", lambda d: d.accept())
+    except Exception:
+        pass
+
+    # Wait briefly then check for a confirmation modal
+    page.wait_for_timeout(1500)
+
+    # If a Bootstrap modal appeared asking to confirm, click the confirm button
+    confirm_modal = page.query_selector(".modal.in, .modal.show")
+    if confirm_modal:
+        _log.info("Confirmation modal appeared — clicking confirm button")
+        page.screenshot(path=f"{shot_base}_confirm_modal.png")
+        for selector in [
+            ".modal.in button.btn-danger",
+            ".modal.show button.btn-danger",
+            ".modal.in button:has-text('Yes')",
+            ".modal.show button:has-text('Yes')",
+            ".modal.in button:has-text('Confirm')",
+            ".modal.in button:has-text('Cancel Occurrence')",
+            ".modal.in button.btn-primary",
+        ]:
+            btn = page.query_selector(selector)
+            if btn and btn.is_visible():
+                btn.click()
+                page.wait_for_timeout(2000)
+                break
+
+    page.wait_for_timeout(2000)
+    page.screenshot(path=f"{shot_base}_result.png")
+
+    # Verify the occurrence no longer appears in the grid
+    still_present = page.evaluate(f"""
+        (function() {{
+            var html = document.body.innerHTML || '';
+            // Check if occurrence_id still appears in an action link
+            return html.indexOf('reservationId={occurrence_id}') !== -1 ||
+                   html.indexOf('occurrenceId={occurrence_id}') !== -1;
+        }})()
+    """)
+
+    if still_present:
+        _log.warning("Occurrence %s may still be present after cancel — check screenshot", occurrence_id)
+        return {
+            "success": False, "method": "cancel",
+            "screenshot": f"{shot_base}_result.png",
+            "error": "Occurrence still appears in grid after cancel attempt — may need manual confirmation",
+        }
+
+    _log.info("Occurrence %s cancelled successfully", occurrence_id)
+    return {
+        "success": True, "method": "cancel",
+        "screenshot": f"{shot_base}_result.png",
+        "error": None,
+    }

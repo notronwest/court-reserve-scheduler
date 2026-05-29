@@ -214,7 +214,16 @@ def recommend(
     needed_court_hours = max(0.0, target_court_hours - existing_court_hours)
 
     # ── Existing event occurrence counts ─────────────────────────────────────
-    max_occ  = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]["limit"]
+    _occ_constraint = policy["hard_constraints"]["3_max_occurrences_per_event_per_day"]
+    max_occ  = _occ_constraint["limit"]
+    # Per-event overrides — e.g. AI capped at 1/day
+    _occ_overrides = {
+        int(k): v["limit"]
+        for k, v in _occ_constraint.get("per_event_overrides", {}).items()
+    }
+    def _max_occ_for(eid: int) -> int:
+        return _occ_overrides.get(eid, max_occ)
+
     min_gap  = timedelta(hours=policy["hard_constraints"]["3b_min_gap_same_event_hours"]["hours"])
 
     event_counts: dict[int, int] = {eid: 0 for eid in APPROVED_EVENTS}
@@ -470,7 +479,7 @@ def recommend(
         # Book as ONE occurrence on the primary court, then edit to add extras.
         # This matches Court Reserve's workflow: add date → edit to assign all
         # courts and set max participants.
-        if event_counts[eid] < max_occ:
+        if event_counts[eid] < _max_occ_for(eid):
             primary = courts_assigned[0]
             extras  = courts_assigned[1:]
             max_p   = fe.get("max_participants", 0)
@@ -499,7 +508,7 @@ def recommend(
             for rec in _llm_recs:
                 # Re-validate before committing — guard against hallucinations
                 if (rec_free(rec.court_num, rec.start, rec.end)
-                        and event_counts.get(rec.event_id, 0) < max_occ
+                        and event_counts.get(rec.event_id, 0) < _max_occ_for(rec.event_id)
                         and event_gap_ok(rec.event_id, rec.start, rec.end)):
                     add(rec.event_id, rec.court_num, rec.start, rec.end)
             llm_source = "llm"
@@ -528,7 +537,7 @@ def recommend(
                 levels_covered.add(level)  # count as covered — no new rec needed
                 continue
             eid = LEVEL_TO_EVENT_ID[level]
-            if event_counts[eid] >= max_occ:
+            if event_counts[eid] >= _max_occ_for(eid):
                 continue
             candidates = [
                 (cn, ss, se) for cn, ss, se in free_slots
@@ -558,7 +567,7 @@ def recommend(
             eligible = [
                 (LEVEL_TO_EVENT_ID[l], l)
                 for l in LEVEL_ORDER
-                if event_counts[LEVEL_TO_EVENT_ID[l]] < max_occ
+                if event_counts[LEVEL_TO_EVENT_ID[l]] < _max_occ_for(LEVEL_TO_EVENT_ID[l])
                 and event_gap_ok(LEVEL_TO_EVENT_ID[l], ss, se)
             ]
             if not eligible:
