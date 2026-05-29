@@ -865,28 +865,20 @@ def cancel_occurrence(                  # noqa: C901
     """)
     _log.info("More Actions dropdown items:\n%s", "\n".join(f"  {i}" for i in (dropdown_items or [])))
 
-    # ── Step 4: Click cancel/delete item — prefer "occurrence" over "event" ──
+    # ── Step 4: Click the cancel item ────────────────────────────────────────
+    # In the UpdateReservation modal (scoped to a specific date), "Cancel Event"
+    # means "cancel this occurrence" — not the whole series.
     clicked = page.evaluate("""
         (function() {
             var els = Array.from(document.querySelectorAll(
                 '.dropdown-menu a, .dropdown-menu button, .dropdown-menu li a, .dropdown-menu li button'
             ));
             var allTexts = els.map(function(e){ return (e.innerText||'').trim(); });
-
-            // Priority 1: "cancel occurrence" / "delete occurrence" / "cancel date"
-            for (var el of els) {
-                var text = (el.innerText || '').trim().toLowerCase();
-                if ((text.includes('cancel') || text.includes('delete')) && !text.includes('event')) {
-                    el.click();
-                    return {clicked: true, text: text};
-                }
-            }
-            // Priority 2: any cancel/delete (fallback)
             for (var el of els) {
                 var text = (el.innerText || '').trim().toLowerCase();
                 if (text.includes('cancel') || text.includes('delete') || text.includes('remove')) {
                     el.click();
-                    return {clicked: true, text: text, warn: 'fallback'};
+                    return {clicked: true, text: text};
                 }
             }
             return {clicked: false, available: allTexts};
@@ -902,25 +894,57 @@ def cancel_occurrence(                  # noqa: C901
                 "error": f"Cancel option not in More Actions dropdown. Available: {clicked.get('available', [])}"}
 
     # ── Step 5: Handle confirmation ───────────────────────────────────────────
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_confirm.png")
 
+    # Log what appeared after clicking — dialog, new modal, or redirect
+    post_click_state = page.evaluate("""
+        (function() {
+            var url = window.location.href;
+            var allBtns = Array.from(document.querySelectorAll('button, .btn')).map(function(b) {
+                return {text: (b.innerText||'').trim(), cls: b.className, visible: b.offsetParent !== null};
+            }).filter(function(b){ return b.text && b.visible; });
+            var modalVisible = !!document.querySelector('.modal.in, .action-modal.in');
+            return {url: url, modalVisible: modalVisible, buttons: allBtns.slice(0, 10)};
+        })()
+    """)
+    _log.info("Post-cancel state: %s", post_click_state)
+
+    # Register JS dialog handler BEFORE looking for confirmation buttons
     def _accept(dialog):
         _log.info("JS dialog: %s", dialog.message[:80])
         dialog.accept()
     page.on("dialog", _accept)
 
-    for sel in ["button.btn-danger", "button.confirm",
-                "button:has-text('Yes')", "button:has-text('OK')", "button.btn-primary"]:
-        btn = page.query_selector(sel)
-        if btn and btn.is_visible():
-            _log.info("Confirming with: %s", sel)
-            btn.click()
-            page.wait_for_timeout(2000)
-            break
+    # Look for a confirmation button — try broad selectors
+    confirmed = False
+    for sel in [
+        "button.btn-danger:visible", "button.confirm:visible",
+        "button:has-text('Yes'):visible", "button:has-text('Confirm'):visible",
+        "button:has-text('OK'):visible",
+    ]:
+        try:
+            btn = page.query_selector(sel)
+            if btn and btn.is_visible():
+                _log.info("Confirming with: %s  text=%s", sel, btn.inner_text().strip())
+                btn.click()
+                page.wait_for_timeout(2000)
+                confirmed = True
+                break
+        except Exception:
+            pass
+
+    if not confirmed:
+        _log.info("No confirmation button found — cancel may not need one (or already dismissed)")
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
+
+    # Navigate back to the grid and check whether occurrence_id is still there
+    page.goto(OCCURRENCES_URL.format(event_id=event_id))
+    _page_ready(page)
+    page.wait_for_timeout(3000)
+    page.screenshot(path=f"{shot_base}_grid_after.png")
 
     still_present = page.evaluate(f"""
         (function() {{
@@ -929,7 +953,7 @@ def cancel_occurrence(                  # noqa: C901
     """)
     if still_present:
         return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_result.png",
+                "screenshot": f"{shot_base}_grid_after.png",
                 "error": "Occurrence still in grid after cancel — check screenshots"}
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
