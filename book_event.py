@@ -831,136 +831,113 @@ def cancel_occurrence(
               event_id, occurrence_id,
               "\n".join(f"  {l}" for l in (all_links or [])))
 
-    # Court Reserve doesn't have a standalone cancel link per occurrence.
-    # The cancel option is inside the UpdateReservation modal.
-    # Open the modal for this occurrence_id, then look for cancel/delete inside it.
-    _log.info("Opening UpdateReservation modal for occurrence %s", occurrence_id)
-    clicked = page.evaluate(f"""
+    # The per-occurrence cancel is in the "More Actions" dropdown on each grid row.
+    # (The UpdateReservation modal only has Save/Close; the top-nav has Cancel Event
+    #  which cancels the WHOLE event — we must not click that.)
+    _log.info("Looking for More Actions dropdown for occurrence %s", occurrence_id)
+    # Find the "More Actions" dropdown button in the row for this occurrence_id
+    # and click it to reveal the per-occurrence cancel option.
+    more_actions_clicked = page.evaluate(f"""
         (function() {{
-            var links = Array.from(document.querySelectorAll('a[data-remote*="UpdateReservation"]'));
-            for (var l of links) {{
-                if (l.getAttribute('data-remote').indexOf('{occurrence_id}') !== -1) {{
-                    l.click();
-                    return true;
+            // Find the table row that contains this occurrence_id in any link
+            var rows = Array.from(document.querySelectorAll('tr'));
+            for (var row of rows) {{
+                if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
+                // Find the More Actions dropdown toggle in this row
+                var btn = row.querySelector('.btn-dropdown, [data-toggle="dropdown"], button.dropdown-toggle');
+                if (btn) {{
+                    btn.click();
+                    return {{status: 'clicked', rowText: row.innerText.substring(0, 80)}};
                 }}
             }}
-            return false;
+            return {{status: 'not_found'}};
         }})()
     """)
+    _log.info("More Actions click result: %s", more_actions_clicked)
 
-    if not clicked:
-        page.screenshot(path=f"{shot_base}_no_modal_link.png")
+    if isinstance(more_actions_clicked, dict) and more_actions_clicked.get("status") == "not_found":
+        page.screenshot(path=f"{shot_base}_no_more_actions.png")
         return {
             "success": False, "method": "cancel",
-            "screenshot": f"{shot_base}_no_modal_link.png",
-            "error": f"UpdateReservation link for occurrence {occurrence_id} not found",
+            "screenshot": f"{shot_base}_no_more_actions.png",
+            "error": "No 'More Actions' dropdown found in occurrence row — screenshot saved",
         }
 
-    # Wait for the modal to open
-    try:
-        page.wait_for_selector(".action-modal.in, .modal.in", timeout=10000)
-    except Exception:
-        page.screenshot(path=f"{shot_base}_modal_timeout.png")
-        return {
-            "success": False, "method": "cancel",
-            "screenshot": f"{shot_base}_modal_timeout.png",
-            "error": "Timed out waiting for UpdateReservation modal",
-        }
-    page.wait_for_timeout(1500)
-    page.screenshot(path=f"{shot_base}_modal_open.png")
+    # Wait for dropdown menu to appear, then find and click the cancel option
+    page.wait_for_timeout(800)
+    page.screenshot(path=f"{shot_base}_dropdown_open.png")
 
-    # Dump ALL page buttons/links/inputs so we can find the cancel option
-    all_page_actions = page.evaluate("""
+    # Dump dropdown menu items for debugging
+    dropdown_items = page.evaluate("""
         (function() {
+            var menus = Array.from(document.querySelectorAll('.dropdown-menu, .dropdown.open .dropdown-menu'));
             var result = [];
-            // All buttons (including input[type=submit/button])
-            document.querySelectorAll('button, input[type="submit"], input[type="button"]').forEach(function(el) {
-                if (!el.offsetParent && el.type !== 'submit') return; // skip hidden
-                result.push({
-                    tag:     el.tagName,
-                    type:    el.type || '',
-                    text:    (el.innerText || el.value || '').trim().substring(0, 60),
-                    classes: el.className.substring(0, 80),
-                    id:      el.id || ''
+            menus.forEach(function(menu) {
+                if (menu.offsetParent === null) return; // skip hidden
+                menu.querySelectorAll('a, button, li').forEach(function(el) {
+                    var text = (el.innerText || '').trim();
+                    if (text) result.push({tag: el.tagName, text: text,
+                                           href: el.getAttribute('href') || '',
+                                           classes: el.className});
                 });
             });
-            // All visible links with meaningful text or danger class
-            document.querySelectorAll('a').forEach(function(el) {
-                var text = (el.innerText || '').trim().toLowerCase();
-                var cls  = el.className.toLowerCase();
-                var href = (el.getAttribute('href') || el.getAttribute('data-remote') || '').toLowerCase();
-                if (text.length < 2 && !cls.includes('danger') && !href.includes('cancel') && !href.includes('delete')) return;
-                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')
-                    || cls.includes('danger') || href.includes('cancel') || href.includes('delete')) {
-                    result.push({
-                        tag: 'A', text: text.substring(0,60),
-                        classes: cls.substring(0,80),
-                        href: href.substring(0,100)
-                    });
-                }
-            });
-            // Modal outerHTML (first 2000 chars) to see structure
-            var modal = document.querySelector('.action-modal.in, .modal.in, .modal[style*="display: block"]');
-            var modalHtml = modal ? modal.outerHTML.substring(0, 2000) : 'no modal found';
-            result.push({MODAL_HTML: modalHtml});
             return result;
         })()
     """)
-    _log.info("Full page actions for occurrence %s:\n%s",
-              occurrence_id, "\n".join(f"  {b}" for b in (all_page_actions or [])))
+    _log.info("Dropdown menu items:\n%s", "\n".join(f"  {i}" for i in (dropdown_items or [])))
 
-    # Look for a cancel/delete button inside the modal
-    cancel_btn = page.evaluate("""
+    # Click the cancel/delete option in the dropdown
+    cancel_clicked = page.evaluate("""
         (function() {
-            var modal = document.querySelector('.action-modal.in, .modal.in');
-            if (!modal) return null;
-            var candidates = Array.from(modal.querySelectorAll('a, button'));
-            for (var el of candidates) {
-                var text = (el.innerText || el.textContent || '').trim().toLowerCase();
-                var cls  = (el.className || '').toLowerCase();
-                var href = (el.getAttribute('href') || el.getAttribute('data-remote') || '').toLowerCase();
-                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')
-                    || cls.includes('danger') || href.includes('cancel') || href.includes('delete')) {
-                    el.click();
-                    return {clicked: true, text: text, cls: cls};
+            var menus = Array.from(document.querySelectorAll('.dropdown-menu, .dropdown.open .dropdown-menu'));
+            for (var menu of menus) {
+                if (menu.offsetParent === null) continue;
+                var items = Array.from(menu.querySelectorAll('a, button'));
+                for (var el of items) {
+                    var text = (el.innerText || '').trim().toLowerCase();
+                    if (text.includes('cancel') || text.includes('delete') || text.includes('remove')) {
+                        el.click();
+                        return {clicked: true, text: text};
+                    }
                 }
             }
             return {clicked: false};
         })()
     """)
+    _log.info("Cancel dropdown item result: %s", cancel_clicked)
+    page.screenshot(path=f"{shot_base}_after_cancel.png")
 
-    _log.info("Cancel button result: %s", cancel_btn)
-    page.screenshot(path=f"{shot_base}_after_cancel_click.png")
-
-    if not (isinstance(cancel_btn, dict) and cancel_btn.get("clicked")):
+    if not (isinstance(cancel_clicked, dict) and cancel_clicked.get("clicked")):
         return {
             "success": False, "method": "cancel",
-            "screenshot": f"{shot_base}_after_cancel_click.png",
-            "error": "No cancel/delete button found inside UpdateReservation modal — check modal_open screenshot",
+            "screenshot": f"{shot_base}_after_cancel.png",
+            "error": "No cancel/delete option found in More Actions dropdown — check dropdown_open screenshot",
         }
 
-    # Handle any confirmation dialog that appears
-    page.wait_for_timeout(1500)
+    # Handle any confirmation dialog (JS confirm() or Bootstrap modal)
+    page.wait_for_timeout(1000)
     page.screenshot(path=f"{shot_base}_confirm.png")
 
-    confirm_modal = page.query_selector(".modal.in .modal, .bootbox, .modal.in")
-    if confirm_modal:
-        for sel in [
-            "button.btn-danger", "button:has-text('Yes')",
-            "button:has-text('Confirm')", "button:has-text('OK')",
-            "button.btn-primary",
-        ]:
-            btn = page.query_selector(f".modal.in {sel}")
-            if btn and btn.is_visible():
-                _log.info("Clicking confirmation button: %s", sel)
-                btn.click()
-                page.wait_for_timeout(2000)
-                break
+    # JS dialog handler
+    def _accept_dialog(dialog):
+        _log.info("Accepting dialog: %s", dialog.message[:80])
+        dialog.accept()
+    page.on("dialog", _accept_dialog)
+
+    # Bootstrap confirmation modal
+    for sel in ["button.btn-danger", "button.confirm", "button:has-text('Yes')",
+                "button:has-text('Confirm')", "button:has-text('OK')"]:
+        btn = page.query_selector(sel)
+        if btn and btn.is_visible():
+            _log.info("Clicking confirmation: %s", sel)
+            btn.click()
+            page.wait_for_timeout(2000)
+            break
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
 
-    # Verify the occurrence no longer appears in the grid
+    # Verify occurrence is gone from the grid
     still_present = page.evaluate(f"""
         (function() {{
             return (document.body.innerHTML || '').indexOf('reservationId={occurrence_id}') !== -1;
@@ -971,7 +948,7 @@ def cancel_occurrence(
         return {
             "success": False, "method": "cancel",
             "screenshot": f"{shot_base}_result.png",
-            "error": "Occurrence still in grid after cancel — check screenshots for confirmation step",
+            "error": "Occurrence still in grid — check confirm screenshot for required confirmation step",
         }
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
