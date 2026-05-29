@@ -856,32 +856,46 @@ def cancel_occurrence(                  # noqa: C901
     page.wait_for_timeout(500)
     page.screenshot(path=f"{shot_base}_modal.png")
 
-    # Use Playwright's native locator + click (properly fires all JS event handlers)
+    # Wait for modal, then click "Cancel Event" and wait for the AJAX response.
+    # btn-modal submits via jQuery AJAX — we intercept the network response to
+    # know when the cancellation has actually completed server-side.
+    try:
+        page.wait_for_selector("button:has-text('Cancel Event')", timeout=8000)
+    except Exception:
+        page.screenshot(path=f"{shot_base}_no_cancel_btn.png")
+        _log.warning("Cancel Event button not found after modal opened")
+
+    page.screenshot(path=f"{shot_base}_modal.png")
+
     confirmed = False
-    for locator in [
-        page.get_by_role("button", name="Cancel Event"),
-        page.locator(".modal.in").get_by_role("button", name="Cancel Event"),
-        page.locator("#action-modal").get_by_role("button", name="Cancel Event"),
-        page.get_by_role("button", name="Cancel Event", exact=False),
-    ]:
+    btn = page.query_selector("button:has-text('Cancel Event')")
+    if btn and btn.is_visible():
+        _log.info("Clicking Cancel Event (waiting for AJAX response)")
         try:
-            if locator.is_visible(timeout=2000):
-                _log.info("Clicking Cancel Event via locator")
-                locator.click()
-                # Wait for modal to close or page to change
-                try:
-                    page.wait_for_selector(".modal.in", state="hidden", timeout=10000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(2000)
-                confirmed = True
-                break
+            # Wait for the POST to CancelReservation to complete
+            with page.expect_response(
+                lambda r: "CancelReservation" in r.url and r.request.method == "POST",
+                timeout=15000
+            ) as resp_info:
+                btn.click()
+            resp = resp_info.value
+            _log.info("CancelReservation response: status=%s url=%s", resp.status, resp.url)
+            confirmed = resp.ok
         except Exception as e:
-            _log.debug("Locator attempt failed: %s", e)
+            _log.warning("AJAX wait failed (%s) — trying direct click fallback", e)
+            # Fallback: just click and wait
+            try:
+                btn = page.query_selector("button:has-text('Cancel Event')")
+                if btn:
+                    btn.click()
+                    page.wait_for_timeout(4000)
+                    confirmed = True
+            except Exception as e2:
+                _log.warning("Fallback click also failed: %s", e2)
 
     if not confirmed:
         page.screenshot(path=f"{shot_base}_no_confirm_btn.png")
-        _log.warning("Cancel Event button not clicked — check modal screenshot")
+        _log.warning("Cancel Event button not found or click failed")
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
