@@ -852,37 +852,44 @@ def cancel_occurrence(                  # noqa: C901
     page.wait_for_timeout(800)
     page.screenshot(path=f"{shot_base}_dropdown.png")
 
-    # Log what's in the dropdown
+    # Log ALL dropdown items (no visibility filter — modal z-index can fool offsetParent)
     dropdown_items = page.evaluate("""
         (function() {
             var items = [];
             document.querySelectorAll('.dropdown-menu a, .dropdown-menu button, .dropdown-menu li').forEach(function(el) {
                 var text = (el.innerText || '').trim();
-                if (text && el.offsetParent !== null)
-                    items.push({tag: el.tagName, text: text, href: el.getAttribute('href') || ''});
+                if (text) items.push({tag: el.tagName, text: text, href: el.getAttribute('href') || ''});
             });
             return items;
         })()
     """)
     _log.info("More Actions dropdown items:\n%s", "\n".join(f"  {i}" for i in (dropdown_items or [])))
 
-    # ── Step 4: Click cancel/delete item ─────────────────────────────────────
+    # ── Step 4: Click cancel/delete item — prefer "occurrence" over "event" ──
     clicked = page.evaluate("""
         (function() {
             var els = Array.from(document.querySelectorAll(
                 '.dropdown-menu a, .dropdown-menu button, .dropdown-menu li a, .dropdown-menu li button'
             ));
+            var allTexts = els.map(function(e){ return (e.innerText||'').trim(); });
+
+            // Priority 1: "cancel occurrence" / "delete occurrence" / "cancel date"
             for (var el of els) {
-                if (el.offsetParent === null) continue;
                 var text = (el.innerText || '').trim().toLowerCase();
-                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')) {
+                if ((text.includes('cancel') || text.includes('delete')) && !text.includes('event')) {
                     el.click();
                     return {clicked: true, text: text};
                 }
             }
-            var available = els.filter(function(e){return e.offsetParent!==null;})
-                               .map(function(e){return (e.innerText||'').trim();});
-            return {clicked: false, available: available};
+            // Priority 2: any cancel/delete (fallback)
+            for (var el of els) {
+                var text = (el.innerText || '').trim().toLowerCase();
+                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')) {
+                    el.click();
+                    return {clicked: true, text: text, warn: 'fallback'};
+                }
+            }
+            return {clicked: false, available: allTexts};
         })()
     """)
     _log.info("Cancel item: %s", clicked)
