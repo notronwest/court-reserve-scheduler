@@ -806,6 +806,31 @@ def cancel_occurrence(
     page.wait_for_timeout(3000)
     page.screenshot(path=f"{shot_base}_grid.png")
 
+    # Diagnostic: dump all action links on the page so we can see what's available
+    all_links = page.evaluate("""
+        (function() {
+            var result = [];
+            // All data-remote links
+            document.querySelectorAll('a[data-remote]').forEach(function(a) {
+                result.push({type: 'data-remote', href: a.getAttribute('data-remote'),
+                             text: (a.innerText||'').trim().substring(0,40)});
+            });
+            // All onclick links
+            document.querySelectorAll('a[onclick]').forEach(function(a) {
+                result.push({type: 'onclick', onclick: a.getAttribute('onclick').substring(0,80),
+                             text: (a.innerText||'').trim().substring(0,40)});
+            });
+            // All buttons
+            document.querySelectorAll('button, input[type=submit]').forEach(function(b) {
+                result.push({type: 'button', text: (b.innerText||b.value||'').trim().substring(0,40)});
+            });
+            return result;
+        })()
+    """)
+    _log.info("Page action links for event %s occ %s:\n%s",
+              event_id, occurrence_id,
+              "\n".join(f"  {l}" for l in (all_links or [])))
+
     # Find and click the cancel link for this occurrence_id.
     # Court Reserve typically renders one of:
     #   a[data-remote*="CancelReservation?reservationId=NNN"]
