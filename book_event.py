@@ -831,94 +831,108 @@ def cancel_occurrence(
               event_id, occurrence_id,
               "\n".join(f"  {l}" for l in (all_links or [])))
 
-    # Find and click the cancel link for this occurrence_id.
-    # Court Reserve typically renders one of:
-    #   a[data-remote*="CancelReservation?reservationId=NNN"]
-    #   a[data-remote*="DeleteOccurrence?..."]
-    #   a button/link in the same row with text Cancel/Delete
-    cancel_result = page.evaluate(f"""
+    # Court Reserve doesn't have a standalone cancel link per occurrence.
+    # The cancel option is inside the UpdateReservation modal.
+    # Open the modal for this occurrence_id, then look for cancel/delete inside it.
+    _log.info("Opening UpdateReservation modal for occurrence %s", occurrence_id)
+    clicked = page.evaluate(f"""
         (function() {{
-            var occId = {occurrence_id};
-
-            // Strategy 1: direct data-remote containing CancelReservation + occurrenceId
-            var cancelSelectors = [
-                'a[data-remote*="CancelReservation"][data-remote*="{occurrence_id}"]',
-                'a[data-remote*="DeleteOccurrence"][data-remote*="{occurrence_id}"]',
-                'a[data-remote*="Cancel"][data-remote*="{occurrence_id}"]',
-            ];
-            for (var sel of cancelSelectors) {{
-                var el = document.querySelector(sel);
-                if (el) {{ el.click(); return {{status: 'clicked', selector: sel}}; }}
-            }}
-
-            // Strategy 2: find the row containing this occurrence_id in any link/attr,
-            // then find a cancel/delete anchor in that row
-            var rows = Array.from(document.querySelectorAll('tr'));
-            for (var row of rows) {{
-                var html = row.innerHTML || '';
-                if (html.indexOf(String(occId)) === -1) continue;
-
-                // Look for cancel link by data-remote
-                var links = Array.from(row.querySelectorAll('a[data-remote]'));
-                for (var l of links) {{
-                    var dr = (l.getAttribute('data-remote') || '').toLowerCase();
-                    if (dr.indexOf('cancel') !== -1 || dr.indexOf('delete') !== -1) {{
-                        l.click();
-                        return {{status: 'clicked_in_row', href: l.getAttribute('data-remote')}};
-                    }}
-                }}
-
-                // Look for a text-based cancel/delete button
-                var btns = Array.from(row.querySelectorAll('a, button'));
-                for (var b of btns) {{
-                    var txt = (b.innerText || b.textContent || '').trim().toLowerCase();
-                    if (txt === 'cancel' || txt === 'delete' || txt === 'remove') {{
-                        b.click();
-                        return {{status: 'clicked_text', text: txt}};
-                    }}
+            var links = Array.from(document.querySelectorAll('a[data-remote*="UpdateReservation"]'));
+            for (var l of links) {{
+                if (l.getAttribute('data-remote').indexOf('{occurrence_id}') !== -1) {{
+                    l.click();
+                    return true;
                 }}
             }}
-
-            return {{status: 'not_found'}};
+            return false;
         }})()
     """)
 
-    _log.info("Cancel click result: %s", cancel_result)
-    page.screenshot(path=f"{shot_base}_after_click.png")
-
-    if isinstance(cancel_result, dict) and cancel_result.get("status") == "not_found":
+    if not clicked:
+        page.screenshot(path=f"{shot_base}_no_modal_link.png")
         return {
             "success": False, "method": "cancel",
-            "screenshot": f"{shot_base}_after_click.png",
-            "error": f"Cancel link for occurrence {occurrence_id} not found in grid — screenshot saved",
+            "screenshot": f"{shot_base}_no_modal_link.png",
+            "error": f"UpdateReservation link for occurrence {occurrence_id} not found",
         }
 
-    # Handle confirmation dialog (JavaScript confirm() or Bootstrap modal)
+    # Wait for the modal to open
     try:
-        # Accept a JS confirm() dialog if it appears
-        page.on("dialog", lambda d: d.accept())
+        page.wait_for_selector(".action-modal.in, .modal.in", timeout=10000)
     except Exception:
-        pass
-
-    # Wait briefly then check for a confirmation modal
+        page.screenshot(path=f"{shot_base}_modal_timeout.png")
+        return {
+            "success": False, "method": "cancel",
+            "screenshot": f"{shot_base}_modal_timeout.png",
+            "error": "Timed out waiting for UpdateReservation modal",
+        }
     page.wait_for_timeout(1500)
+    page.screenshot(path=f"{shot_base}_modal_open.png")
 
-    # If a Bootstrap modal appeared asking to confirm, click the confirm button
-    confirm_modal = page.query_selector(".modal.in, .modal.show")
+    # Dump modal buttons so we can see what's available
+    modal_buttons = page.evaluate("""
+        (function() {
+            var modal = document.querySelector('.action-modal.in, .modal.in');
+            if (!modal) return [];
+            var result = [];
+            modal.querySelectorAll('a, button').forEach(function(el) {
+                result.push({
+                    tag:     el.tagName,
+                    text:    (el.innerText || el.textContent || '').trim().substring(0,60),
+                    classes: el.className,
+                    href:    el.getAttribute('href') || el.getAttribute('data-remote') || ''
+                });
+            });
+            return result;
+        })()
+    """)
+    _log.info("Modal buttons for occurrence %s:\n%s",
+              occurrence_id, "\n".join(f"  {b}" for b in (modal_buttons or [])))
+
+    # Look for a cancel/delete button inside the modal
+    cancel_btn = page.evaluate("""
+        (function() {
+            var modal = document.querySelector('.action-modal.in, .modal.in');
+            if (!modal) return null;
+            var candidates = Array.from(modal.querySelectorAll('a, button'));
+            for (var el of candidates) {
+                var text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                var cls  = (el.className || '').toLowerCase();
+                var href = (el.getAttribute('href') || el.getAttribute('data-remote') || '').toLowerCase();
+                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')
+                    || cls.includes('danger') || href.includes('cancel') || href.includes('delete')) {
+                    el.click();
+                    return {clicked: true, text: text, cls: cls};
+                }
+            }
+            return {clicked: false};
+        })()
+    """)
+
+    _log.info("Cancel button result: %s", cancel_btn)
+    page.screenshot(path=f"{shot_base}_after_cancel_click.png")
+
+    if not (isinstance(cancel_btn, dict) and cancel_btn.get("clicked")):
+        return {
+            "success": False, "method": "cancel",
+            "screenshot": f"{shot_base}_after_cancel_click.png",
+            "error": "No cancel/delete button found inside UpdateReservation modal — check modal_open screenshot",
+        }
+
+    # Handle any confirmation dialog that appears
+    page.wait_for_timeout(1500)
+    page.screenshot(path=f"{shot_base}_confirm.png")
+
+    confirm_modal = page.query_selector(".modal.in .modal, .bootbox, .modal.in")
     if confirm_modal:
-        _log.info("Confirmation modal appeared — clicking confirm button")
-        page.screenshot(path=f"{shot_base}_confirm_modal.png")
-        for selector in [
-            ".modal.in button.btn-danger",
-            ".modal.show button.btn-danger",
-            ".modal.in button:has-text('Yes')",
-            ".modal.show button:has-text('Yes')",
-            ".modal.in button:has-text('Confirm')",
-            ".modal.in button:has-text('Cancel Occurrence')",
-            ".modal.in button.btn-primary",
+        for sel in [
+            "button.btn-danger", "button:has-text('Yes')",
+            "button:has-text('Confirm')", "button:has-text('OK')",
+            "button.btn-primary",
         ]:
-            btn = page.query_selector(selector)
+            btn = page.query_selector(f".modal.in {sel}")
             if btn and btn.is_visible():
+                _log.info("Clicking confirmation button: %s", sel)
                 btn.click()
                 page.wait_for_timeout(2000)
                 break
@@ -929,24 +943,16 @@ def cancel_occurrence(
     # Verify the occurrence no longer appears in the grid
     still_present = page.evaluate(f"""
         (function() {{
-            var html = document.body.innerHTML || '';
-            // Check if occurrence_id still appears in an action link
-            return html.indexOf('reservationId={occurrence_id}') !== -1 ||
-                   html.indexOf('occurrenceId={occurrence_id}') !== -1;
+            return (document.body.innerHTML || '').indexOf('reservationId={occurrence_id}') !== -1;
         }})()
     """)
 
     if still_present:
-        _log.warning("Occurrence %s may still be present after cancel — check screenshot", occurrence_id)
         return {
             "success": False, "method": "cancel",
             "screenshot": f"{shot_base}_result.png",
-            "error": "Occurrence still appears in grid after cancel attempt — may need manual confirmation",
+            "error": "Occurrence still in grid after cancel — check screenshots for confirmation step",
         }
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
-    return {
-        "success": True, "method": "cancel",
-        "screenshot": f"{shot_base}_result.png",
-        "error": None,
-    }
+    return {"success": True, "method": "cancel", "screenshot": f"{shot_base}_result.png", "error": None}
