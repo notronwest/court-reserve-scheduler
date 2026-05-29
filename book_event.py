@@ -835,22 +835,50 @@ def cancel_occurrence(
     # (The UpdateReservation modal only has Save/Close; the top-nav has Cancel Event
     #  which cancels the WHOLE event — we must not click that.)
     _log.info("Looking for More Actions dropdown for occurrence %s", occurrence_id)
-    # Find the "More Actions" dropdown button in the row for this occurrence_id
-    # and click it to reveal the per-occurrence cancel option.
+    # Find the "More Actions" dropdown button for this occurrence.
+    # Kendo Grid may put command buttons in a separate <td>, so we walk UP the DOM
+    # from the occurrence link to find a containing element with the dropdown button.
     more_actions_clicked = page.evaluate(f"""
         (function() {{
-            // Find the table row that contains this occurrence_id in any link
-            var rows = Array.from(document.querySelectorAll('tr'));
-            for (var row of rows) {{
-                if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
-                // Find the More Actions dropdown toggle in this row
-                var btn = row.querySelector('.btn-dropdown, [data-toggle="dropdown"], button.dropdown-toggle');
+            // Find an element that directly references occurrence_id
+            var anchors = Array.from(document.querySelectorAll(
+                'a[href*="{occurrence_id}"], a[data-remote*="{occurrence_id}"]'
+            ));
+            if (anchors.length === 0) return {{status: 'no_anchor_found'}};
+
+            // Walk up the DOM from the first anchor to find a row-level container
+            // that also contains a More Actions button
+            var el = anchors[0];
+            for (var depth = 0; depth < 8; depth++) {{
+                el = el.parentElement;
+                if (!el) break;
+                // Log what we find at each level for debugging
+                var btn = el.querySelector('.btn-dropdown, button.dropdown-toggle, [data-toggle="dropdown"]');
                 if (btn) {{
                     btn.click();
-                    return {{status: 'clicked', rowText: row.innerText.substring(0, 80)}};
+                    return {{
+                        status: 'clicked',
+                        depth: depth,
+                        tagName: el.tagName,
+                        btnClass: btn.className
+                    }};
                 }}
             }}
-            return {{status: 'not_found'}};
+
+            // Fallback: all More Actions buttons on page — click the one whose
+            // sibling row contains occurrence_id
+            var allMoreBtns = Array.from(document.querySelectorAll('.btn-dropdown, button.dropdown-toggle'));
+            return {{
+                status: 'not_found',
+                anchorsFound: anchors.length,
+                moreActionsBtnsOnPage: allMoreBtns.length,
+                anchorParentTags: anchors.slice(0,3).map(function(a) {{
+                    var tags = [];
+                    var p = a.parentElement;
+                    for (var i=0; i<6 && p; i++) {{ tags.push(p.tagName + '.' + p.className.substring(0,20)); p = p.parentElement; }}
+                    return tags.join(' > ');
+                }})
+            }};
         }})()
     """)
     _log.info("More Actions click result: %s", more_actions_clicked)
