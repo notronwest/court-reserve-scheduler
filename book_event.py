@@ -886,21 +886,41 @@ def cancel_occurrence(                  # noqa: C901
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
 
-    # ── Step 4: Reload grid and verify occurrence is gone ─────────────────────
+    # ── Step 4: Reload grid and verify cancellation ───────────────────────────
+    # Cancelled dates remain in the grid with a "Cancelled" status —
+    # they don't disappear. Success = the Cancel Date link is gone
+    # (replaced by the Cancelled status text) for this occurrence.
     page.goto(occ_url)
     _page_ready(page)
     page.wait_for_timeout(3000)
 
-    still_present = page.evaluate(f"""
+    cancel_link_gone = page.evaluate(f"""
         (function() {{
-            return document.body.innerHTML.indexOf('{occurrence_id}') !== -1;
+            // If cancelled, the data-href link for this occurrence will be gone
+            var link = document.querySelector(
+                'a[data-href*="CancelReservation"][data-href*="{occurrence_id}"]'
+            );
+            if (link) return {{cancelled: false, reason: 'Cancel Date link still present'}};
+
+            // Also check the row contains 'Cancelled' text
+            var rows = Array.from(document.querySelectorAll('tr'));
+            for (var row of rows) {{
+                if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
+                var text = (row.innerText || '').toLowerCase();
+                if (text.includes('cancel')) return {{cancelled: true, rowText: row.innerText.substring(0, 100)}};
+            }}
+            // Link is gone even if row text doesn't say cancelled yet
+            return {{cancelled: true, reason: 'Cancel Date link removed'}};
         }})()
     """)
-    if still_present:
-        page.screenshot(path=f"{shot_base}_still_present.png")
+
+    _log.info("Cancellation check: %s", cancel_link_gone)
+
+    if not (isinstance(cancel_link_gone, dict) and cancel_link_gone.get("cancelled")):
+        page.screenshot(path=f"{shot_base}_not_cancelled.png")
         return {"success": False, "method": "cancel",
-                "screenshot": f"{shot_base}_still_present.png",
-                "error": "Occurrence still in grid after cancel — check screenshots"}
+                "screenshot": f"{shot_base}_not_cancelled.png",
+                "error": f"Cancellation did not complete: {cancel_link_gone}"}
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
     return {"success": True, "method": "cancel", "screenshot": f"{shot_base}_result.png", "error": None}

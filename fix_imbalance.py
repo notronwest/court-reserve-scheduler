@@ -118,6 +118,11 @@ def analyse_day(date_str: str, items: list[dict]) -> dict:
         start = datetime.fromisoformat(item["StartDateTime"])
         if start.date() != dt.date():
             continue
+        # Skip cancelled occurrences — they stay in the schedule feed with Cancelled status
+        event_name = (item.get("EventName") or "").lower()
+        reservation_type = (item.get("ReservationType") or "").lower()
+        if "cancel" in event_name or "cancel" in reservation_type:
+            continue
         members = int(item.get("MembersCount") or 0)
         record = {
             "event_name":    item.get("EventName", ""),
