@@ -843,42 +843,45 @@ def cancel_occurrence(                  # noqa: C901
                 "error": f"Cancel Date link for occurrence {occurrence_id} not found in grid"}
 
     # ── Step 3: Confirm in the modal ─────────────────────────────────────────
-    # The link opens a modal showing dates with checkboxes — the target date is
-    # pre-checked. Click "Cancel Event" to confirm.
+    # The link opens a modal showing all dates with checkboxes — the target date
+    # is pre-checked. Click "Cancel Event" to confirm.
     page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_confirm.png")
 
-    # Wait for the modal to appear
+    # Wait for the modal
     try:
-        page.wait_for_selector(".modal.in, .action-modal.in, #action-modal.in", timeout=8000)
+        page.wait_for_selector(".modal.in, #action-modal", timeout=8000)
     except Exception:
-        _log.info("No modal appeared after clicking Cancel Date link")
-
+        _log.warning("No modal appeared — check confirm screenshot")
     page.wait_for_timeout(500)
     page.screenshot(path=f"{shot_base}_modal.png")
 
-    # Click "Cancel Event" button inside the modal
+    # Use Playwright's native locator + click (properly fires all JS event handlers)
     confirmed = False
-    for sel in [
-        "button:has-text('Cancel Event')",
-        ".modal.in button:has-text('Cancel')",
-        ".action-modal.in button:has-text('Cancel')",
-        "button.btn-danger",
+    for locator in [
+        page.get_by_role("button", name="Cancel Event"),
+        page.locator(".modal.in").get_by_role("button", name="Cancel Event"),
+        page.locator("#action-modal").get_by_role("button", name="Cancel Event"),
+        page.get_by_role("button", name="Cancel Event", exact=False),
     ]:
         try:
-            btn = page.query_selector(sel)
-            if btn and btn.is_visible():
-                _log.info("Clicking cancel confirm: %s  text=%r", sel, btn.inner_text().strip())
-                btn.click()
+            if locator.is_visible(timeout=2000):
+                _log.info("Clicking Cancel Event via locator")
+                locator.click()
+                # Wait for modal to close or page to change
+                try:
+                    page.wait_for_selector(".modal.in", state="hidden", timeout=10000)
+                except Exception:
+                    pass
                 page.wait_for_timeout(2000)
                 confirmed = True
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            _log.debug("Locator attempt failed: %s", e)
 
     if not confirmed:
         page.screenshot(path=f"{shot_base}_no_confirm_btn.png")
-        _log.warning("Cancel Event button not found — check modal screenshot")
+        _log.warning("Cancel Event button not clicked — check modal screenshot")
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
