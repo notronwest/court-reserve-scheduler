@@ -908,33 +908,31 @@ def cancel_occurrence(                  # noqa: C901
     _page_ready(page)
     page.wait_for_timeout(3000)
 
-    cancel_link_gone = page.evaluate(f"""
+    # Cancelled rows stay in the grid — check Status column for 'Cancel' text
+    cancel_check = page.evaluate(f"""
         (function() {{
-            // If cancelled, the data-href link for this occurrence will be gone
-            var link = document.querySelector(
-                'a[data-href*="CancelReservation"][data-href*="{occurrence_id}"]'
-            );
-            if (link) return {{cancelled: false, reason: 'Cancel Date link still present'}};
-
-            // Also check the row contains 'Cancelled' text
             var rows = Array.from(document.querySelectorAll('tr'));
             for (var row of rows) {{
                 if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
-                var text = (row.innerText || '').toLowerCase();
-                if (text.includes('cancel')) return {{cancelled: true, rowText: row.innerText.substring(0, 100)}};
+                var text = (row.innerText || '');
+                var lower = text.toLowerCase();
+                // Status column will contain 'cancel' for cancelled occurrences
+                if (lower.includes('cancel')) {{
+                    return {{cancelled: true, rowText: text.substring(0, 120)}};
+                }}
+                return {{cancelled: false, rowText: text.substring(0, 120)}};
             }}
-            // Link is gone even if row text doesn't say cancelled yet
-            return {{cancelled: true, reason: 'Cancel Date link removed'}};
+            return {{cancelled: false, reason: 'Row not found for occurrence ' + {occurrence_id}}};
         }})()
     """)
 
-    _log.info("Cancellation check: %s", cancel_link_gone)
+    _log.info("Cancellation check: %s", cancel_check)
 
-    if not (isinstance(cancel_link_gone, dict) and cancel_link_gone.get("cancelled")):
+    if not (isinstance(cancel_check, dict) and cancel_check.get("cancelled")):
         page.screenshot(path=f"{shot_base}_not_cancelled.png")
         return {"success": False, "method": "cancel",
                 "screenshot": f"{shot_base}_not_cancelled.png",
-                "error": f"Cancellation did not complete: {cancel_link_gone}"}
+                "error": f"Status column does not show Cancelled: {cancel_check}"}
 
     _log.info("Occurrence %s cancelled successfully", occurrence_id)
     return {"success": True, "method": "cancel", "screenshot": f"{shot_base}_result.png", "error": None}
