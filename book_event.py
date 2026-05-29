@@ -869,25 +869,45 @@ def cancel_occurrence(
     page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_modal_open.png")
 
-    # Dump modal buttons so we can see what's available
-    modal_buttons = page.evaluate("""
+    # Dump ALL page buttons/links/inputs so we can find the cancel option
+    all_page_actions = page.evaluate("""
         (function() {
-            var modal = document.querySelector('.action-modal.in, .modal.in');
-            if (!modal) return [];
             var result = [];
-            modal.querySelectorAll('a, button').forEach(function(el) {
+            // All buttons (including input[type=submit/button])
+            document.querySelectorAll('button, input[type="submit"], input[type="button"]').forEach(function(el) {
+                if (!el.offsetParent && el.type !== 'submit') return; // skip hidden
                 result.push({
                     tag:     el.tagName,
-                    text:    (el.innerText || el.textContent || '').trim().substring(0,60),
-                    classes: el.className,
-                    href:    el.getAttribute('href') || el.getAttribute('data-remote') || ''
+                    type:    el.type || '',
+                    text:    (el.innerText || el.value || '').trim().substring(0, 60),
+                    classes: el.className.substring(0, 80),
+                    id:      el.id || ''
                 });
             });
+            // All visible links with meaningful text or danger class
+            document.querySelectorAll('a').forEach(function(el) {
+                var text = (el.innerText || '').trim().toLowerCase();
+                var cls  = el.className.toLowerCase();
+                var href = (el.getAttribute('href') || el.getAttribute('data-remote') || '').toLowerCase();
+                if (text.length < 2 && !cls.includes('danger') && !href.includes('cancel') && !href.includes('delete')) return;
+                if (text.includes('cancel') || text.includes('delete') || text.includes('remove')
+                    || cls.includes('danger') || href.includes('cancel') || href.includes('delete')) {
+                    result.push({
+                        tag: 'A', text: text.substring(0,60),
+                        classes: cls.substring(0,80),
+                        href: href.substring(0,100)
+                    });
+                }
+            });
+            // Modal outerHTML (first 2000 chars) to see structure
+            var modal = document.querySelector('.action-modal.in, .modal.in, .modal[style*="display: block"]');
+            var modalHtml = modal ? modal.outerHTML.substring(0, 2000) : 'no modal found';
+            result.push({MODAL_HTML: modalHtml});
             return result;
         })()
     """)
-    _log.info("Modal buttons for occurrence %s:\n%s",
-              occurrence_id, "\n".join(f"  {b}" for b in (modal_buttons or [])))
+    _log.info("Full page actions for occurrence %s:\n%s",
+              occurrence_id, "\n".join(f"  {b}" for b in (all_page_actions or [])))
 
     # Look for a cancel/delete button inside the modal
     cancel_btn = page.evaluate("""
