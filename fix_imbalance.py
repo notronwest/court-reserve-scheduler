@@ -248,10 +248,10 @@ def print_summary(analyses: list[dict], changes: list[dict]):
         i   = day["int_events"]
         if not ai and not i:
             continue
-        ai_str = ", ".join(
-            f"{e['start'].strftime('%-I%p')}({'🔒' if e['members'] > 0 else f\"{e['members']}\"})"
-            for e in ai
-        ) or "—"
+        def _ai_label(e):
+            tag = "🔒" if e["members"] > 0 else str(e["members"])
+            return f"{e['start'].strftime('%-I%p')}({tag})"
+        ai_str = ", ".join(_ai_label(e) for e in ai) or "—"
         i_str = ", ".join(
             f"{e['start'].strftime('%-I%p')}({e['members']})"
             for e in i
