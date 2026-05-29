@@ -323,7 +323,7 @@ def main():
 
     print(f"\nFetching schedule for {dates[0]} → {dates[-1]}...")
     analyses = []
-    with browser_session(headless=True) as page:
+    with browser_session(headless=False) as page:
         for d in dates:
             items = fetch_schedule(d, d, page=page)
             analyses.append(analyse_day(d, items))
