@@ -842,22 +842,33 @@ def cancel_occurrence(                  # noqa: C901
                 "screenshot": f"{shot_base}_no_link.png",
                 "error": f"Cancel Date link for occurrence {occurrence_id} not found in grid"}
 
-    # ── Step 3: Confirm the modal ─────────────────────────────────────────────
+    # ── Step 3: Confirm in the modal ─────────────────────────────────────────
+    # The link opens a modal showing dates with checkboxes — the target date is
+    # pre-checked. Click "Cancel Event" to confirm.
     page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_confirm.png")
 
-    def _accept(dialog):
-        _log.info("JS dialog: %s", dialog.message[:80])
-        dialog.accept()
-    page.on("dialog", _accept)
+    # Wait for the modal to appear
+    try:
+        page.wait_for_selector(".modal.in, .action-modal.in, #action-modal.in", timeout=8000)
+    except Exception:
+        _log.info("No modal appeared after clicking Cancel Date link")
 
+    page.wait_for_timeout(500)
+    page.screenshot(path=f"{shot_base}_modal.png")
+
+    # Click "Cancel Event" button inside the modal
     confirmed = False
-    for sel in ["button.btn-danger", "button.btn-primary",
-                "button:has-text('Yes')", "button:has-text('Confirm')", "button:has-text('OK')"]:
+    for sel in [
+        "button:has-text('Cancel Event')",
+        ".modal.in button:has-text('Cancel')",
+        ".action-modal.in button:has-text('Cancel')",
+        "button.btn-danger",
+    ]:
         try:
             btn = page.query_selector(sel)
             if btn and btn.is_visible():
-                _log.info("Confirming with: %s  text=%r", sel, btn.inner_text().strip())
+                _log.info("Clicking cancel confirm: %s  text=%r", sel, btn.inner_text().strip())
                 btn.click()
                 page.wait_for_timeout(2000)
                 confirmed = True
@@ -866,7 +877,8 @@ def cancel_occurrence(                  # noqa: C901
             pass
 
     if not confirmed:
-        _log.info("No confirmation button — may not need one")
+        page.screenshot(path=f"{shot_base}_no_confirm_btn.png")
+        _log.warning("Cancel Event button not found — check modal screenshot")
 
     page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
