@@ -840,31 +840,46 @@ def cancel_occurrence(                  # noqa: C901
     page.wait_for_timeout(1500)
     page.screenshot(path=f"{shot_base}_cancel_form.png")
 
-    # ── Step 4: Click Cancel Event and wait for the server response ───────────
+    # ── Step 4: Inspect the cancel form and submit ────────────────────────────
+    form_info = page.evaluate("""
+        (function() {
+            var form = document.querySelector('form');
+            if (!form) return {found: false, html: document.body.innerHTML.substring(0, 1000)};
+            var inputs = Array.from(form.querySelectorAll('input, select, textarea')).map(function(el) {
+                return {name: el.name, type: el.type, value: el.value, checked: el.checked};
+            });
+            var buttons = Array.from(form.querySelectorAll('button, input[type=submit]')).map(function(b) {
+                return {tag: b.tagName, type: b.type, text: (b.innerText||b.value||'').trim(), name: b.name, value: b.value};
+            });
+            return {
+                found: true,
+                action: form.action,
+                method: form.method,
+                inputs: inputs,
+                buttons: buttons,
+                html: form.outerHTML.substring(0, 2000)
+            };
+        })()
+    """)
+    _log.info("Cancel form info:\n  action=%s\n  method=%s\n  inputs=%s\n  buttons=%s",
+              form_info.get("action"), form_info.get("method"),
+              form_info.get("inputs"), form_info.get("buttons"))
+
+    if not form_info.get("found"):
+        page.screenshot(path=f"{shot_base}_no_form.png")
+        _log.warning("No form found on cancel page — page HTML: %s", form_info.get("html", "")[:500])
+
     confirmed = False
     try:
-        page.wait_for_selector(
-            "button:has-text('Cancel Event'), input[value='Cancel Event']",
-            timeout=8000
-        )
-        btn = page.query_selector(
-            "button:has-text('Cancel Event'), input[value='Cancel Event']"
-        )
+        btn = page.query_selector("button:has-text('Cancel Event'), input[value='Cancel Event']")
         if btn and btn.is_visible():
-            _log.info("Submitting cancel form")
-            with page.expect_response(
-                lambda r: "Cancel" in r.url or r.request.method == "POST",
-                timeout=15000
-            ) as resp_info:
-                btn.click()
-            resp = resp_info.value
-            _log.info("Cancel response: status=%s url=%s", resp.status, resp.url)
-            page.wait_for_timeout(2000)
+            _log.info("Clicking Cancel Event on full-page form")
+            btn.click()
+            page.wait_for_timeout(5000)
             confirmed = True
+            _log.info("Post-click URL: %s", page.url)
     except Exception as e:
-        _log.warning("Cancel form submit: %s — waiting and assuming complete", e)
-        page.wait_for_timeout(3000)
-        confirmed = True  # verify via grid check below
+        _log.warning("Cancel form submit error: %s", e)
 
     page.screenshot(path=f"{shot_base}_result.png")
 
