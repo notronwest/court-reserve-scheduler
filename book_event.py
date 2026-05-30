@@ -828,62 +828,53 @@ def cancel_occurrence(                  # noqa: C901
                 "screenshot": f"{shot_base}_no_link.png",
                 "error": f"Cancel Date link for occurrence {occurrence_id} not found"}
 
-    # ── Step 3: Navigate directly to the cancel URL as a full page ───────────
-    # The btn-modal pattern loads this URL in a modal via AJAX, but the URL is
-    # a valid standalone page too. Navigating directly avoids jQuery/CSRF issues
-    # with triggering the modal click programmatically.
+    # ── Step 3: Navigate to cancel URL and submit the form directly ──────────
+    # btn-modal loads this URL in an AJAX modal. The URL is also a valid
+    # standalone page — but the "Cancel Event" button is type='button' (AJAX
+    # handler), so clicking it doesn't POST when the page is loaded directly.
+    # Solution: call form.submit() from JavaScript, which performs a real HTTP
+    # POST with all form data (including the pre-checked DeleteReservation
+    # checkbox) and triggers a normal page navigation on completion.
     base = "https://app.courtreserve.com"
     full_url = cancel_href if cancel_href.startswith("http") else f"{base}{cancel_href}"
     _log.info("Navigating to cancel form: %s", full_url)
     page.goto(full_url)
     _page_ready(page)
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(1000)
     page.screenshot(path=f"{shot_base}_cancel_form.png")
 
-    # ── Step 4: Inspect the cancel form and submit ────────────────────────────
-    form_info = page.evaluate("""
+    # Verify the form is present and has a DeleteReservation checkbox
+    form_check = page.evaluate("""
         (function() {
             var form = document.querySelector('form');
-            if (!form) return {found: false, html: document.body.innerHTML.substring(0, 1000)};
-            var inputs = Array.from(form.querySelectorAll('input, select, textarea')).map(function(el) {
-                return {name: el.name, type: el.type, value: el.value, checked: el.checked};
-            });
-            var buttons = Array.from(form.querySelectorAll('button, input[type=submit]')).map(function(b) {
-                return {tag: b.tagName, type: b.type, text: (b.innerText||b.value||'').trim(), name: b.name, value: b.value};
-            });
-            return {
-                found: true,
-                action: form.action,
-                method: form.method,
-                inputs: inputs,
-                buttons: buttons,
-                html: form.outerHTML.substring(0, 2000)
-            };
+            if (!form) return {found: false};
+            var cb = form.querySelector('input[name*="DeleteReservation"]:checked');
+            return {found: true, action: form.action, has_checked_cb: !!cb};
         })()
     """)
-    _log.info("Cancel form info:\n  action=%s\n  method=%s\n  inputs=%s\n  buttons=%s",
-              form_info.get("action"), form_info.get("method"),
-              form_info.get("inputs"), form_info.get("buttons"))
+    _log.info("Cancel form check: %s", form_check)
 
-    if not form_info.get("found"):
+    if not form_check.get("found"):
         page.screenshot(path=f"{shot_base}_no_form.png")
-        _log.warning("No form found on cancel page — page HTML: %s", form_info.get("html", "")[:500])
+        return {"success": False, "method": "cancel",
+                "screenshot": f"{shot_base}_no_form.png",
+                "error": "Cancel form not found on page"}
 
-    confirmed = False
+    # ── Step 4: Submit via form.submit() — real HTTP POST, no JS handler ─────
+    page.evaluate("document.querySelector('form').submit()")
+    _log.info("form.submit() called — waiting for navigation")
+
     try:
-        btn = page.query_selector("button:has-text('Cancel Event'), input[value='Cancel Event']")
-        if btn and btn.is_visible():
-            _log.info("Clicking Cancel Event on full-page form")
-            btn.click()
-            page.wait_for_timeout(5000)
-            confirmed = True
-            _log.info("Post-click URL: %s", page.url)
-    except Exception as e:
-        _log.warning("Cancel form submit error: %s", e)
+        page.wait_for_load_state("domcontentloaded", timeout=10000)
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
 
+    post_url = page.url
+    _log.info("Post-submit URL: %s", post_url)
     page.screenshot(path=f"{shot_base}_result.png")
 
-    # ── Step 4: Reload grid and verify cancellation ───────────────────────────
+    # ── Step 5: Reload grid and verify cancellation ───────────────────────────
     # Cancelled dates remain in the grid with a "Cancelled" status —
     # they don't disappear. Success = the Cancel Date link is gone
     # (replaced by the Cancelled status text) for this occurrence.
