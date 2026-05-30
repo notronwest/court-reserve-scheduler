@@ -804,100 +804,68 @@ def cancel_occurrence(                  # noqa: C901
     page.wait_for_timeout(3000)
     page.screenshot(path=f"{shot_base}_grid.png")
 
-    # ── Step 2: Click the 'Cancel Date' link for this occurrence ──────────────
-    # The link uses data-href (not href/data-remote) and has class btn-modal.
-    # We trigger it via JavaScript to fire the btn-modal handler.
-    cancel_link = page.evaluate(f"""
+    # ── Step 2: Get the cancel URL from the grid ─────────────────────────────
+    cancel_href = page.evaluate(f"""
         (function() {{
-            // Find by data-href containing CancelReservation + occurrence_id
             var link = document.querySelector(
                 'a[data-href*="CancelReservation"][data-href*="{occurrence_id}"]'
             );
-            if (!link) {{
-                // Fallback: title="Cancel Date" in same row as occurrence_id
-                var rows = Array.from(document.querySelectorAll('tr'));
-                for (var row of rows) {{
-                    if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
-                    link = row.querySelector('a[title="Cancel Date"], a.delete');
-                    if (link) break;
-                }}
+            if (link) return link.getAttribute('data-href');
+            var rows = Array.from(document.querySelectorAll('tr'));
+            for (var row of rows) {{
+                if (row.innerHTML.indexOf('{occurrence_id}') === -1) continue;
+                var a = row.querySelector('a[title="Cancel Date"]');
+                if (a) return a.getAttribute('data-href');
             }}
-            if (!link) return {{found: false}};
-
-            var href = link.getAttribute('data-href') || link.getAttribute('href') || '';
-            // Fire the btn-modal click handler (jQuery)
-            if (window.$) {{
-                $(link).trigger('click');
-            }} else {{
-                link.click();
-            }}
-            return {{found: true, href: href, title: link.title, classes: link.className}};
+            return null;
         }})()
     """)
-    _log.info("Cancel Date link: %s", cancel_link)
+    _log.info("Cancel URL: %s", cancel_href)
 
-    if not (isinstance(cancel_link, dict) and cancel_link.get("found")):
+    if not cancel_href:
         page.screenshot(path=f"{shot_base}_no_link.png")
         return {"success": False, "method": "cancel",
                 "screenshot": f"{shot_base}_no_link.png",
-                "error": f"Cancel Date link for occurrence {occurrence_id} not found in grid"}
+                "error": f"Cancel Date link for occurrence {occurrence_id} not found"}
 
-    # ── Step 3: Confirm in the modal ─────────────────────────────────────────
-    # The link opens a modal showing all dates with checkboxes — the target date
-    # is pre-checked. Click "Cancel Event" to confirm.
+    # ── Step 3: Navigate directly to the cancel URL as a full page ───────────
+    # The btn-modal pattern loads this URL in a modal via AJAX, but the URL is
+    # a valid standalone page too. Navigating directly avoids jQuery/CSRF issues
+    # with triggering the modal click programmatically.
+    base = "https://app.courtreserve.com"
+    full_url = cancel_href if cancel_href.startswith("http") else f"{base}{cancel_href}"
+    _log.info("Navigating to cancel form: %s", full_url)
+    page.goto(full_url)
+    _page_ready(page)
     page.wait_for_timeout(1500)
-    page.screenshot(path=f"{shot_base}_confirm.png")
+    page.screenshot(path=f"{shot_base}_cancel_form.png")
 
-    # Wait for the modal
-    try:
-        page.wait_for_selector(".modal.in, #action-modal", timeout=8000)
-    except Exception:
-        _log.warning("No modal appeared — check confirm screenshot")
-    page.wait_for_timeout(500)
-    page.screenshot(path=f"{shot_base}_modal.png")
-
-    # Wait for modal, then click "Cancel Event" and wait for the AJAX response.
-    # btn-modal submits via jQuery AJAX — we intercept the network response to
-    # know when the cancellation has actually completed server-side.
-    try:
-        page.wait_for_selector("button:has-text('Cancel Event')", timeout=8000)
-    except Exception:
-        page.screenshot(path=f"{shot_base}_no_cancel_btn.png")
-        _log.warning("Cancel Event button not found after modal opened")
-
-    page.screenshot(path=f"{shot_base}_modal.png")
-
+    # ── Step 4: Click Cancel Event and wait for the server response ───────────
     confirmed = False
-    btn = page.query_selector("button:has-text('Cancel Event')")
-    if btn and btn.is_visible():
-        _log.info("Clicking Cancel Event (waiting for AJAX response)")
-        try:
-            # Wait for the POST to CancelReservation to complete
+    try:
+        page.wait_for_selector(
+            "button:has-text('Cancel Event'), input[value='Cancel Event']",
+            timeout=8000
+        )
+        btn = page.query_selector(
+            "button:has-text('Cancel Event'), input[value='Cancel Event']"
+        )
+        if btn and btn.is_visible():
+            _log.info("Submitting cancel form")
             with page.expect_response(
-                lambda r: "CancelReservation" in r.url and r.request.method == "POST",
+                lambda r: "Cancel" in r.url or r.request.method == "POST",
                 timeout=15000
             ) as resp_info:
                 btn.click()
             resp = resp_info.value
-            _log.info("CancelReservation response: status=%s url=%s", resp.status, resp.url)
-            confirmed = resp.ok
-        except Exception as e:
-            _log.warning("AJAX wait failed (%s) — trying direct click fallback", e)
-            # Fallback: just click and wait
-            try:
-                btn = page.query_selector("button:has-text('Cancel Event')")
-                if btn:
-                    btn.click()
-                    page.wait_for_timeout(4000)
-                    confirmed = True
-            except Exception as e2:
-                _log.warning("Fallback click also failed: %s", e2)
+            _log.info("Cancel response: status=%s url=%s", resp.status, resp.url)
+            page.wait_for_timeout(2000)
+            confirmed = True
+    except Exception as e:
+        _log.warning("Cancel form submit: %s — waiting and assuming complete", e)
+        page.wait_for_timeout(3000)
+        confirmed = True  # verify via grid check below
 
-    if not confirmed:
-        page.screenshot(path=f"{shot_base}_no_confirm_btn.png")
-        _log.warning("Cancel Event button not found or click failed")
-
-    page.wait_for_timeout(2000)
     page.screenshot(path=f"{shot_base}_result.png")
 
     # ── Step 4: Reload grid and verify cancellation ───────────────────────────
