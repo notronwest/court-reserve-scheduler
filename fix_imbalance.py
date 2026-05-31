@@ -183,24 +183,72 @@ def plan_changes(analyses: list[dict]) -> list[dict]:
                     "description":  f"Cancel extra AI at {ev['start'].strftime('%-I:%M%p')} ({ev['courts']})",
                 })
 
+        # Shared state for both pairing and target-fill passes
+        items_for_day = day["all_items"]
+        _day_dt = datetime.strptime(date_str, "%m/%d/%Y")
+        win = POLICY["operating_windows"]
+        window = win["weekday"] if dow not in ("Saturday", "Sunday") else win["weekend"]
+        win_start_h = int(window["start"].split(":")[0])
+        win_end_h   = int(window["end"].split(":")[0])
+
+        # ── Pair Intermediate with each AI session ────────────────────────────
+        # Every AI slot gets a simultaneous Intermediate on a different court so
+        # members of both levels can play on the same visit.
+        for ai_ev in ai_events:
+            ai_hour = ai_ev["start"].hour
+            # Already an Intermediate at this exact hour?
+            already = any(ie["start"].hour == ai_hour for ie in int_events)
+            if already:
+                continue
+            # Must fit inside the operating window
+            if ai_hour < win_start_h or ai_hour + 2 > win_end_h:
+                log.warning("  %s  AI at %s: Intermediate pairing skipped — outside window",
+                            date_str, ai_ev["start"].strftime("%-I:%M%p"))
+                continue
+            start_dt = _day_dt.replace(hour=ai_hour, minute=0, second=0, microsecond=0)
+            end_dt   = start_dt.replace(hour=ai_hour + 2)
+            court_id = _find_free_court(items_for_day, start_dt, end_dt)
+            if court_id is None:
+                log.warning("  %s  AI at %s: Intermediate pairing skipped — no free court",
+                            date_str, ai_ev["start"].strftime("%-I:%M%p"))
+                continue
+            changes.append({
+                "action":      "book",
+                "date_str":    date_str,
+                "dow":         dow,
+                "event_id":    INT_EVENT_ID,
+                "start_time":  start_dt.strftime("%-I:%M %p"),
+                "end_time":    end_dt.strftime("%-I:%M %p"),
+                "court_id":    court_id,
+                "court_num":   COURTS[str(court_id)]["number"],
+                "description": (
+                    f"Book Intermediate {start_dt.strftime('%-I:%M%p')}–"
+                    f"{end_dt.strftime('%-I:%M%p')} Court #{COURTS[str(court_id)]['number']}"
+                    f" (paired with AI)"
+                ),
+            })
+            # Register booking so subsequent passes respect it
+            items_for_day.append({
+                "EventId":       str(INT_EVENT_ID),
+                "StartDateTime": start_dt.isoformat(),
+                "EndDateTime":   end_dt.isoformat(),
+                "Courts":        f"#{COURTS[str(court_id)]['number']}",
+                "CourtId":       str(court_id),
+                "MembersCount":  0,
+            })
+            int_events.append({"start": start_dt, "members": 0})
+
         # ── Intermediate: add up to target ───────────────────────────────────
         needed = INT_TARGET - len(int_events)
         if needed > 0:
-            items_for_day = day["all_items"]
             # Try candidate start hours
             for hour in INT_TIMES:
                 if needed <= 0:
                     break
-                start_dt = datetime.strptime(date_str, "%m/%d/%Y").replace(hour=hour)
-                end_dt   = start_dt.replace(hour=hour + 2)
-
-                # Check operating window
-                win = POLICY["operating_windows"]
-                window = win["weekday"] if dow not in ("Saturday", "Sunday") else win["weekend"]
-                win_start_h = int(window["start"].split(":")[0])
-                win_end_h   = int(window["end"].split(":")[0])
                 if hour < win_start_h or hour + 2 > win_end_h:
                     continue
+                start_dt = _day_dt.replace(hour=hour, minute=0, second=0, microsecond=0)
+                end_dt   = start_dt.replace(hour=hour + 2)
 
                 # Skip if this time already has an Intermediate session
                 already = any(
@@ -238,6 +286,7 @@ def plan_changes(analyses: list[dict]) -> list[dict]:
                     "CourtId":       str(court_id),
                     "MembersCount":  0,
                 })
+                int_events.append({"start": start_dt, "members": 0})
                 needed -= 1
 
     return changes
