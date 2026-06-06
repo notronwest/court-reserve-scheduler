@@ -44,8 +44,9 @@ CHANNEL_ID  = os.getenv("DISCORD_CHANNEL_ID", "")
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
 POLL_INTERVAL_SECS  = 3
-PENDING_FILE        = Path(__file__).parent / "logs" / "pending_approval.json"
-STATE_FILE          = Path(__file__).parent / "logs" / "listener_state.json"
+PENDING_FILE          = Path(__file__).parent / "logs" / "pending_approval.json"
+PENDING_WAITLIST_FILE = Path(__file__).parent / "logs" / "pending_waitlist.json"
+STATE_FILE            = Path(__file__).parent / "logs" / "listener_state.json"
 BROWSER_LOCK        = Path(__file__).parent / "logs" / "browser.lock"
 LOG_DIR             = Path(__file__).parent / "logs"
 PENDING_EXPIRE_DAYS = 2   # auto-clear approvals older than this
@@ -423,6 +424,80 @@ def _execute_single_booking(params: dict):
     else:
         _post_message(f"❌ Booking failed: {result.get('error', 'unknown error')}")
         log.warning("Ad-hoc booking failed: %s", result.get("error"))
+
+
+# ── !expand execution ─────────────────────────────────────────────────────────
+
+def _execute_expand(res_id: str):
+    """
+    Expand a waitlisted occurrence to an additional court by editing it via
+    the UpdateReservation modal.  Proposal details are read from
+    logs/pending_waitlist.json (written by check_waitlists.py).
+    """
+    from book_event import edit_occurrence_multi_court
+
+    # Load pending waitlist proposals
+    if not PENDING_WAITLIST_FILE.exists():
+        _post_message(f"❌ No pending waitlist expansions found (missing {PENDING_WAITLIST_FILE.name}).")
+        return
+
+    try:
+        pending = json.loads(PENDING_WAITLIST_FILE.read_text())
+    except Exception as e:
+        _post_message(f"❌ Could not read pending waitlist file: {e}")
+        return
+
+    if res_id not in pending:
+        _post_message(
+            f"❌ No pending expansion for res_id `{res_id}`.\n"
+            "Run `make check-waitlists` to refresh the list."
+        )
+        return
+
+    p = pending[res_id]
+
+    if not _acquire_lock():
+        _post_message("⏳ Scheduler is currently running — try `!expand` again in a few minutes.")
+        return
+
+    try:
+        with browser_session(headless=False) as page:
+            result = edit_occurrence_multi_court(
+                page             = page,
+                occurrence_id    = int(res_id),
+                all_court_ids    = p["all_court_ids"],
+                event_id         = p["event_id"],
+                max_participants = p["new_max"],
+            )
+    finally:
+        _release_lock()
+
+    courts_str = "Courts #" + ", #".join(str(n) for n in p["all_court_nums"])
+
+    if result["success"]:
+        # Remove from pending
+        del pending[res_id]
+        PENDING_WAITLIST_FILE.write_text(json.dumps(pending, indent=2))
+
+        _post_embed({"embeds": [{
+            "title": "✅ Court Expanded!",
+            "color": 0x2ECC71,
+            "description": (
+                f"**{p['event_name']}**\n"
+                f"📅  {p['date_text']}  ·  {p['time_text']}\n"
+                f"🎾  {p['courts_text']} → **{courts_str}**\n"
+                f"👥  New max: **{p['new_max']}** players\n\n"
+                f"Waitlisted members will be notified automatically by Court Reserve."
+            ),
+            "footer": {"text": "White Mountain Pickleball • Court Reserve Scheduler"},
+        }]})
+        log.info("Expanded res_id=%s to %s (max %d)", res_id, courts_str, p["new_max"])
+    else:
+        _post_message(
+            f"❌ Expansion failed for `{p['event_name']}` on {p['date_text']}: "
+            f"{result.get('error', 'unknown error')}"
+        )
+        log.warning("Expansion failed for res_id=%s: %s", res_id, result.get("error"))
 
 
 # ── Move execution ────────────────────────────────────────────────────────────
@@ -887,6 +962,15 @@ def main():
                             ),
                             "inline": False,
                         },
+                        {
+                            "name": "!expand <res_id>",
+                            "value": (
+                                "Add a court to a waitlisted event (from a `check-waitlists` alert)\n"
+                                "`!expand 54377320`\n"
+                                "Run `make check-waitlists` to see pending proposals."
+                            ),
+                            "inline": False,
+                        },
                     ],
                     "footer": {"text": f"White Mountain Pickleball • Court Reserve Scheduler • {_HOSTNAME}"},
                 }]})
@@ -904,6 +988,23 @@ def main():
                         "Examples: `!schedule wednesday`  ·  "
                         "`!schedule 4/30`  ·  `!schedule 4/30/2026`"
                     )
+                _save_state()
+                continue
+
+            # ── Check for !expand command ────────────────────────────────────
+            if content.lower().startswith("!expand"):
+                arg = content[7:].strip()
+                if not arg:
+                    _post_message(
+                        "Usage: `!expand <res_id>`\n"
+                        "Run `make check-waitlists` to see pending proposals."
+                    )
+                else:
+                    try:
+                        _execute_expand(arg)
+                    except Exception as exc:
+                        log.error("Expand error: %s", exc, exc_info=True)
+                        _post_message(f"❌ Expand error: {exc}")
                 _save_state()
                 continue
 

@@ -8,7 +8,7 @@ PIP    := venv/bin/pip
 # Default DATE is 14 days out (the scheduler's booking horizon)
 DATE   ?= $(shell python3 -c "from datetime import date,timedelta; d=date.today()+timedelta(14); print(f'{d.month}/{d.day}/{d.year}')")
 
-.PHONY: help setup check test run dry-run show-prompt history logs status restart migrate push uninstall fix-imbalance fix-imbalance-execute checkin-past checkin-past-execute
+.PHONY: help setup check test run dry-run show-prompt history logs status restart migrate push uninstall fix-imbalance fix-imbalance-execute checkin-past checkin-past-execute check-waitlists
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
@@ -31,6 +31,7 @@ help:
 	@echo "    make fix-imbalance-execute Apply the fixes (cancel excess AI, add Intermediate)"
 	@echo "    make checkin-past          Preview check-ins needed for past 90 days"
 	@echo "    make checkin-past-execute  Check in all registered members for past 90 days"
+	@echo "    make check-waitlists       Scan next 7 days for waitlists, post Discord alerts"
 	@echo "    make history         Fetch 3 months of attendance history now"
 	@echo ""
 	@echo "  Setup & maintenance:"
@@ -99,6 +100,9 @@ checkin-past:
 
 checkin-past-execute:
 	$(PYTHON) checkin_past.py --execute
+
+check-waitlists:
+	$(PYTHON) check_waitlists.py
 
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 uninstall:
