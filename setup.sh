@@ -233,6 +233,7 @@ install_plist() {
 install_plist "com.whitemountain.scheduler"
 install_plist "com.whitemountain.fetch-history"
 install_plist "com.whitemountain.listener"
+install_plist "com.whitemountain.check-waitlists"
 
 # ── 7. Court Reserve login (first time) ──────────────────────────────────────
 step "7. Court Reserve browser login"
@@ -282,6 +283,11 @@ fi
 info "Checking history fetcher..."
 if launchctl list | grep -q "com.whitemountain.fetch-history"; then
     ok "History fetcher is loaded (runs Mondays at 7:00 AM)"
+fi
+
+info "Checking waitlist checker..."
+if launchctl list | grep -q "com.whitemountain.check-waitlists"; then
+    ok "Waitlist checker is loaded (runs 9am, 11am, 1pm, 3pm, 5pm daily)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
