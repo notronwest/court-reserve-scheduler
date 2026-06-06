@@ -8,7 +8,7 @@ PIP    := venv/bin/pip
 # Default DATE is 14 days out (the scheduler's booking horizon)
 DATE   ?= $(shell python3 -c "from datetime import date,timedelta; d=date.today()+timedelta(14); print(f'{d.month}/{d.day}/{d.year}')")
 
-.PHONY: help setup check test run dry-run show-prompt history logs status restart migrate push uninstall fix-imbalance fix-imbalance-execute checkin-past checkin-past-execute check-waitlists
+.PHONY: help setup update check test run dry-run show-prompt history logs status restart migrate push uninstall fix-imbalance fix-imbalance-execute checkin-past checkin-past-execute check-waitlists
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 help:
@@ -35,7 +35,8 @@ help:
 	@echo "    make history         Fetch 3 months of attendance history now"
 	@echo ""
 	@echo "  Setup & maintenance:"
-	@echo "    make setup           Run the full setup script"
+	@echo "    make update          Pull latest code + re-run setup (use after any push)"
+	@echo "    make setup           Run the full setup script (first-time install)"
 	@echo "    make check           Health check (env, services, API keys)"
 	@echo "    make test            Live connectivity test (CR login, Discord, Anthropic)"
 	@echo "    make migrate         Create a migration bundle for a new machine"
@@ -46,6 +47,9 @@ help:
 # ── Setup ─────────────────────────────────────────────────────────────────────
 setup:
 	chmod +x setup.sh && ./setup.sh
+
+update:
+	git pull origin main && chmod +x setup.sh && ./setup.sh
 
 check:
 	chmod +x check.sh && ./check.sh
