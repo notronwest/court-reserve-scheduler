@@ -150,3 +150,20 @@ rm -rf /path/to/CourtReserve-Scheduler
 - Daily recommendations: ~$0.001/day (Claude Sonnet)
 - `!book` / `!move` parsing: ~$0.0002/command (Claude Haiku)
 - Approval polling: $0 (plain HTTP, no tokens)
+
+## Backlog
+
+This repo's backlog lives on the **WMPC Roadmap** GitHub Project board
+(Project **#1**, owner `notronwest`) — **not** in a file. This repo's
+stories are its `story`-labeled GitHub Issues, added to the board.
+
+- **Read:** `gh issue list --repo notronwest/CourtReserve-Scheduler --label story`
+  (whole board: `gh project item-list 1 --owner notronwest`).
+- **Write:** create a GitHub Issue with a user story + a scripted,
+  code-free `## Acceptance criteria`, label it `story`, add it to the
+  board, set **Priority**.
+- The Builder agent works the board's **Agent Ready** column into PRs;
+  Ron reviews + merges. Don't reintroduce a `BACKLOG.md` file.
+- **Full convention** (fields, Builder workflow, examples):
+  [`../wmpc-meta/conventions/backlog.md`](../wmpc-meta/conventions/backlog.md)
+  (synced into every repo by `scripts/claude-bootstrap.sh`).
