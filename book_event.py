@@ -163,6 +163,12 @@ def book_event(
         return {"success": True, "dry_run": True, "screenshot": screenshot_path, "error": None}
 
     # ── Submit ────────────────────────────────────────────────────────────────
+    # Court Reserve now shows third-party overlays (NPS surveys, "What's New"
+    # announcements) that can paint on top of the Save button and swallow the
+    # click. Dismiss them right before submitting (they appear on a timer, after
+    # the dismiss call at navigation time).
+    dismiss_popups(page)
+
     # Click the plain "Save" button (not "Save Changes & Register Members")
     save_btn = page.query_selector("button.btn-success:not(:has-text('Register')), button:has-text('Save'):not(:has-text('Register'))")
     if not save_btn:
@@ -171,17 +177,28 @@ def book_event(
     if not save_btn:
         return {"success": False, "error": "Could not find Save button", "screenshot": screenshot_path}
 
+    def _wait_left_form():
+        # Redirect can take several seconds — use wait_for_url to avoid a fixed
+        # sleep that times out before the navigation completes.
+        page.wait_for_url(lambda url: "AddEventOccurrence" not in url, timeout=12000)
+
     try:
-        save_btn.click()
-        # Wait for Court Reserve to redirect away from the add form.
-        # The redirect can take several seconds — use wait_for_url to avoid
-        # a fixed sleep that times out before the navigation completes.
-        page.wait_for_url(
-            lambda url: "AddEventOccurrence" not in url,
-            timeout=12000,
-        )
+        # Dispatch the click via JS so it fires on the button itself even if an
+        # overlay is painted over it — a native/force click would land on the
+        # overlay at those coordinates instead.
+        try:
+            save_btn.scroll_into_view_if_needed(timeout=2000)
+        except Exception:
+            pass
+        save_btn.evaluate("el => el.click()")
+        _wait_left_form()
     except Exception:
-        pass  # timeout = still on form (failure); navigation away = success
+        # Fallback: a real pointer click, in case the JS dispatch was ignored.
+        try:
+            save_btn.click(timeout=5000)
+            _wait_left_form()
+        except Exception:
+            pass  # still on form (failure); navigation away = success
 
     try:
         current_url = page.url

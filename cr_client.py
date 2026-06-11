@@ -51,6 +51,50 @@ def dismiss_popups(page: Page):
     except Exception:
         pass  # No popup — that's fine
 
+    # Third-party overlays (NPS satisfaction surveys, product-tour / "What's New"
+    # announcements) are NOT Bootstrap modals — they live in fixed-position
+    # containers or iframes and can cover the Save button, silently swallowing
+    # the click. Best-effort: click their close controls, then hide whatever
+    # nuisance overlay remains so it can't intercept pointer events.
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    try:
+        killed = page.evaluate(r"""
+        () => {
+            let n = 0;
+            const PHRASES = ['how likely are you', 'recommend us', 'net promoter',
+                             'new updates', "what's new", 'bulk email'];
+            // 1) Click obvious close controls (survey/announcement "✕")
+            document.querySelectorAll(
+                '[aria-label*="close" i],[title*="close" i],.close,' +
+                'button[class*="close" i],span[class*="close" i]'
+            ).forEach(el => {
+                const r = el.getBoundingClientRect();
+                if (r.width && r.height) { try { el.click(); n++; } catch (e) {} }
+            });
+            // 2) Hide leftover fixed/sticky high-z overlays matching a nuisance
+            //    signature, so they can't sit on top of the Save button.
+            for (const el of document.querySelectorAll('div,section,aside,iframe')) {
+                const cs = getComputedStyle(el);
+                if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+                if ((parseInt(cs.zIndex) || 0) < 100) continue;
+                const txt = (el.innerText || '').toLowerCase();
+                const sig = ((el.getAttribute('src') || '') + ' ' +
+                             (el.className || '')).toLowerCase();
+                const hit = PHRASES.some(p => txt.includes(p)) ||
+                    /survey|wootric|delighted|asknicely|beamer|pendo|nps|qualtrics/.test(sig);
+                if (hit) { el.style.setProperty('display', 'none', 'important'); n++; }
+            }
+            return n;
+        }
+        """)
+        if killed:
+            _log.info("Cleared %d third-party overlay element(s)", killed)
+    except Exception:
+        pass
+
 
 def login(page: Page):
     page.goto(LOGIN_URL)
