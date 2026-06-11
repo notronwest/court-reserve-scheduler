@@ -320,6 +320,41 @@ def wait_for_reply(
 
 # ── Results post ─────────────────────────────────────────────────────────────
 
+def _pack_lines_into_fields(name: str, lines: list[str], limit: int = 1024) -> list[dict]:
+    """Pack lines into embed fields, each value <= limit chars (Discord's cap)."""
+    fields, chunk, length = [], [], 0
+    for line in lines:
+        add = len(line) + (1 if chunk else 0)  # +1 for the joining newline
+        if chunk and length + add > limit:
+            fields.append("\n".join(chunk))
+            chunk, length = [line], len(line)
+        else:
+            chunk.append(line)
+            length += add
+    if chunk:
+        fields.append("\n".join(chunk))
+    return [
+        {
+            "name": name if i == 0 else f"{name} (cont.)",
+            "value": val[:limit],   # final safety clamp for a single oversized line
+            "inline": False,
+        }
+        for i, val in enumerate(fields)
+    ]
+
+
+def _post_embed(payload: dict, params: dict):
+    """POST an embed payload, surfacing Discord's error body on failure."""
+    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
+    if resp.status_code >= 400:
+        # Discord's 400 body names the exact offending field — don't swallow it.
+        raise requests.HTTPError(
+            f"{resp.status_code} from Discord webhook: {resp.text[:500]}",
+            response=resp,
+        )
+    return resp
+
+
 def send_booking_results(
     results: list[dict],
     target_date: str,
@@ -349,7 +384,9 @@ def send_booking_results(
             lines.append(f"✅ {emoji} **{time_s}** {court} — {name}")
             n_ok += 1
         else:
-            err = res.get("error") or "unknown error"
+            err = (res.get("error") or "unknown error").replace("\n", " ").strip()
+            if len(err) > 220:           # keep one event from blowing the field budget
+                err = err[:217] + "…"
             lines.append(f"❌ {emoji} **{time_s}** {court} — {name}\n  ↳ _{err}_")
             n_fail += 1
 
@@ -357,11 +394,12 @@ def send_booking_results(
 
     footer_text = f"White Mountain Pickleball • Court Reserve Scheduler • {HOSTNAME}"
 
-    fields = [{
-        "name": f"Results — {n_ok} booked, {n_fail} failed",
-        "value": "\n".join(lines) if lines else "_No events processed._",
-        "inline": False,
-    }]
+    # Discord caps an embed field "value" at 1024 chars — pack lines into as many
+    # fields as needed so a long error message can't 400 the whole embed.
+    fields = _pack_lines_into_fields(
+        f"Results — {n_ok} booked, {n_fail} failed",
+        lines or ["_No events processed._"],
+    )
 
     # If there are failures and retries remain, add retry instructions
     if n_fail > 0 and attempt < max_attempts:
@@ -395,8 +433,7 @@ def send_booking_results(
     }
 
     params = {"wait": "true"} if BOT_TOKEN else {}
-    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
-    resp.raise_for_status()
+    resp = _post_embed(payload, params)
 
     if BOT_TOKEN and resp.status_code == 200:
         return resp.json().get("id")
