@@ -25,6 +25,7 @@ import json
 import time
 import signal
 import logging
+import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -50,6 +51,10 @@ STATE_FILE            = Path(__file__).parent / "logs" / "listener_state.json"
 BROWSER_LOCK        = Path(__file__).parent / "logs" / "browser.lock"
 LOG_DIR             = Path(__file__).parent / "logs"
 PENDING_EXPIRE_DAYS = 2   # auto-clear approvals older than this
+
+# ✅ reaction used for one-tap waitlist-expansion approval
+_CHECK_EMOJI     = "✅"
+_CHECK_EMOJI_ENC = urllib.parse.quote(_CHECK_EMOJI)
 
 HEADERS = {"Authorization": f"Bot {BOT_TOKEN}"}
 
@@ -98,6 +103,8 @@ _state = {
     "pending_book_params":   None,   # parsed booking params awaiting confirm
     "pending_move_msg_id":   None,   # message_id of the !move preview we posted
     "pending_move_params":   None,   # parsed move params awaiting confirm
+    "waitlist_seeded":       [],     # alert msg_ids we've added our ✅ seed to
+    "waitlist_handled":      [],     # alert msg_ids whose expansion we've run
 }
 
 
@@ -155,6 +162,39 @@ def _post_embed(payload):
 def _post_message(text: str):
     """Post a plain text message via webhook."""
     return _post_embed({"content": text})
+
+
+def _add_reaction(message_id: str, emoji_enc: str = _CHECK_EMOJI_ENC) -> bool:
+    """Add the bot's reaction to a message. Returns True on success."""
+    try:
+        r = _session.put(
+            f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages/"
+            f"{message_id}/reactions/{emoji_enc}/@me",
+            timeout=10,
+        )
+        if r.status_code in (200, 204):
+            return True
+        log.warning("Add reaction failed (%s) for msg %s: %s",
+                    r.status_code, message_id, r.text[:200])
+        return False
+    except Exception as e:
+        log.warning("Add reaction error for msg %s: %s", message_id, e)
+        return False
+
+
+def _get_reaction_users(message_id: str, emoji_enc: str = _CHECK_EMOJI_ENC):
+    """Return the list of users who reacted with emoji, or None on error."""
+    try:
+        r = _session.get(
+            f"https://discord.com/api/v10/channels/{CHANNEL_ID}/messages/"
+            f"{message_id}/reactions/{emoji_enc}",
+            params={"limit": 100}, timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        log.warning("Reaction fetch error for msg %s: %s", message_id, e)
+        return None
 
 
 # ── Pending approval helpers ──────────────────────────────────────────────────
@@ -428,37 +468,41 @@ def _execute_single_booking(params: dict):
 
 # ── !expand execution ─────────────────────────────────────────────────────────
 
-def _execute_expand(res_id: str):
+def _execute_expand(res_id: str) -> bool:
     """
     Expand a waitlisted occurrence to an additional court by editing it via
     the UpdateReservation modal.  Proposal details are read from
     logs/pending_waitlist.json (written by check_waitlists.py).
+
+    Returns False only when the browser was locked (a transient condition the
+    caller may retry); returns True for every terminal outcome — success, a
+    real failure, or nothing to do.
     """
     from book_event import edit_occurrence_multi_court
 
     # Load pending waitlist proposals
     if not PENDING_WAITLIST_FILE.exists():
         _post_message(f"❌ No pending waitlist expansions found (missing {PENDING_WAITLIST_FILE.name}).")
-        return
+        return True
 
     try:
         pending = json.loads(PENDING_WAITLIST_FILE.read_text())
     except Exception as e:
         _post_message(f"❌ Could not read pending waitlist file: {e}")
-        return
+        return True
 
     if res_id not in pending:
         _post_message(
             f"❌ No pending expansion for res_id `{res_id}`.\n"
             "Run `make check-waitlists` to refresh the list."
         )
-        return
+        return True
 
     p = pending[res_id]
 
     if not _acquire_lock():
-        _post_message("⏳ Scheduler is currently running — try `!expand` again in a few minutes.")
-        return
+        _post_message("⏳ Scheduler is currently running — try again in a few minutes.")
+        return False
 
     try:
         with browser_session(headless=False) as page:
@@ -498,6 +542,80 @@ def _execute_expand(res_id: str):
             f"{result.get('error', 'unknown error')}"
         )
         log.warning("Expansion failed for res_id=%s: %s", res_id, result.get("error"))
+
+    return True
+
+
+# ── ✅ tap-to-approve for waitlist expansions ──────────────────────────────────
+
+def _process_waitlist_reactions(bot_id: str):
+    """
+    One-tap approval for waitlist expansions.
+
+    check_waitlists.py posts an alert embed and records its message_id in
+    logs/pending_waitlist.json.  Each poll cycle we:
+      1. Seed each alert with a ✅ reaction so approving is a single tap.
+      2. If a non-bot user has tapped ✅ on a seeded alert, run the expansion.
+
+    The `!expand <res_id>` text command remains a fully-supported fallback.
+    """
+    if not bot_id:
+        return   # can't tell our own seed from a human's tap without our id
+    try:
+        pending = (json.loads(PENDING_WAITLIST_FILE.read_text())
+                   if PENDING_WAITLIST_FILE.exists() else {})
+    except Exception:
+        return   # transient read error mid-write — leave state untouched
+
+    # Empty/absent pending falls through to the prune below (which clears the
+    # seeded/handled lists), so they don't grow unbounded across expansions.
+    live_msg_ids = set()
+
+    for res_id, entry in list(pending.items()):
+        mid = entry.get("message_id")
+        if not mid:
+            continue
+        live_msg_ids.add(mid)
+
+        # 1. Seed our ✅ once so the user just taps the existing checkmark.
+        #    If we can't react (permissions/transient), fall through and still
+        #    watch for a ✅ the user adds manually.
+        if mid not in _state["waitlist_seeded"]:
+            if _add_reaction(mid):
+                _state["waitlist_seeded"].append(mid)
+                _save_state()
+                continue   # let the seed land before counting reactors
+
+        if mid in _state["waitlist_handled"]:
+            continue
+
+        # 2. Has anyone other than us tapped ✅?
+        users = _get_reaction_users(mid)
+        if users is None:
+            continue   # transient error — retry next cycle
+        approver = next((u for u in users if u.get("id") != bot_id), None)
+        if not approver:
+            continue
+
+        log.info("Waitlist expansion approved via ✅ by %s — res_id=%s (msg %s)",
+                 approver.get("username", approver.get("id")), res_id, mid)
+        # Mark handled BEFORE executing so a crash-restart won't re-fire.
+        _state["waitlist_handled"].append(mid)
+        _save_state()
+        try:
+            ok = _execute_expand(res_id)
+        except Exception as exc:
+            log.error("Reaction expand error: %s", exc, exc_info=True)
+            _post_message(f"❌ Expand error: {exc}")
+            ok = True   # hard error — don't auto-retry
+        if ok is False:
+            # Browser was locked — allow a retry on the next cycle.
+            _state["waitlist_handled"].remove(mid)
+            _save_state()
+
+    # Prune state to messages still pending so the lists don't grow unbounded.
+    _state["waitlist_seeded"]  = [m for m in _state["waitlist_seeded"]  if m in live_msg_ids]
+    _state["waitlist_handled"] = [m for m in _state["waitlist_handled"] if m in live_msg_ids]
 
 
 # ── Move execution ────────────────────────────────────────────────────────────
@@ -963,11 +1081,11 @@ def main():
                             "inline": False,
                         },
                         {
-                            "name": "!expand <res_id>",
+                            "name": "Court expansion (waitlist alerts)",
                             "value": (
-                                "Add a court to a waitlisted event (from a `check-waitlists` alert)\n"
-                                "`!expand 54377320`\n"
-                                "Run `make check-waitlists` to see pending proposals."
+                                "**Tap the ✅** on a waitlist alert to approve — that's it.\n"
+                                "Or reply `!expand <res_id>` (e.g. `!expand 54377320`).\n"
+                                "Run `make check-waitlists` to refresh pending proposals."
                             ),
                             "inline": False,
                         },
@@ -1105,6 +1223,12 @@ def main():
                         _post_message(f"❌ Booking error: {exc}")
                         _clear_pending()
                 _save_state()
+
+        # ── ✅ tap-to-approve for waitlist expansions ────────────────────────
+        try:
+            _process_waitlist_reactions(bot_id)
+        except Exception as exc:
+            log.error("Waitlist reaction processing error: %s", exc, exc_info=True)
 
         _save_state()
         time.sleep(POLL_INTERVAL_SECS)
