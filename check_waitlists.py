@@ -278,8 +278,13 @@ def build_proposal(alert: dict, page) -> dict | None:
 
 # ── Discord notification ──────────────────────────────────────────────────────
 
-def post_discord_alert(alert: dict, proposal: dict):
-    """Post a waitlist expansion proposal embed to Discord."""
+def post_discord_alert(alert: dict, proposal: dict) -> str | None:
+    """Post a waitlist expansion proposal embed to Discord.
+
+    Posted with ?wait=true so Discord returns the created message; the message
+    id is saved to pending_waitlist.json so the listener can seed a ✅ reaction
+    on it for one-tap approval.  Returns the message id (or None on failure).
+    """
     import requests
 
     confirmed    = alert["registered"] + alert["waitlist"]
@@ -303,7 +308,7 @@ def post_discord_alert(alert: dict, proposal: dict):
         f"📈  New max: **{proposal['new_max']}** "
         f"({proposal['num_courts_after']} courts × {proposal['per_court']} per court)"
         f"{risk}\n\n"
-        f"Reply `!expand {alert['res_id']}` to approve"
+        f"✅  **Tap the checkmark below to approve**  ·  or reply `!expand {alert['res_id']}`"
     )
 
     payload = {"embeds": [{
@@ -314,11 +319,15 @@ def post_discord_alert(alert: dict, proposal: dict):
     }]}
 
     try:
-        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        r = requests.post(WEBHOOK_URL, json=payload, params={"wait": "true"}, timeout=10)
         r.raise_for_status()
-        log.info("  Posted Discord alert for %s res_id=%s", alert["event_name"], alert["res_id"])
+        msg_id = r.json().get("id")
+        log.info("  Posted Discord alert for %s res_id=%s (msg %s)",
+                 alert["event_name"], alert["res_id"], msg_id)
+        return msg_id
     except Exception as e:
         log.warning("  Discord post failed: %s", e)
+        return None
 
 
 # ── Pending state ─────────────────────────────────────────────────────────────
@@ -402,7 +411,7 @@ def main():
             continue
 
         # Post to Discord
-        post_discord_alert(alert, prop)
+        msg_id = post_discord_alert(alert, prop)
 
         # Save to pending file
         pending[alert["res_id"]] = {
@@ -418,6 +427,7 @@ def main():
             "all_court_ids":  prop["all_court_ids"],
             "all_court_nums": prop["all_court_nums"],
             "new_max":     prop["new_max"],
+            "message_id":  msg_id,   # Discord alert msg — listener seeds ✅ here
             "posted_at":   datetime.now().isoformat(),
         }
 
