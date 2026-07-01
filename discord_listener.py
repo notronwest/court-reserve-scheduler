@@ -479,6 +479,7 @@ def _execute_expand(res_id: str) -> bool:
     real failure, or nothing to do.
     """
     from book_event import edit_occurrence_multi_court
+    from cr_client import browser_session
 
     # Load pending waitlist proposals
     if not PENDING_WAITLIST_FILE.exists():
