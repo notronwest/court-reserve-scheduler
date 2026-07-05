@@ -171,6 +171,16 @@ def _system_prompt(policy: dict) -> str:
     sat_thr  = policy["hard_constraints"]["4_required_level_coverage"].get("saturation_threshold", 2)
     tgt_pct  = policy["utilization"]["target_pct"]
     n_courts = policy["utilization"]["baseline_courts"]
+
+    # Time-of-day spread + preference, sourced from policy (not hard-coded)
+    spread   = policy["recommendation_rules"].get("spread_throughout_day", {})
+    bands    = spread.get("time_bands", {})
+    band_str = ", ".join(
+        f"{name} ({b['start']}–{b['end']})" for name, b in bands.items()
+    ) or "morning, midday, afternoon, evening"
+    pref_win = (policy["recommendation_rules"]
+                .get("time_of_day_preference", {})
+                .get("preferred_window", "12:00–17:00"))
     return (
         f"You are the head scheduler for White Mountain Pickleball Club. "
         f"You've been running this club for years and you know your members well.\n\n"
@@ -213,7 +223,13 @@ def _system_prompt(policy: dict) -> str:
         f"- A level already at {sat_thr}+ sessions today is saturated — don't add more\n"
         f"- Fill toward {tgt_pct}% court utilization across {n_courts} courts, "
         f"but never schedule a low-demand slot just to hit a number\n"
-        f"- Spread sessions across the day — avoid stacking the same hour\n"
+        f"- SPREAD ACROSS THE DAY — this is important. The day has these time bands: "
+        f"{band_str}. Give the schedule reach: cover as many bands as the free slots "
+        f"allow BEFORE placing a second session in any single band. Do not front-load "
+        f"the morning and leave the afternoon/evening empty when free slots exist there. "
+        f"If a band has free slots but weak history, a modest session there still beats "
+        f"stacking another morning slot — members can't attend a session that was never offered.\n"
+        f"- When history is equal or absent, prefer the {pref_win} window over early morning\n"
         f"- Prioritize Intermediate (event 1931656): target 2 sessions per day when slots allow — "
         f"Intermediate is under-served because members over-report their level as Advanced Intermediate\n"
         f"- ALWAYS pair Intermediate with Advanced Intermediate: whenever you recommend AI (event 1672774), "
@@ -311,6 +327,51 @@ def _user_prompt(
         courts_str = "  ".join(f"C{c}" for c in sorted(by_time[tkey]))
         lines.append(f"  {tkey}  [{courts_str}]")
     lines.append("")
+
+    # ── Time-band coverage — where the day is already filled vs. still open ─
+    band_defs = (policy["recommendation_rules"]
+                 .get("spread_throughout_day", {})
+                 .get("time_bands", {}))
+    if band_defs:
+        def _band_of(dt: datetime) -> str | None:
+            hm = dt.strftime("%H:%M")
+            for name, b in band_defs.items():
+                if b["start"] <= hm < b["end"]:
+                    return name
+            return None
+
+        # "open" is trustworthy (free_slots already excludes every existing
+        # event). "picks" counts only Pass-0 recs — pre-existing schedule
+        # events aren't enumerated here, so we frame the directive around open
+        # capacity rather than asserting a band is fully uncovered.
+        free_by_band: dict[str, int] = defaultdict(int)
+        for _cn, ss, _se in free_slots:
+            b = _band_of(ss)
+            if b:
+                free_by_band[b] += 1
+        picks_by_band: dict[str, int] = defaultdict(int)
+        for r in pass0_recs:
+            b = _band_of(r.start)
+            if b:
+                picks_by_band[b] += 1
+
+        lines.append("TIME-BAND SPREAD (open = free slots available in this band):")
+        bands_with_room = []
+        for name, b in band_defs.items():
+            free  = free_by_band.get(name, 0)
+            picks = picks_by_band.get(name, 0)
+            if free > 0:
+                bands_with_room.append(name)
+            note = "  ← open, spread here" if free > 0 and picks == 0 else ""
+            lines.append(
+                f"  {name:<9} {b['start']}–{b['end']}:  {free} open slots{note}"
+            )
+        if len(bands_with_room) > 1:
+            lines.append(
+                "→ Give at least one session to each band that has open slots "
+                "before placing a 2nd session in any single band — don't front-load the morning."
+            )
+        lines.append("")
 
     # ── Historical attendance — full profile per level for this day ───────
     full_stats = load_popularity_full()
