@@ -1,6 +1,6 @@
 {
   "meta": {
-    "version": "2026-04-11",
+    "version": "2026-07-06",
     "approved_by": "Club Management",
     "source_document": "Court Reserve Calendar — Business Decisions & Policies",
     "notes": "Machine-readable expression of all business decisions governing automated recommendations and manual management of the court reserve calendar. Edit this file (not the code) when policies change."
@@ -77,6 +77,14 @@
         "end_time": "17:00",
         "courts": 2,
         "max_participants": 10,
+        "level": "Advanced Intermediate"
+      },
+      {
+        "name": "Co-Ed Advanced Intermediate Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "16:00",
+        "end_time": "18:00",
+        "courts": 1,
         "level": "Advanced Intermediate"
       },
       {
