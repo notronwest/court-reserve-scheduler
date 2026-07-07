@@ -47,6 +47,13 @@ log = logging.getLogger(__name__)
 POLICY   = load_policy()
 APPROVED = POLICY["approved_events"]   # str(id) -> {name, level}
 COURTS   = POLICY["courts"]            # str(id) -> {number, label}
+WAITLIST = POLICY.get("waitlist", {})
+
+# Waitlist demand is real, so it may use ALL courts — it is NOT bound by
+# hard_constraint 6 (keep one court free), which governs only speculative
+# recommendations.  Ceiling comes from policy.json (waitlist.max_courts).
+MAX_COURTS       = WAITLIST.get("max_courts", len(COURTS))
+DEFAULT_SCAN_DAYS = WAITLIST.get("scan_days_ahead", 7)
 
 WEBHOOK_URL      = os.getenv("DISCORD_WEBHOOK_URL", "")
 OCCURRENCES_URL  = "https://app.courtreserve.com/Events/Edit/{event_id}?page=occurrences"
@@ -218,8 +225,8 @@ def build_proposal(alert: dict, page) -> dict | None:
     current_ids  = [c for c in current_ids if c]
     num_courts   = len(current_ids) if current_ids else 1
 
-    if num_courts >= 3:
-        log.info("  res_id=%s already at 3 courts — cannot expand", alert["res_id"])
+    if num_courts >= MAX_COURTS:
+        log.info("  res_id=%s already at %d courts — cannot expand", alert["res_id"], MAX_COURTS)
         return None
 
     # Fetch the full day schedule to check court availability
@@ -240,8 +247,8 @@ def build_proposal(alert: dict, page) -> dict | None:
                 if num_str in c_str or cid in c_str:
                     occupied.add(int(cid))
 
-    if len(occupied) >= 3:
-        log.info("  res_id=%s: 3 courts already in use — cannot add another", alert["res_id"])
+    if len(occupied) >= MAX_COURTS:
+        log.info("  res_id=%s: %d courts already in use — cannot add another", alert["res_id"], MAX_COURTS)
         return None
 
     # Find first preferred free court not already hosting this occurrence
@@ -352,8 +359,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Check upcoming events for waitlists and post Discord expansion proposals"
     )
-    parser.add_argument("--days", type=int, default=7,
-                        help="Days ahead to scan (default: 7)")
+    parser.add_argument("--days", type=int, default=DEFAULT_SCAN_DAYS,
+                        help=f"Days ahead to scan (default: {DEFAULT_SCAN_DAYS})")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print proposals without posting to Discord")
     args = parser.parse_args()
