@@ -252,8 +252,8 @@ def _execute_bookings(pending: dict, selected_indices: list):
     Posts results to Discord when done.
     """
     from recommender import Recommendation
-    from cr_client import browser_session, fetch_schedule
-    from book_event import book_event, edit_occurrence_multi_court
+    from courtreserve_api import browser_session, fetch_schedule
+    from courtreserve_api import book_event, edit_occurrence_multi_court
     from discord_notify import LEVEL_EMOJI
 
     recs_raw = pending["recommendations"]
@@ -382,8 +382,8 @@ def _execute_bookings(pending: dict, selected_indices: list):
 def _execute_single_booking(params: dict):
     """Book a single ad-hoc event from a !book command."""
     from recommender import Recommendation, COURTS, APPROVED_EVENTS
-    from cr_client import browser_session
-    from book_event import book_event, edit_occurrence_multi_court
+    from courtreserve_api import browser_session
+    from courtreserve_api import book_event, edit_occurrence_multi_court
 
     target_date = params["date"]
     event_info  = APPROVED_EVENTS.get(str(params["event_id"]), {})
@@ -478,8 +478,8 @@ def _execute_expand(res_id: str) -> bool:
     caller may retry); returns True for every terminal outcome — success, a
     real failure, or nothing to do.
     """
-    from book_event import edit_occurrence_multi_court
-    from cr_client import browser_session
+    from courtreserve_api import edit_occurrence_multi_court
+    from courtreserve_api import browser_session
 
     # Load pending waitlist proposals
     if not PENDING_WAITLIST_FILE.exists():
@@ -626,8 +626,8 @@ def _execute_move(params: dict):
     Find the occurrence on Court Reserve and move it to the new timeslot.
     Fetches the live schedule inside the browser session to get the occurrence_id.
     """
-    from cr_client import browser_session, fetch_schedule
-    from book_event import move_occurrence
+    from courtreserve_api import browser_session, fetch_schedule
+    from courtreserve_api import move_occurrence
     from discord_notify import LEVEL_EMOJI
     from policy_loader import load_policy
 

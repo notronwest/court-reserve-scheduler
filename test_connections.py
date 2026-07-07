@@ -50,7 +50,7 @@ def head(msg):
 head("1. Court Reserve")
 try:
     info("Logging in (this opens a headless browser — takes ~10s)...")
-    from cr_client import browser_session, fetch_schedule
+    from courtreserve_api import browser_session, fetch_schedule
     from datetime import date
     today = date.today()
     date_str = f"{today.month}/{today.day}/{today.year}"

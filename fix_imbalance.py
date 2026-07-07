@@ -26,9 +26,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-from cr_client import browser_session, fetch_schedule
+from courtreserve_api import browser_session, fetch_schedule
 from policy_loader import load_policy
-from book_event import book_event, cancel_occurrence
+from courtreserve_api import book_event, cancel_occurrence
 
 logging.basicConfig(
     level=logging.INFO,

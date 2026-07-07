@@ -33,8 +33,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env", override=True)
 
-from cr_client import browser_session, fetch_schedule
-from book_event import _page_ready
+from courtreserve_api import browser_session, fetch_schedule
+from courtreserve_api import _page_ready
 from policy_loader import load_policy
 
 logging.basicConfig(

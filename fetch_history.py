@@ -13,7 +13,7 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
-from cr_client import browser_session, fetch_schedule
+from courtreserve_api import browser_session, fetch_schedule
 
 HISTORY_DIR = Path(__file__).parent / "history"
 

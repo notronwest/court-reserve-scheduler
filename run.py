@@ -13,9 +13,9 @@ import argparse
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-from cr_client import browser_session, fetch_schedule
+from courtreserve_api import browser_session, fetch_schedule
 from recommender import recommend, APPROVED_EVENTS, COURTS, _overlaps, _parse_court_nums
-from book_event import book_event, fix_event_court, edit_occurrence_multi_court
+from courtreserve_api import book_event, fix_event_court, edit_occurrence_multi_court
 from discord_notify import (
     send_and_wait, maybe_send_fixed_events_reminder, WEBHOOK_URL,
     send_booking_results, wait_for_retry_reply, BOT_TOKEN, CHANNEL_ID,
@@ -33,7 +33,7 @@ def _show_llm_prompt(target_date: str, policy: dict):
     calling the API or booking anything. Useful for debugging recommendations.
     """
     from datetime import datetime as _dt
-    from cr_client import browser_session, fetch_schedule
+    from courtreserve_api import browser_session, fetch_schedule
     from llm_ranker import _system_prompt, _user_prompt
     import llm_ranker
 
