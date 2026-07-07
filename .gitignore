@@ -30,3 +30,9 @@ history/
 # Editor
 .vscode/
 .idea/
+
+# Supabase CLI local cache (machine-local, not source)
+supabase/.temp/
+
+# Temp files (e.g. bootstrap write-then-move leftovers)
+*.tmp
