@@ -214,16 +214,18 @@ def scan_event_waitlists(
     log.info("  grid returned %d occurrence row(s) spanning %s  ·  %d within scan window (%s → %s)  ·  pager: %s",
              len(raw), span, n_future, today.isoformat(), cutoff.isoformat(), scan["pager"])
 
-    # Per-occurrence detail for in-window rows — reveals why a known waitlist is
-    # not detected (raw MaxPeople cell text + whether a res_id was captured).
-    for r in raw:
-        d = _parse_cr_date(r["date_text"])
-        if d and today < d <= cutoff:
-            log.info("    · %s  MaxPeople=%r  res_id=%s  status=%r",
-                     d.isoformat(),
-                     " ".join(r["max_people_text"].split()),
-                     r["res_id"],
-                     r["status"].strip())
+    # Per-occurrence detail for in-window rows (DEBUG only) — raw MaxPeople cell
+    # text + captured res_id. Kept for future debugging of parse/id-capture
+    # issues; silent at the default INFO level.
+    if log.isEnabledFor(logging.DEBUG):
+        for r in raw:
+            d = _parse_cr_date(r["date_text"])
+            if d and today < d <= cutoff:
+                log.debug("    · %s  MaxPeople=%r  res_id=%s  status=%r",
+                          d.isoformat(),
+                          " ".join(r["max_people_text"].split()),
+                          r["res_id"],
+                          r["status"].strip())
 
     alerts = []
     for row in raw:
