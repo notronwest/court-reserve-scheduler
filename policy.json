@@ -231,6 +231,13 @@
     }
   },
 
+  "waitlist": {
+    "scan_days_ahead": 7,
+    "max_courts": 4,
+    "override_keep_one_free": true,
+    "note": "Waitlist expansions represent real, confirmed demand and may use ALL courts (max_courts = 4), overriding hard_constraint 6 (keep one court free). Constraint 6 governs only speculative daily recommendations; when players are actually waitlisted and a court is free, that court should be claimed. check_waitlists.py reads max_courts from here — do not hardcode the ceiling in code."
+  },
+
   "recommendation_rules": {
     "min_recommendations": 5,
     "event_duration_hours": {
