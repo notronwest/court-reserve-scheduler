@@ -154,14 +154,37 @@ def scan_event_waitlists(
                 var el = row.querySelector("td[data-testid='" + testid + "']");
                 return el ? el.textContent.trim() : '';
             }
-            var rows = Array.from(document.querySelectorAll('tr.k-master-row')).map(function(row) {
-                var resId = null;
-                for (var a of row.querySelectorAll('a[onclick]')) {
-                    var m = a.getAttribute('onclick').match(
-                        /revertReservationToSeries\\(([0-9]+)/
-                    );
-                    if (m) { resId = m[1]; break; }
+            // Extract the reservation/occurrence id from whichever attribute is
+            // present. Unmodified series occurrences have no revertReservationToSeries
+            // onclick — their id lives in the UpdateReservation data-remote link
+            // (the same link used to open the expansion modal). Mirror the
+            // multi-strategy capture in book_event.py so full-but-untouched
+            // occurrences aren't dropped.
+            function extractResId(row) {
+                // Strategy 1: data-remote="...UpdateReservation?reservationId=NNN"
+                var drLink = row.querySelector('a[data-remote*="UpdateReservation"]');
+                if (drLink) {
+                    var m = (drLink.getAttribute('data-remote') || '').match(/reservationId=([0-9]+)/);
+                    if (m) return m[1];
                 }
+                // Strategy 2: onclick="revertReservationToSeries(NNN, ...)"
+                var onclickLinks = row.querySelectorAll('a[onclick]');
+                for (var i = 0; i < onclickLinks.length; i++) {
+                    var m2 = (onclickLinks[i].getAttribute('onclick') || '').match(
+                        /revertReservationToSeries\\s*\\(\\s*([0-9]+)/
+                    );
+                    if (m2) return m2[1];
+                }
+                // Strategy 3: legacy href occurrenceId=NNN
+                var hrefLink = row.querySelector('a[href*="occurrenceId"]');
+                if (hrefLink) {
+                    var m3 = (hrefLink.getAttribute('href') || '').match(/occurrenceId=([0-9]+)/);
+                    if (m3) return m3[1];
+                }
+                return null;
+            }
+            var rows = Array.from(document.querySelectorAll('tr.k-master-row')).map(function(row) {
+                var resId = extractResId(row);
                 return {
                     res_id:          resId,
                     date_text:       cell(row, 'Date'),
