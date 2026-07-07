@@ -148,13 +148,13 @@ def scan_event_waitlists(
     today  = date.today()
     cutoff = today + timedelta(days=days_ahead)
 
-    raw = page.evaluate("""
+    scan = page.evaluate("""
         (function() {
             function cell(row, testid) {
                 var el = row.querySelector("td[data-testid='" + testid + "']");
                 return el ? el.textContent.trim() : '';
             }
-            return Array.from(document.querySelectorAll('tr.k-master-row')).map(function(row) {
+            var rows = Array.from(document.querySelectorAll('tr.k-master-row')).map(function(row) {
                 var resId = null;
                 for (var a of row.querySelectorAll('a[onclick]')) {
                     var m = a.getAttribute('onclick').match(
@@ -171,8 +171,25 @@ def scan_event_waitlists(
                     status:          cell(row, 'Status.Name'),
                 };
             });
+            var pagerEl = document.querySelector('.k-pager-info, .k-pager-wrap');
+            var pager = pagerEl ? pagerEl.textContent.trim().replace(/\\s+/g, ' ') : '(no pager)';
+            return { rows: rows, pager: pager };
         })()
     """)
+
+    raw = scan["rows"]
+
+    # ── Diagnostic: what did the grid actually return? ────────────────────────
+    # If future occurrences never appear here, the scan is stuck on the grid's
+    # default page (past/recent dates) and will always report "no waitlists".
+    parsed_dates = sorted(d for d in (_parse_cr_date(r["date_text"]) for r in raw) if d)
+    if parsed_dates:
+        span = f"{parsed_dates[0].isoformat()} → {parsed_dates[-1].isoformat()}"
+        n_future = sum(1 for d in parsed_dates if today < d <= cutoff)
+    else:
+        span, n_future = "(no dated rows)", 0
+    log.info("  grid returned %d occurrence row(s) spanning %s  ·  %d within scan window (%s → %s)  ·  pager: %s",
+             len(raw), span, n_future, today.isoformat(), cutoff.isoformat(), scan["pager"])
 
     alerts = []
     for row in raw:
