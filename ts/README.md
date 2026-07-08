@@ -6,8 +6,12 @@ goes through the **`courtreserve-api` HTTP service** — there is **no Playwrigh
 browser in this repo**, which is what makes it immune to the browser-version drift
 that used to break the Python version.
 
-**Status:** Phase 0 (scaffold) + Phase 1 (CR HTTP client) — done and runnable.
-Recommender, LLM ranking, Discord bot, and the scheduled jobs are the remaining phases.
+**Status:** Phase 0 (scaffold), Phase 1 (CR HTTP client), and Phase 2 (recommender +
+policy + history, rule-based path) — done, with parity tests asserting byte-identical
+output to the Python. LLM ranking, Discord bot, and the scheduled jobs remain.
+
+Phase 1 was verified live: the TS client → local `courtreserve-api` → Court Reserve
+returned the identical schedule the Python browser path did for the same date.
 
 The Python scheduler at the repo root keeps running until the TS version is proven and
 cut over per the plan (parity + shadow-run). Nothing here touches it.
@@ -32,14 +36,27 @@ npm run typecheck
 
 - `src/cr/client.ts` — typed HTTP client for `courtreserve-api` (schedule / book / move / cancel / …).
 - `src/cr/types.ts` — CR payload + request shapes.
+- `src/recommender.ts` — rule-based recommender (Pass 0 fixed events, Pass 1 level
+  coverage, Pass 2 utilization fill). Port of `recommender.py` minus the LLM path.
+- `src/policy.ts` — `policy.json` loader + types.
+- `src/history.ts` — historical popularity scoring (`load_popularity` / `popularity_score`).
+- `src/datetime.ts` — timezone-free datetime + Python-compatible rounding, so date math
+  and stats match the Python exactly.
 - `src/cli.ts` — dev CLI (`health`, `schedule`; more commands per phase).
-- `tests/` — vitest unit tests (mocked).
+- `tests/` — vitest: mocked client tests + **parity tests** (`tests/fixtures/` holds
+  real CR schedule data and Python-generated golden outputs).
+
+## Parity tests
+
+`tests/recommender.parity.test.ts` + `tests/history.parity.test.ts` feed the same
+schedule + policy (+ optional history) to the TS recommender and assert the output
+equals a golden captured from the Python `recommend()`. Fixtures cover real-schedule
+days, empty-schedule full-fill days, and a synthetic-history case where popularity
+changes the placement. Regenerate goldens from the Python if the rules change.
 
 ## What's next (see the plan)
 
-- **Phase 2** — port `recommender` + `policy` + `history` (`src/recommender.ts`,
-  `src/policy.ts`) with **parity tests** asserting the same recommendations as the Python.
-- **Phase 3** — LLM ranker/parser (`@anthropic-ai/sdk`).
+- **Phase 3** — LLM ranker/parser (`@anthropic-ai/sdk`); replaces Pass 1+2 when enabled.
 - **Phase 4** — Discord bot + approval loop (`discord.js`).
 - **Phase 5** — scheduled jobs (`src/jobs/*`) + launchd → node. Needs a `/checkin`
   endpoint added to `courtreserve-api` first.
