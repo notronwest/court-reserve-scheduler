@@ -1,0 +1,23 @@
+{
+  "name": "courtreserve-scheduler-ts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript rewrite of the WMPC Court Reserve scheduler (in progress — see ts/README.md)",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts",
+    "health": "tsx src/cli.ts health",
+    "schedule": "tsx src/cli.ts schedule"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}

@@ -1,0 +1,43 @@
+/**
+ * Court Reserve payload shapes as exposed by the `courtreserve-api` service.
+ * CR's report data is loosely typed, so `ScheduleItem` is intentionally open.
+ */
+export interface ScheduleItem {
+  Id?: number
+  EventId?: number
+  StartDateTime?: string
+  EndDateTime?: string
+  Courts?: string
+  EventName?: string
+  [key: string]: unknown
+}
+
+/** Request bodies mirror courtreserve-api's endpoints (service.py). */
+export interface BookRequest {
+  event_id: string
+  date: string // M/D/YYYY
+  start_time: string // e.g. "2:00 PM"
+  end_time: string
+  court_id: string
+  dry_run?: boolean
+}
+export interface MoveRequest {
+  res_id: string
+  new_date: string
+  new_start: string
+  new_end: string
+}
+export interface CancelRequest {
+  res_id: string
+}
+export interface SetCourtsRequest {
+  res_id: string
+  court_ids: string[]
+  max_people: number
+}
+export interface FixCourtRequest {
+  event_id: string
+  date: string
+  start_time: string
+  court_id: string
+}
