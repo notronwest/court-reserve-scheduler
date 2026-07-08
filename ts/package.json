@@ -12,6 +12,7 @@
     "schedule": "tsx src/cli.ts schedule"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "dotenv": "^16.4.5"
   },
   "devDependencies": {

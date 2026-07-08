@@ -6,12 +6,15 @@ goes through the **`courtreserve-api` HTTP service** — there is **no Playwrigh
 browser in this repo**, which is what makes it immune to the browser-version drift
 that used to break the Python version.
 
-**Status:** Phase 0 (scaffold), Phase 1 (CR HTTP client), and Phase 2 (recommender +
-policy + history, rule-based path) — done, with parity tests asserting byte-identical
-output to the Python. LLM ranking, Discord bot, and the scheduled jobs remain.
+**Status:** Phase 0 (scaffold), Phase 1 (CR HTTP client), Phase 2 (recommender + policy +
+history, rule-based path), and Phase 3 (LLM ranker + command parser) — done. The rule-based
+path has parity tests asserting byte-identical output to the Python; the LLM modules have
+mocked-SDK tests plus a live end-to-end verify. Discord bot and scheduled jobs remain.
 
-Phase 1 was verified live: the TS client → local `courtreserve-api` → Court Reserve
-returned the identical schedule the Python browser path did for the same date.
+Phase 1 was verified live (TS client → local `courtreserve-api` → Court Reserve returned
+the identical schedule the Python browser path did). Phase 3's ranker was verified live
+against the Claude API — a real `book_slots` tool call parsed into valid, approved,
+free-slot bookings covering all five levels.
 
 The Python scheduler at the repo root keeps running until the TS version is proven and
 cut over per the plan (parity + shadow-run). Nothing here touches it.
@@ -39,7 +42,12 @@ npm run typecheck
 - `src/recommender.ts` — rule-based recommender (Pass 0 fixed events, Pass 1 level
   coverage, Pass 2 utilization fill). Port of `recommender.py` minus the LLM path.
 - `src/policy.ts` — `policy.json` loader + types.
-- `src/history.ts` — historical popularity scoring (`load_popularity` / `popularity_score`).
+- `src/history.ts` — historical popularity scoring (`loadPopularity` / `popularityScore`,
+  plus `loadPopularityFull` / `loadTimePatterns` for the LLM prompt).
+- `src/llm/ranker.ts` — LLM Pass 1+2 (`callLlmRanker`): builds the prompt, forces the
+  `book_slots` tool call, and re-validates every booking. Port of `llm_ranker.py`.
+- `src/llm/parser.ts` — `!book` / `!move` natural-language parser (`parseBookCommand` /
+  `parseMoveCommand`), Claude Haiku. Port of `llm_parser.py`.
 - `src/datetime.ts` — timezone-free datetime + Python-compatible rounding, so date math
   and stats match the Python exactly.
 - `src/cli.ts` — dev CLI (`health`, `schedule`; more commands per phase).
@@ -54,9 +62,14 @@ equals a golden captured from the Python `recommend()`. Fixtures cover real-sche
 days, empty-schedule full-fill days, and a synthetic-history case where popularity
 changes the placement. Regenerate goldens from the Python if the rules change.
 
+The LLM modules keep the Python's exact model IDs (`claude-sonnet-4-6` ranker,
+`claude-haiku-4-5` parser) so the TS path can be shadow-run and diffed against the Python
+during cutover; override with `CR_RANKER_MODEL` / `CR_PARSER_MODEL`. Wiring the ranker into
+an async `recommend()` path lands with the CLI/jobs (Phase 5) — `callLlmRanker` already has
+the signature to slot in.
+
 ## What's next (see the plan)
 
-- **Phase 3** — LLM ranker/parser (`@anthropic-ai/sdk`); replaces Pass 1+2 when enabled.
 - **Phase 4** — Discord bot + approval loop (`discord.js`).
 - **Phase 5** — scheduled jobs (`src/jobs/*`) + launchd → node. Needs a `/checkin`
   endpoint added to `courtreserve-api` first.

@@ -11,30 +11,30 @@ import { loadPopularity, popularityScore, type PopularityScores } from './histor
 
 // ── Static configuration (mirrors recommender.py) ────────────────────────────
 
-const COURTS: Record<number, { id: number; label: string }> = {
+export const COURTS: Record<number, { id: number; label: string }> = {
   1: { id: 52349, label: 'Pickleball-Court #1' },
   2: { id: 52350, label: 'Pickleball-Court #2' },
   3: { id: 52351, label: 'Pickleball-Court #3' },
   4: { id: 52352, label: 'Pickleball-Court #4' },
 }
 
-interface ApprovedEvent {
+export interface ApprovedEvent {
   id: number
   name: string
   level: string
 }
 
 // Insertion order matters for stable-sort tie-breaks — keep this list ordered.
-const APPROVED_EVENTS_ORDER: ApprovedEvent[] = [
+export const APPROVED_EVENTS_ORDER: ApprovedEvent[] = [
   { id: 1717147, name: 'Co-Ed Beginner Open Play', level: 'Beginner' },
   { id: 1717131, name: 'Co-Ed Advanced Beginner Open Play', level: 'Advanced Beginner' },
   { id: 1931656, name: 'Co-ed Intermediate Open Play', level: 'Intermediate' },
   { id: 1672774, name: 'Co-ed Advanced Intermediate Open Play', level: 'Advanced Intermediate' },
   { id: 1633147, name: 'Co-ed Advanced Open Play', level: 'Advanced' },
 ]
-const APPROVED_EVENTS = new Map(APPROVED_EVENTS_ORDER.map((e) => [e.id, e]))
+export const APPROVED_EVENTS = new Map(APPROVED_EVENTS_ORDER.map((e) => [e.id, e]))
 
-const LEVEL_ORDER = [
+export const LEVEL_ORDER = [
   'Beginner',
   'Advanced Beginner',
   'Intermediate',
