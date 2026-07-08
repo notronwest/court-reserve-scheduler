@@ -106,6 +106,23 @@ def login(page: Page):
     dismiss_popups(page)  # dismiss any announcement modal shown after login
 
 
+def _use_installed_chrome() -> bool:
+    """Prefer the OS-installed Chrome (channel='chrome') → immune to Playwright
+    package/browser version drift. NB: shutil.which misses macOS (.app bundle).
+    Override with CR_BROWSER_CHANNEL=chromium to force the managed build."""
+    import os, sys, shutil
+    if os.environ.get("CR_BROWSER_CHANNEL", "").lower() == "chromium":
+        return False
+    if shutil.which("google-chrome") or shutil.which("google-chrome-stable") or shutil.which("chrome"):
+        return True
+    if sys.platform == "darwin":
+        for p in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                  os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")):
+            if os.path.exists(p):
+                return True
+    return False
+
+
 @contextmanager
 def browser_session(headless: bool = False):  # headless=True breaks Cloudflare — always use False
     """Context manager that yields a logged-in Playwright page.
@@ -121,15 +138,15 @@ def browser_session(headless: bool = False):  # headless=True breaks Cloudflare 
         with sync_playwright() as p:
             # launch_persistent_context gives an isolated profile — completely
             # separate from the user's normal Chrome windows
-            # Use installed Chrome if available, otherwise fall back to
-            # the playwright-managed Chromium build (also works with stealth).
-            import shutil as _shutil
+            # Prefer the OS-installed Chrome so a Playwright package/browser
+            # version bump can't break launch; fall back to the managed
+            # Chromium build (also works with stealth).
             launch_kwargs = dict(
                 user_data_dir=profile_dir,
                 headless=headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
-            if _shutil.which("google-chrome") or _shutil.which("chrome"):
+            if _use_installed_chrome():
                 launch_kwargs["channel"] = "chrome"
             context = p.chromium.launch_persistent_context(**launch_kwargs)
             page = context.new_page()
