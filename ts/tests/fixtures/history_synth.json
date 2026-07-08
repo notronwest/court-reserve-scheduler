@@ -1,0 +1,37 @@
+[
+  {
+    "EventId": 1931656,
+    "EventName": "Co-ed Intermediate Open Play",
+    "StartDateTime": "2026-06-01T09:00:00",
+    "DayOfTheWeek": "Monday",
+    "MembersCount": 12
+  },
+  {
+    "EventId": 1931656,
+    "EventName": "Co-ed Intermediate Open Play",
+    "StartDateTime": "2026-06-08T09:00:00",
+    "DayOfTheWeek": "Monday",
+    "MembersCount": 10
+  },
+  {
+    "EventId": 1931656,
+    "EventName": "Co-ed Intermediate Open Play",
+    "StartDateTime": "2026-06-15T09:00:00",
+    "DayOfTheWeek": "Monday",
+    "MembersCount": 14
+  },
+  {
+    "EventId": 99999,
+    "EventName": "Co-Ed up to 3.25 Beginner Open Play",
+    "StartDateTime": "2026-06-01T13:00:00",
+    "DayOfTheWeek": "Monday",
+    "MembersCount": 6
+  },
+  {
+    "EventId": 12345,
+    "EventName": "Private Lesson",
+    "StartDateTime": "2026-06-01T10:00:00",
+    "DayOfTheWeek": "Monday",
+    "MembersCount": 4
+  }
+]

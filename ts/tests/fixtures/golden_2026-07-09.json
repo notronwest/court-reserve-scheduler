@@ -1,0 +1,51 @@
+{
+  "date": "7/9/2026",
+  "recs": [
+    {
+      "event_id": 1717131,
+      "event_name": "Co-Ed Advanced Beginner Open Play",
+      "level": "Advanced Beginner",
+      "court_num": 4,
+      "court_id": 52352,
+      "court_label": "Pickleball-Court #4",
+      "extra_court_ids": [],
+      "extra_court_nums": [],
+      "max_participants": 0,
+      "date": "7/9/2026",
+      "start_time": "1:00 PM",
+      "end_time": "3:00 PM"
+    }
+  ],
+  "stats": {
+    "target_date": "7/9/2026",
+    "day_of_week": "Thursday",
+    "existing_court_hours": 22.0,
+    "recommended_court_hours": 2.0,
+    "achieved_court_hours": 24.0,
+    "target_court_hours": 26.4,
+    "achieved_pct": 54.5,
+    "target_pct": 60,
+    "gap_court_hours": 2.4,
+    "gap_pct_points": 5.5,
+    "levels_covered": [
+      "Advanced",
+      "Advanced Beginner",
+      "Advanced Intermediate",
+      "Intermediate"
+    ],
+    "levels_missing": [
+      "Beginner"
+    ],
+    "min_recommendations_met": false,
+    "n_recommendations": 1,
+    "popularity_used": false,
+    "existing_level_counts": {
+      "Beginner": 1,
+      "Advanced Beginner": 1,
+      "Intermediate": 4,
+      "Advanced Intermediate": 3,
+      "Advanced": 3
+    },
+    "rec_source": "rule_based"
+  }
+}
