@@ -120,3 +120,131 @@ export function popularityScore(
 ): number {
   return scores.get(popKey(eventId, dayOfWeek, timeBand(slotStart))) ?? 0
 }
+
+// ── Full stats + time patterns (used by the LLM ranker prompt) ────────────────
+
+export interface PopularityStats {
+  avg: number
+  peak: number
+  sessions: number
+}
+
+export interface PopularityFullEntry {
+  eventId: number
+  dayOfWeek: string
+  band: string
+  stats: PopularityStats
+}
+
+/** Load history → per (event, day, band) avg/peak/session-count. Empty if no file.
+ *  Port of `history_analysis.load_popularity_full`. */
+export function loadPopularityFull(
+  historyPath: string = DEFAULT_HISTORY_PATH,
+): PopularityFullEntry[] {
+  if (!existsSync(historyPath)) return []
+
+  const items = JSON.parse(readFileSync(historyPath, 'utf8')) as HistoryItem[]
+  // Preserve insertion order (mirrors Python dict/defaultdict) for determinism.
+  const buckets = new Map<string, { eventId: number; dayOfWeek: string; band: string; vals: number[] }>()
+
+  for (const item of items) {
+    const eid = canonicalEventId(item.EventId, item.EventName ?? '')
+    if (eid === null) continue
+    const dt = NaiveDateTime.fromISO(item.StartDateTime)
+    const dow = item.DayOfTheWeek || dt.weekdayName()
+    const band = timeBand(dt)
+    const count = Number(item.MembersCount ?? 0) || 0
+    const key = popKey(eid, dow, band)
+    const b = buckets.get(key)
+    if (b) b.vals.push(count)
+    else buckets.set(key, { eventId: eid, dayOfWeek: dow, band, vals: [count] })
+  }
+
+  return [...buckets.values()].map(({ eventId, dayOfWeek, band, vals }) => ({
+    eventId,
+    dayOfWeek,
+    band,
+    stats: {
+      avg: pyRound(vals.reduce((a, b) => a + b, 0) / vals.length, 1),
+      peak: Math.max(...vals),
+      sessions: vals.length,
+    },
+  }))
+}
+
+export interface TimePattern {
+  modalHour: number
+  consistencyPct: number
+  nSessions: number
+  avgAtModal: number
+}
+
+export interface TimePatternEntry {
+  eventId: number
+  dayOfWeek: string
+  pattern: TimePattern
+}
+
+/** Recurring start-time tendencies strong enough to surface. Port of
+ *  `history_analysis.load_time_patterns`. */
+export function loadTimePatterns(
+  historyPath: string = DEFAULT_HISTORY_PATH,
+  minSessions = 3,
+  minConsistency = 0.6,
+): TimePatternEntry[] {
+  if (!existsSync(historyPath)) return []
+
+  const items = JSON.parse(readFileSync(historyPath, 'utf8')) as HistoryItem[]
+  // (eid|dow|hour) → attendance counts, and (eid|dow) → total sessions.
+  const hourCounts = new Map<string, number[]>()
+  const sessionTotals = new Map<string, { eventId: number; dayOfWeek: string; total: number }>()
+
+  for (const item of items) {
+    const eid = canonicalEventId(item.EventId, item.EventName ?? '')
+    if (eid === null) continue
+    const dt = NaiveDateTime.fromISO(item.StartDateTime)
+    const dow = item.DayOfTheWeek || dt.weekdayName()
+    const hour = dt.hour
+    const count = Number(item.MembersCount ?? 0) || 0
+    const hk = `${eid}|${dow}|${hour}`
+    const arr = hourCounts.get(hk)
+    if (arr) arr.push(count)
+    else hourCounts.set(hk, [count])
+    const sk = `${eid}|${dow}`
+    const st = sessionTotals.get(sk)
+    if (st) st.total += 1
+    else sessionTotals.set(sk, { eventId: eid, dayOfWeek: dow, total: 1 })
+  }
+
+  const out: TimePatternEntry[] = []
+  for (const { eventId, dayOfWeek, total } of sessionTotals.values()) {
+    if (total < minSessions) continue
+    // Modal hour: most-frequent start hour; ties resolve to the first inserted
+    // (matches Python max() over the defaultdict's insertion order).
+    let modalHour = -1
+    let modalN = -1
+    for (const [hk, counts] of hourCounts) {
+      const [e, d, h] = hk.split('|')
+      if (Number(e) !== eventId || d !== dayOfWeek) continue
+      if (counts.length > modalN) {
+        modalN = counts.length
+        modalHour = Number(h)
+      }
+    }
+    const consistency = modalN / total
+    if (consistency < minConsistency) continue
+    const modalCounts = hourCounts.get(`${eventId}|${dayOfWeek}|${modalHour}`)!
+    const avgAtModal = modalCounts.reduce((a, b) => a + b, 0) / modalN
+    out.push({
+      eventId,
+      dayOfWeek,
+      pattern: {
+        modalHour,
+        consistencyPct: pyRound(consistency * 100, 0),
+        nSessions: total,
+        avgAtModal: pyRound(avgAtModal, 1),
+      },
+    })
+  }
+  return out
+}

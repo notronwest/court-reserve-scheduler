@@ -90,6 +90,11 @@ export class NaiveDateTime {
     return `${dt.getUTCMonth() + 1}/${dt.getUTCDate()}/${dt.getUTCFullYear()}`
   }
 
+  /** "%H:%M" — 24-hour, zero-padded (e.g. "09:00"). */
+  formatHm(): string {
+    return `${String(this.hour).padStart(2, '0')}:${String(this.minute).padStart(2, '0')}`
+  }
+
   /** "%-I:%M %p" — 12-hour, no leading zero on hour, uppercase AM/PM. */
   formatTime(): string {
     const h24 = this.hour
