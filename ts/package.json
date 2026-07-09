@@ -11,7 +11,9 @@
     "health": "tsx src/cli.ts health",
     "recommend": "tsx src/cli.ts recommend",
     "schedule": "tsx src/cli.ts schedule",
-    "listen": "tsx src/discord/listener.ts"
+    "listen": "tsx src/discord/listener.ts",
+    "fetch-history": "tsx src/jobs/fetchHistory.ts",
+    "fix-imbalance": "tsx src/jobs/fixImbalance.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
