@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.whitemountain.fetch-history</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/notronwest/data/web/wmpc/projects/court-reserve-scheduler/ts/ops/run-fetch-history.sh</string>
+    </array>
+
+    <!-- Every Monday at 7:00 AM (Weekday 2 = Monday). -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>2</integer>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_history.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_history_err.log</string>
+</dict>
+</plist>

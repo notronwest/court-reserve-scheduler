@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.whitemountain.scheduler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/notronwest/data/web/wmpc/projects/court-reserve-scheduler/ts/ops/run-scheduler.sh</string>
+    </array>
+
+    <!-- Daily at 8:00 AM. RunAtLoad off so a reload doesn't fire an extra run. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_scheduler.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_scheduler_err.log</string>
+</dict>
+</plist>
