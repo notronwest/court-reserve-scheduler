@@ -9,7 +9,8 @@
  */
 import os from 'node:os'
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { CourtReserveClient } from '../cr/client'
 import { loadPolicy, type Policy } from '../policy'
 import { parseBookCommand, parseMoveCommand } from '../llm/parser'
@@ -505,15 +506,22 @@ function errMsg(e: unknown): string {
 // ── Wiring + main loop ─────────────────────────────────────────────────────────
 
 function defaultSpawnSchedule(dateStr: string, log: (m: string) => void): void {
+  // Default: run the TS scheduler CLI (generate → post → save pending). Override
+  // with CR_SCHEDULE_CMD (the date is appended as the last arg).
   const cmd = process.env.CR_SCHEDULE_CMD
-  if (!cmd) {
-    log(`CR_SCHEDULE_CMD unset — cannot run scheduler for ${dateStr}. (Phase 5 wires the CLI.)`)
-    return
+  let bin: string
+  let args: string[]
+  if (cmd) {
+    ;[bin, ...args] = cmd.split(/\s+/)
+    args = [...args, dateStr]
+  } else {
+    const cliPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'cli.ts')
+    bin = 'npx'
+    args = ['tsx', cliPath, 'schedule', dateStr]
   }
-  const [bin, ...args] = cmd.split(/\s+/)
-  const child = spawn(bin, [...args, dateStr], { detached: true, stdio: 'ignore' })
+  const child = spawn(bin, args, { detached: true, stdio: 'ignore' })
   child.unref()
-  log(`Scheduler spawned (${cmd} ${dateStr}), pid=${child.pid}`)
+  log(`Scheduler spawned (${bin} ${args.join(' ')}), pid=${child.pid}`)
 }
 
 export function buildCtx(overrides: Partial<ListenerCtx> = {}): ListenerCtx {

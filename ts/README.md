@@ -102,8 +102,22 @@ State files (`pending_approval.json`, `listener_state.json`, `pending_waitlist.j
 to `../logs` so the TS listener shadow-runs against the same run.py output; override with
 `CR_LOGS_DIR`.
 
+## Scheduler CLI (Phase 5, in progress)
+
+```bash
+npm run recommend 7/22/2026 --llm   # compute + print recs (no Discord) — great for shadow-diff
+npm run schedule 7/22/2026          # generate → post to Discord → save pending_approval.json
+npm run schedule 7/22/2026 -- --dry-run   # preview embed, no pending saved
+```
+
+`recommendLlm` (recommender.ts) replaces Pass 1+2 with the Claude `book_slots` ranker and
+falls back to the rule-based passes if the call throws — the sync `recommend()` (rule-based,
+parity-tested) is unchanged; both share setup + Pass 0 via `buildContext`. The listener's
+`!schedule` now spawns this CLI by default (retiring the Python `run.py` bridge).
+
 ## What's next (see the plan)
 
-- **Phase 5** — scheduled jobs (`src/jobs/*`) + launchd → node. Needs a `/checkin`
-  endpoint added to `courtreserve-api` first. Also add a court-aware `/move` (or `/reschedule`).
+- **Phase 5 (remaining)** — the scheduled jobs: `fetchHistory`, `checkWaitlists`, `checkinPast`
+  (needs `/checkin`), `fixImbalance`, and the launchd plists → `node`. See issue #21 for the
+  `courtreserve-api` endpoints (`/checkin`, court-aware `/move`).
 - **Phase 6** — shadow-run beside the Python, then cut over job-by-job and delete the Python.

@@ -9,6 +9,7 @@
     "test": "vitest run",
     "cli": "tsx src/cli.ts",
     "health": "tsx src/cli.ts health",
+    "recommend": "tsx src/cli.ts recommend",
     "schedule": "tsx src/cli.ts schedule",
     "listen": "tsx src/discord/listener.ts"
   },
