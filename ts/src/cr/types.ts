@@ -41,3 +41,16 @@ export interface FixCourtRequest {
   start_time: string
   court_id: string
 }
+
+/**
+ * Normalized result of a CR mutation (book / move / setCourts). Verified against
+ * the live `courtreserve-api` (`courtreserve_api/booking.py`): `/book` returns the
+ * `book_event` dict `{success, occurrence_id, error, …}` and `/events/courts`
+ * returns `edit_occurrence_multi_court` `{success, error, …}`. `normalizeCrResult`
+ * (execute.ts) coerces those (plus tolerant aliases) into this shape.
+ */
+export interface CrActionResult {
+  success: boolean
+  occurrence_id?: number
+  error?: string
+}
