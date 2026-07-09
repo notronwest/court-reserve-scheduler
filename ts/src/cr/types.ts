@@ -43,11 +43,11 @@ export interface FixCourtRequest {
 }
 
 /**
- * Normalized result of a CR mutation (book / move / setCourts). The service
- * wraps the Python `book_event` / `move_occurrence` functions, which return
- * `{success, occurrence_id?, error?}`; `normalizeCrResult` (execute.ts) coerces
- * that (and a few tolerant aliases) into this shape. Confirm the exact service
- * contract during the first live test-channel run.
+ * Normalized result of a CR mutation (book / move / setCourts). Verified against
+ * the live `courtreserve-api` (`courtreserve_api/booking.py`): `/book` returns the
+ * `book_event` dict `{success, occurrence_id, error, …}` and `/events/courts`
+ * returns `edit_occurrence_multi_court` `{success, error, …}`. `normalizeCrResult`
+ * (execute.ts) coerces those (plus tolerant aliases) into this shape.
  */
 export interface CrActionResult {
   success: boolean

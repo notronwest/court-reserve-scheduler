@@ -93,9 +93,10 @@ Design notes / deliberate deviations from the plan:
   Phase 5 item.
 - **`!schedule`** spawns `CR_SCHEDULE_CMD` (date appended). Until Phase 5 wires the TS
   scheduler, leave it unset (logs + no-ops) or point it at the Python during cutover.
-- CR mutation responses are normalized (`normalizeCrResult`) assuming the service returns the
-  Python `{success, occurrence_id?, error?}` — **confirm against the live service on the first
-  test-channel run.**
+- CR mutation responses are normalized (`normalizeCrResult`). **Verified** against the live
+  `courtreserve-api` (`booking.py`): `/book` → `{success, occurrence_id, error}`, `/events/courts`
+  → `{success, error}`. A read-only `/schedule` fetch through the TS client against the running
+  service also returned the real Court Reserve schedule.
 
 State files (`pending_approval.json`, `listener_state.json`, `pending_waitlist.json`) default
 to `../logs` so the TS listener shadow-runs against the same run.py output; override with
