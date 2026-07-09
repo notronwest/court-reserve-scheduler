@@ -7,9 +7,9 @@ browser in this repo**, which is what makes it immune to the browser-version dri
 that used to break the Python version.
 
 **Status:** Phase 0 (scaffold), Phase 1 (CR HTTP client), Phase 2 (recommender + policy +
-history, rule-based path), and Phase 3 (LLM ranker + command parser) — done. The rule-based
-path has parity tests asserting byte-identical output to the Python; the LLM modules have
-mocked-SDK tests plus a live end-to-end verify. Discord bot and scheduled jobs remain.
+history, rule-based path), Phase 3 (LLM ranker + command parser), and Phase 4 (Discord
+listener) — done. The rule-based path has parity tests asserting byte-identical output to
+the Python; the LLM + Discord modules have mocked tests. Scheduled jobs (Phase 5) remain.
 
 Phase 1 was verified live (TS client → local `courtreserve-api` → Court Reserve returned
 the identical schedule the Python browser path did). Phase 3's ranker was verified live
@@ -51,6 +51,11 @@ npm run typecheck
 - `src/datetime.ts` — timezone-free datetime + Python-compatible rounding, so date math
   and stats match the Python exactly.
 - `src/cli.ts` — dev CLI (`health`, `schedule`; more commands per phase).
+- `src/discord/` — the persistent listener (Phase 4). `rest.ts` (REST polling — no
+  gateway, no privileged intent), `notify.ts` (embeds + reply parsers, port of
+  `discord_notify.py`), `state.ts` (listener/pending files), `execute.ts` (book/move/expand
+  via `courtreserve-api`, the layer that was Playwright in Python), `listener.ts` (routing +
+  poll loop, port of `discord_listener.py`).
 - `tests/` — vitest: mocked client tests + **parity tests** (`tests/fixtures/` holds
   real CR schedule data and Python-generated golden outputs).
 
@@ -68,9 +73,36 @@ during cutover; override with `CR_RANKER_MODEL` / `CR_PARSER_MODEL`. Wiring the 
 an async `recommend()` path lands with the CLI/jobs (Phase 5) — `callLlmRanker` already has
 the signature to slot in.
 
+## Discord listener (Phase 4)
+
+```bash
+cp .env.template .env    # set DISCORD_BOT_TOKEN + DISCORD_WEBHOOK_URL; CHANNEL_ID
+                         # defaults to the TEST channel
+npm run listen           # start the persistent listener (REST polling)
+```
+
+Design notes / deliberate deviations from the plan:
+- **REST polling, not `discord.js` gateway.** Reading channel history over REST needs only
+  "Read Message History" — **not** the privileged `MESSAGE_CONTENT` gateway intent — so the
+  bot works with zero portal toggles, matching the Python. Only `rest.ts` + the loop change
+  if we later want a gateway.
+- **No browser lock.** CR actions are HTTP calls to the single `courtreserve-api` process,
+  which owns the one browser and serializes them; the Python `browser.lock` is gone.
+- **`/move` changes time only** (the endpoint takes no court). A requested court change is
+  surfaced in the result but not applied — safe for a live system; a proper endpoint is a
+  Phase 5 item.
+- **`!schedule`** spawns `CR_SCHEDULE_CMD` (date appended). Until Phase 5 wires the TS
+  scheduler, leave it unset (logs + no-ops) or point it at the Python during cutover.
+- CR mutation responses are normalized (`normalizeCrResult`) assuming the service returns the
+  Python `{success, occurrence_id?, error?}` — **confirm against the live service on the first
+  test-channel run.**
+
+State files (`pending_approval.json`, `listener_state.json`, `pending_waitlist.json`) default
+to `../logs` so the TS listener shadow-runs against the same run.py output; override with
+`CR_LOGS_DIR`.
+
 ## What's next (see the plan)
 
-- **Phase 4** — Discord bot + approval loop (`discord.js`).
 - **Phase 5** — scheduled jobs (`src/jobs/*`) + launchd → node. Needs a `/checkin`
-  endpoint added to `courtreserve-api` first.
+  endpoint added to `courtreserve-api` first. Also add a court-aware `/move` (or `/reschedule`).
 - **Phase 6** — shadow-run beside the Python, then cut over job-by-job and delete the Python.

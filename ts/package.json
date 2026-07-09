@@ -9,7 +9,8 @@
     "test": "vitest run",
     "cli": "tsx src/cli.ts",
     "health": "tsx src/cli.ts health",
-    "schedule": "tsx src/cli.ts schedule"
+    "schedule": "tsx src/cli.ts schedule",
+    "listen": "tsx src/discord/listener.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

@@ -41,3 +41,16 @@ export interface FixCourtRequest {
   start_time: string
   court_id: string
 }
+
+/**
+ * Normalized result of a CR mutation (book / move / setCourts). The service
+ * wraps the Python `book_event` / `move_occurrence` functions, which return
+ * `{success, occurrence_id?, error?}`; `normalizeCrResult` (execute.ts) coerces
+ * that (and a few tolerant aliases) into this shape. Confirm the exact service
+ * contract during the first live test-channel run.
+ */
+export interface CrActionResult {
+  success: boolean
+  occurrence_id?: number
+  error?: string
+}
