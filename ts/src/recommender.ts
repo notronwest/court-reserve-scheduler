@@ -8,6 +8,8 @@
 import { NaiveDateTime, overlaps, pyRound } from './datetime'
 import type { Policy } from './policy'
 import { loadPopularity, popularityScore, type PopularityScores } from './history'
+// Type-only import — no runtime cycle (ranker.ts imports values from here).
+import type { LlmRankerInput } from './llm/ranker'
 
 // ── Static configuration (mirrors recommender.py) ────────────────────────────
 
@@ -150,12 +152,64 @@ interface Slot {
 
 // ── Main recommender ──────────────────────────────────────────────────────────
 
+/**
+ * Shared recommender state after setup + Pass 0 (fixed events). Both the
+ * rule-based tail (`applyRuleBasedPasses`) and the LLM tail (`recommendLlm`)
+ * operate on this, so the two paths share identical setup/Pass-0 logic — exactly
+ * as the Python `recommend()` branches internally on `llm`.
+ */
+export interface RecoContext {
+  policy: Policy
+  td: NaiveDateTime
+  dateStr: string
+  dayName: string
+  nCourts: number
+  winHours: number
+  existingCourtHours: number
+  targetCourtHours: number
+  neededCourtHours: number
+  minGapHours: number
+  saturationThreshold: number
+  popSize: number
+  recommendations: Recommendation[]
+  used: Slot[]
+  eventCounts: Map<number, number>
+  levelCounts: Record<string, number>
+  levelsCovered: Set<string>
+  freeSlots: Slot[]
+  maxOccFor: (eid: number) => number
+  pop: (eid: number, slotStart: NaiveDateTime) => number
+  timePref: (slotStart: NaiveDateTime) => number
+  recFree: (courtNum: number, ss: NaiveDateTime, se: NaiveDateTime) => boolean
+  eventGapOk: (eid: number, ss: NaiveDateTime, se: NaiveDateTime) => boolean
+  add: (
+    eid: number,
+    cn: number,
+    ss: NaiveDateTime,
+    se: NaiveDateTime,
+    extraCourtNums?: number[],
+    maxParticipants?: number,
+  ) => void
+}
+
+/** Sync rule-based recommender — Pass 0 + rule-based Pass 1 + Pass 2. Unchanged behaviour. */
 export function recommend(
   scheduleItems: ScheduleItem[],
   targetDate: string,
   policy: Policy,
   opts: { popularity?: PopularityScores } = {},
 ): { recommendations: Recommendation[]; stats: Stats } {
+  const ctx = buildContext(scheduleItems, targetDate, policy, opts)
+  applyRuleBasedPasses(ctx)
+  return finalize(ctx, 'rule_based')
+}
+
+function buildContext(
+  scheduleItems: ScheduleItem[],
+  targetDate: string,
+  policy: Policy,
+  opts: { popularity?: PopularityScores } = {},
+): RecoContext {
   const td = NaiveDateTime.parseDate(targetDate)
   const dateStr = td.formatYmd()
   const dayName = td.weekdayName()
@@ -458,10 +512,26 @@ export function recommend(
     }
   }
 
-  // ── Pass 1: ensure all 5 levels are represented ─────────────────────────────
   const saturationThreshold =
     policy.hard_constraints['4_required_level_coverage'].saturation_threshold ?? 2
 
+  return {
+    policy, td, dateStr, dayName, nCourts, winHours,
+    existingCourtHours, targetCourtHours, neededCourtHours,
+    minGapHours, saturationThreshold, popSize: popScores.size,
+    recommendations, used, eventCounts, levelCounts, levelsCovered, freeSlots,
+    maxOccFor, pop, timePref, recFree, eventGapOk, add,
+  }
+}
+
+/** Rule-based Pass 1 (level coverage) + Pass 2 (utilization fill). Mutates ctx. */
+export function applyRuleBasedPasses(ctx: RecoContext): void {
+  const {
+    freeSlots, eventCounts, levelCounts, levelsCovered, saturationThreshold,
+    maxOccFor, recFree, eventGapOk, pop, timePref, add, neededCourtHours, used,
+  } = ctx
+
+  // ── Pass 1: ensure all 5 levels are represented ─────────────────────────────
   for (const level of LEVEL_ORDER) {
     if (levelsCovered.has(level)) continue
     if (saturationThreshold > 0 && (levelCounts[level] ?? 0) >= saturationThreshold) {
@@ -518,11 +588,21 @@ export function recommend(
     add(eid, cn, ss, se)
     remainingNeeded -= slotHrs
   }
+}
+
+/** Sort recommendations and compute the stats block. `recSource` tags provenance. */
+function finalize(
+  ctx: RecoContext,
+  recSource: 'rule_based' | 'llm' | 'fallback',
+): { recommendations: Recommendation[]; stats: Stats } {
+  const {
+    recommendations, policy, td, dayName, existingCourtHours, targetCourtHours,
+    nCourts, winHours, levelsCovered, levelCounts, popSize,
+  } = ctx
 
   // Sort by time, then court
   recommendations.sort((a, b) => (a.start.ms - b.start.ms) || (a.court_num - b.court_num))
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
   const recHrs = (r: Recommendation): number =>
     r.end.diffHours(r.start) * (1 + r.extra_court_ids.length)
 
@@ -546,10 +626,67 @@ export function recommend(
     min_recommendations_met:
       recommendations.length >= policy.recommendation_rules.min_recommendations,
     n_recommendations: recommendations.length,
-    popularity_used: popScores.size > 0,
+    popularity_used: popSize > 0,
     existing_level_counts: levelCounts,
-    rec_source: 'rule_based',
+    rec_source: recSource,
   }
 
   return { recommendations, stats }
+}
+
+// ── LLM path: Pass 0 + Claude ranker (replaces Pass 1+2), rule-based fallback ──
+
+export interface RecommendLlmOpts {
+  popularity?: PopularityScores
+  historyPath?: string
+  apiKey?: string
+  /** Injectable Anthropic-like client for tests. */
+  client?: LlmRankerInput['client']
+}
+
+/**
+ * Async recommender that replaces Pass 1+2 with the Claude `book_slots` ranker,
+ * re-validating each returned booking, and falls back to the rule-based passes if
+ * the LLM call throws. Port of `recommend(..., llm=True)`.
+ */
+export async function recommendLlm(
+  scheduleItems: ScheduleItem[],
+  targetDate: string,
+  policy: Policy,
+  opts: RecommendLlmOpts = {},
+): Promise<{ recommendations: Recommendation[]; stats: Stats }> {
+  const ctx = buildContext(scheduleItems, targetDate, policy, { popularity: opts.popularity })
+
+  try {
+    const { callLlmRanker } = await import('./llm/ranker') // local import avoids a static cycle
+    const currentFree = ctx.freeSlots.filter((s) => ctx.recFree(s.cn, s.ss, s.se))
+    const llmRecs = await callLlmRanker({
+      pass0Recs: [...ctx.recommendations],
+      freeSlots: currentFree,
+      policy,
+      dateStr: ctx.dateStr,
+      dayName: ctx.dayName,
+      eventCounts: new Map(ctx.eventCounts),
+      levelCounts: { ...ctx.levelCounts },
+      targetCourtHours: ctx.targetCourtHours,
+      existingCourtHours: ctx.existingCourtHours,
+      historyPath: opts.historyPath,
+      apiKey: opts.apiKey,
+      client: opts.client,
+    })
+    for (const rec of llmRecs) {
+      // Re-validate before committing — guard against hallucinations.
+      if (
+        ctx.recFree(rec.court_num, rec.start, rec.end) &&
+        (ctx.eventCounts.get(rec.event_id) ?? 0) < ctx.maxOccFor(rec.event_id) &&
+        ctx.eventGapOk(rec.event_id, rec.start, rec.end)
+      ) {
+        ctx.add(rec.event_id, rec.court_num, rec.start, rec.end)
+      }
+    }
+    return finalize(ctx, 'llm')
+  } catch {
+    applyRuleBasedPasses(ctx)
+    return finalize(ctx, 'fallback')
+  }
 }
