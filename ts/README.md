@@ -115,9 +115,27 @@ falls back to the rule-based passes if the call throws — the sync `recommend()
 parity-tested) is unchanged; both share setup + Pass 0 via `buildContext`. The listener's
 `!schedule` now spawns this CLI by default (retiring the Python `run.py` bridge).
 
+## Scheduled jobs (`src/jobs/`)
+
+```bash
+npm run fetch-history            # last 3 months → history/history_{date}.json + history_latest.json
+npm run fetch-history -- --months 1
+npm run fix-imbalance -- --days 14            # dry run: plan AI/Intermediate rebalance
+npm run fix-imbalance -- --days 14 --execute  # apply (book/cancel via courtreserve-api)
+```
+
+- **`fetchHistory`** — port of `fetch_history.py`. `/schedule` for the window → datestamped
+  archive + `history_latest.json`, prunes archives >60 days.
+- **`fixImbalance`** — port of `fix_imbalance.py`. Keeps ≤1 Advanced Intermediate/day (never
+  cancels one with registered members), pairs Intermediate with each AI, tops Intermediate to
+  target. `planChanges` is pure + unit-tested; `--execute` books/cancels via HTTP.
+
+Both use only existing endpoints (`/schedule`, `/book`, `/cancel`).
+
 ## What's next (see the plan)
 
-- **Phase 5 (remaining)** — the scheduled jobs: `fetchHistory`, `checkWaitlists`, `checkinPast`
-  (needs `/checkin`), `fixImbalance`, and the launchd plists → `node`. See issue #21 for the
-  `courtreserve-api` endpoints (`/checkin`, court-aware `/move`).
+- **Phase 5 (remaining)** — `checkWaitlists` + `checkinPast` are **blocked on new
+  `courtreserve-api` endpoints** (issue #21): `/schedule` exposes `MembersCount` but no
+  MaxPeople/waitlist, so waitlist detection needs a grid-scanning `/waitlists` endpoint, and
+  check-in needs `/checkin`. Then the launchd plists → `node`.
 - **Phase 6** — shadow-run beside the Python, then cut over job-by-job and delete the Python.
