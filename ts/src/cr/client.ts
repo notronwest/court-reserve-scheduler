@@ -6,6 +6,8 @@ import type {
   SetCourtsRequest,
   FixCourtRequest,
   WaitlistOccurrence,
+  CheckinCandidate,
+  CheckinResult,
 } from './types'
 
 /**
@@ -35,6 +37,21 @@ export class CourtReserveClient {
     const q = new URLSearchParams({ event_ids: eventIds.join(','), days: String(days) })
     const data = await this.request<{ items: WaitlistOccurrence[] }>('GET', `/waitlists?${q}`)
     return data.items
+  }
+
+  /** Past occurrences with registrants that may need check-in (read-only). */
+  async checkinScan(eventIds: number[], daysBack: number): Promise<CheckinCandidate[]> {
+    const q = new URLSearchParams({ event_ids: eventIds.join(','), days_back: String(daysBack) })
+    const data = await this.request<{ items: CheckinCandidate[] }>('GET', `/checkin/scan?${q}`)
+    return data.items
+  }
+
+  /** Check in every not-yet-checked-in registrant for one occurrence (mutating). */
+  checkin(eventId: number, resId: string): Promise<CheckinResult> {
+    return this.request<CheckinResult>('POST', '/checkin', {
+      event_id: String(eventId),
+      res_id: String(resId),
+    })
   }
 
   book(req: BookRequest): Promise<unknown> {
