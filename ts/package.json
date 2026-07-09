@@ -14,7 +14,8 @@
     "listen": "tsx src/discord/listener.ts",
     "fetch-history": "tsx src/jobs/fetchHistory.ts",
     "fix-imbalance": "tsx src/jobs/fixImbalance.ts",
-    "check-waitlists": "tsx src/jobs/checkWaitlists.ts"
+    "check-waitlists": "tsx src/jobs/checkWaitlists.ts",
+    "checkin-past": "tsx src/jobs/checkinPast.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

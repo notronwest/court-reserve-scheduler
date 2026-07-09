@@ -134,8 +134,13 @@ npm run fix-imbalance -- --days 14 --execute  # apply (book/cancel via courtrese
   court is available via `/schedule`, posts a Discord alert per proposal, and writes
   `pending_waitlist.json` for the listener's ✅ / `!expand`. Needs courtreserve-api's `/waitlists`
   endpoint (`buildProposal`/`buildAlertEmbed` are pure + unit-tested).
+- **`checkinPast`** (`npm run checkin-past -- --days 90 [--execute] [--event <id>]`) — port of
+  `checkin_past.py`. Scans past occurrences with registrants via `GET /checkin/scan`; with
+  `--execute` checks each in via `POST /checkin`. Dry-run by default. Needs courtreserve-api's
+  `/checkin` endpoints.
 
-`fetchHistory` + `fixImbalance` use only existing endpoints; `checkWaitlists` needs `/waitlists`.
+`fetchHistory` + `fixImbalance` use only existing endpoints; `checkWaitlists` needs
+`/waitlists`; `checkinPast` needs `/checkin/scan` + `/checkin`.
 
 ## What's next (see the plan)
 

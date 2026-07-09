@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { fetchHistory, pruneOld } from '../src/jobs/fetchHistory'
 import { buildCtx, analyseDay, planChanges, findFreeCourt } from '../src/jobs/fixImbalance'
 import { buildWaitlistCtx, buildProposal, buildAlertEmbed } from '../src/jobs/checkWaitlists'
+import { runCheckinPast } from '../src/jobs/checkinPast'
 import { NaiveDateTime } from '../src/datetime'
 import type { Policy } from '../src/policy'
 import type { ScheduleItem, WaitlistOccurrence } from '../src/cr/types'
@@ -163,5 +164,39 @@ describe('buildAlertEmbed', () => {
     expect(e.title).toContain('Waitlist')
     expect(e.description).toContain('2 on waitlist')
     expect(e.description).toContain('!expand 55')
+  })
+})
+
+// ── checkinPast ───────────────────────────────────────────────────────────────
+
+describe('runCheckinPast', () => {
+  const candidates = [
+    { res_id: '900', event_id: INT, date: '2026-07-02', date_text: 'Thu, Jul 2', registrations: '4 / 5' },
+    { res_id: '901', event_id: AI, date: '2026-07-01', date_text: 'Wed, Jul 1', registrations: 'FULL (5) WL (0)' },
+  ]
+
+  it('dry run lists candidates and checks in nobody', async () => {
+    let checkinCalls = 0
+    const cr = {
+      checkinScan: async () => candidates,
+      checkin: async () => {
+        checkinCalls++
+        return { success: true, checked_in: 1, total: 1, names: [], error: null }
+      },
+    } as never
+    const s = await runCheckinPast(cr, { policy })
+    expect(s.candidates).toHaveLength(2)
+    expect(s.occurrences_processed).toBe(0)
+    expect(checkinCalls).toBe(0)
+  })
+
+  it('execute checks in each occurrence and tallies members', async () => {
+    const cr = {
+      checkinScan: async () => candidates,
+      checkin: async () => ({ success: true, checked_in: 3, total: 3, names: ['A B'], error: null }),
+    } as never
+    const s = await runCheckinPast(cr, { policy, execute: true })
+    expect(s.occurrences_processed).toBe(2)
+    expect(s.members_checked_in).toBe(6) // 3 per occurrence × 2
   })
 })

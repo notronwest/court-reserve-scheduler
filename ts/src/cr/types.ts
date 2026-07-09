@@ -25,6 +25,24 @@ export interface WaitlistOccurrence {
   waitlist: number
 }
 
+/** A past occurrence with registrants (from GET /checkin/scan). */
+export interface CheckinCandidate {
+  res_id: string
+  event_id: number
+  date: string // ISO "YYYY-MM-DD"
+  date_text: string
+  registrations: string
+}
+
+/** Result of POST /checkin for one occurrence. */
+export interface CheckinResult {
+  success: boolean
+  checked_in: number
+  total: number
+  names: string[]
+  error: string | null
+}
+
 /** Request bodies mirror courtreserve-api's endpoints (service.py). */
 export interface BookRequest {
   event_id: string
