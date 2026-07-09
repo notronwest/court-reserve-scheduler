@@ -5,6 +5,7 @@ import type {
   CancelRequest,
   SetCourtsRequest,
   FixCourtRequest,
+  WaitlistOccurrence,
 } from './types'
 
 /**
@@ -26,6 +27,13 @@ export class CourtReserveClient {
   async schedule(start: string, end: string): Promise<ScheduleItem[]> {
     const q = new URLSearchParams({ start, end })
     const data = await this.request<{ items: ScheduleItem[] }>('GET', `/schedule?${q}`)
+    return data.items
+  }
+
+  /** Full occurrences with a waitlist in the next `days` days, for the given events. */
+  async waitlists(eventIds: number[], days: number): Promise<WaitlistOccurrence[]> {
+    const q = new URLSearchParams({ event_ids: eventIds.join(','), days: String(days) })
+    const data = await this.request<{ items: WaitlistOccurrence[] }>('GET', `/waitlists?${q}`)
     return data.items
   }
 

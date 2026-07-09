@@ -129,8 +129,13 @@ npm run fix-imbalance -- --days 14 --execute  # apply (book/cancel via courtrese
 - **`fixImbalance`** — port of `fix_imbalance.py`. Keeps ≤1 Advanced Intermediate/day (never
   cancels one with registered members), pairs Intermediate with each AI, tops Intermediate to
   target. `planChanges` is pure + unit-tested; `--execute` books/cancels via HTTP.
+- **`checkWaitlists`** (`npm run check-waitlists -- --days 14 [--dry-run]`) — port of
+  `check_waitlists.py`. Asks `GET /waitlists` for full-with-waitlist occurrences, checks a free
+  court is available via `/schedule`, posts a Discord alert per proposal, and writes
+  `pending_waitlist.json` for the listener's ✅ / `!expand`. Needs courtreserve-api's `/waitlists`
+  endpoint (`buildProposal`/`buildAlertEmbed` are pure + unit-tested).
 
-Both use only existing endpoints (`/schedule`, `/book`, `/cancel`).
+`fetchHistory` + `fixImbalance` use only existing endpoints; `checkWaitlists` needs `/waitlists`.
 
 ## What's next (see the plan)
 

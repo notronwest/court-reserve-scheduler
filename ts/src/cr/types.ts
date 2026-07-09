@@ -12,6 +12,19 @@ export interface ScheduleItem {
   [key: string]: unknown
 }
 
+/** One full occurrence with a waitlist, from GET /waitlists. */
+export interface WaitlistOccurrence {
+  res_id: string
+  event_id: number
+  date: string // ISO "YYYY-MM-DD"
+  date_text: string
+  time_text: string
+  courts_text: string
+  registered: number
+  max_people: number
+  waitlist: number
+}
+
 /** Request bodies mirror courtreserve-api's endpoints (service.py). */
 export interface BookRequest {
   event_id: string

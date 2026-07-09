@@ -13,7 +13,8 @@
     "schedule": "tsx src/cli.ts schedule",
     "listen": "tsx src/discord/listener.ts",
     "fetch-history": "tsx src/jobs/fetchHistory.ts",
-    "fix-imbalance": "tsx src/jobs/fixImbalance.ts"
+    "fix-imbalance": "tsx src/jobs/fixImbalance.ts",
+    "check-waitlists": "tsx src/jobs/checkWaitlists.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

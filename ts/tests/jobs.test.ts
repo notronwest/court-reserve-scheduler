@@ -5,9 +5,10 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fetchHistory, pruneOld } from '../src/jobs/fetchHistory'
 import { buildCtx, analyseDay, planChanges, findFreeCourt } from '../src/jobs/fixImbalance'
+import { buildWaitlistCtx, buildProposal, buildAlertEmbed } from '../src/jobs/checkWaitlists'
 import { NaiveDateTime } from '../src/datetime'
 import type { Policy } from '../src/policy'
-import type { ScheduleItem } from '../src/cr/types'
+import type { ScheduleItem, WaitlistOccurrence } from '../src/cr/types'
 
 const FX = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const policy = JSON.parse(readFileSync(resolve(FX, 'policy.json'), 'utf8')) as Policy
@@ -109,5 +110,58 @@ describe('planChanges', () => {
     expect(
       books.some((c) => c.action === 'book' && c.event_id === INT && c.start_time === '1:00 PM'),
     ).toBe(true)
+  })
+})
+
+// ── checkWaitlists.buildProposal ──────────────────────────────────────────────
+
+const wlCtx = buildWaitlistCtx(policy)
+function occ(over: Partial<WaitlistOccurrence> = {}): WaitlistOccurrence {
+  return {
+    res_id: '55',
+    event_id: INT,
+    date: YMD,
+    date_text: 'Mon, Jul 13',
+    time_text: '9:00 AM-11:00 AM',
+    courts_text: 'Court #3',
+    registered: 5,
+    max_people: 5,
+    waitlist: 2,
+    ...over,
+  }
+}
+
+describe('buildProposal', () => {
+  it('proposes the preferred free court and computes the new max', () => {
+    const day = [item(INT, 1, 9, 3, 5)] // the occurrence itself on court 3
+    const p = buildProposal(wlCtx, occ(), day)
+    expect(p).not.toBeNull()
+    expect(p!.new_court_num).toBe(4) // court 4 preferred + free
+    expect(p!.all_court_nums).toEqual([3, 4])
+    expect(p!.per_court).toBe(5)
+    expect(p!.new_max).toBe(10)
+  })
+
+  it('returns null when the occurrence already spans the max courts', () => {
+    const p = buildProposal(wlCtx, occ({ courts_text: 'Court #1, #2, #3, #4' }), [])
+    expect(p).toBeNull()
+  })
+
+  it('returns null when every court is occupied during the window', () => {
+    const day = [item(INT, 1, 9, 1), item(AI, 2, 9, 2), item(INT, 3, 9, 3), item(AI, 4, 9, 4)]
+    expect(buildProposal(wlCtx, occ(), day)).toBeNull()
+  })
+})
+
+describe('buildAlertEmbed', () => {
+  it('renders the expansion proposal with the waitlist + risk', () => {
+    const p = buildProposal(wlCtx, occ(), [item(INT, 1, 9, 3, 5)])!
+    const payload = buildAlertEmbed(wlCtx, occ(), p) as {
+      embeds: { title: string; description: string }[]
+    }
+    const e = payload.embeds[0]
+    expect(e.title).toContain('Waitlist')
+    expect(e.description).toContain('2 on waitlist')
+    expect(e.description).toContain('!expand 55')
   })
 })
