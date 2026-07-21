@@ -65,6 +65,7 @@ export interface SetCourtsRequest {
   res_id: string
   court_ids: string[]
   max_people: number
+  event_id: string // selects the occurrence's edit grid (required by the service)
 }
 export interface FixCourtRequest {
   event_id: string

@@ -81,6 +81,7 @@ async function bookOne(cr: CourtReserveClient, rec: RecommendationDict): Promise
         res_id: String(result.occurrence_id),
         court_ids: allIds.map(String),
         max_people: rec.max_participants,
+        event_id: String(rec.event_id),
       }),
     )
   }
@@ -343,6 +344,7 @@ export async function executeExpand(
       res_id: String(resId),
       court_ids: p.all_court_ids.map(String),
       max_people: p.new_max,
+      event_id: String(p.event_id),
     }),
   )
 
