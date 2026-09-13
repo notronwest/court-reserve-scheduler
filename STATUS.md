@@ -5,6 +5,47 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-09-13 — Women's Advanced Intermediate moved Wednesday → Thursday 16:00–18:00
+
+**State:** `policy.json` only, on branch `claude/womens-schedule-wed-to-thu-n0wdsf`.
+TS typecheck clean, **94/94 tests pass**, `regen_goldens.py --check` exits 0 (the test
+fixture policy is untouched, so the goldens do not move).
+
+**⚠️ NOT DEPLOYED** — needs `git pull && ./setup.sh` on `wmpcMacMini1`. **⚠️ CR series
+NOT moved** — see below.
+
+### ✅ Done
+- **`fixed_events` entry moved** from Wednesday 15:00–17:00 to **Thursday 16:00–18:00**
+  per club management (2026-09-13). `event_id: 1717124`, 2 courts, max 10 unchanged.
+  The entry had been recorded as 15:00–17:00; management's instruction is 4–6, so the
+  Thursday slot is 16:00–18:00. If the Wednesday series was in fact 15:00–17:00 in CR,
+  the old policy time was right and only the new one matters.
+- **Wednesday 2026-09-16 is intentionally untouched.** The daily job books 14 days out,
+  so from tomorrow it targets 9/28 onward and never re-visits 9/16 or 9/17; the policy
+  change only affects runs from the week of 9/28. An ad-hoc `!schedule 9/16` would now
+  treat Wednesday as free at 15:00 — don't run one for that date.
+- Dry-ran `ts/src/recommender.ts` on the real policy for Thu 10/1: Pass 0 places the
+  women's series on courts 1+2, Co-Ed AI on 4, Mens Advanced Plus on 3.
+
+### ⚠️ Open risks
+- **Thursday 17:00–18:00 is over-subscribed by one court.** Women's (2) + Co-Ed
+  Advanced Intermediate (1) + Mens Advanced Plus (1) + Co-Ed 3.25-3.5 Level Play (1) =
+  5 courts on a 4-court club. In the dry run **Co-Ed 3.25-3.5 Level Play was silently
+  dropped** — Pass 0 `continue`s when no court is free and does not record it in
+  `skipped_fixed_events`. Management needs to decide which Thursday 17:00 event yields
+  (or shrink the women's to 1 court). Worth a follow-up to report a `no_court` skip.
+- **The CR recurring series `1717124` must be moved by hand in Court Reserve** — the
+  code has no edit-series path (`!move` edits one occurrence). Edit the series from the
+  **9/23** occurrence onward; leave **9/16** as is.
+- `1717124` remains unverified against the events list widened to 1/15/2025.
+
+### 🔜 Next
+- Ron: move series `1717124` in CR (from 9/23), then decide the Thursday 17:00 court
+  conflict, then `git pull && ./setup.sh` on `wmpcMacMini1`.
+- Follow-up: make Pass 0 report a fixed event dropped for lack of a free court instead of
+  skipping it silently.
+
+---
 ## 2026-09-06 — Pass 0 min-gap gap FIXED in both engines
 
 **State:** **MERGED to `main`** as `9514021` via

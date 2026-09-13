@@ -116,23 +116,23 @@
         "level": "Advanced Intermediate"
       },
       {
-        "name": "Women's Advanced Intermediate Open Play",
-        "day_of_week": "Wednesday",
-        "start_time": "15:00",
-        "end_time": "17:00",
-        "courts": 2,
-        "max_participants": 10,
-        "level": "Advanced Intermediate",
-        "event_id": 1717124,
-        "note": "event_id added 2026-09-01 — pins the real CR women's series for the TS Pass 0."
-      },
-      {
         "name": "Co-Ed Advanced Intermediate Open Play",
         "day_of_week": "Thursday",
         "start_time": "16:00",
         "end_time": "18:00",
         "courts": 1,
         "level": "Advanced Intermediate"
+      },
+      {
+        "name": "Women's Advanced Intermediate Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "16:00",
+        "end_time": "18:00",
+        "courts": 2,
+        "max_participants": 10,
+        "level": "Advanced Intermediate",
+        "event_id": 1717124,
+        "note": "Moved Wednesday -> Thursday 16:00-18:00 on 2026-09-13 by club management. The Wednesday 2026-09-16 occurrence is intentionally left in place; the move applies from the week of 2026-09-21 onward (the daily job books 14 days out, so it never re-targets 9/16 or 9/17 — only an ad-hoc !schedule for those dates would). This policy entry was previously recorded as Wednesday 15:00-17:00; the 16:00-18:00 time is per management's 2026-09-13 instruction. The CR recurring series 1717124 itself must be moved by hand in Court Reserve (edit the series from 9/23 onward, not the 9/16 occurrence). WARNING: Thursday 17:00-18:00 now needs 5 courts (this x2 + Co-Ed AI + Mens Advanced Plus + Co-Ed 3.25-3.5) on a 4-court club; Pass 0 silently drops whichever fixed event finds no free court. event_id added 2026-09-01 — pins the real CR women's series for the TS Pass 0."
       },
       {
         "name": "Mens Advanced Plus Open Play",
