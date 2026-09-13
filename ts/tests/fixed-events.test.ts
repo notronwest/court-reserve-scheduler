@@ -113,3 +113,67 @@ describe('Pass 0 respects the min-gap constraint (hard constraint 3b)', () => {
     expect(stats.skipped_fixed_events).toEqual([])
   })
 })
+
+// A 2-court fixed event must never vanish just because no court PAIR is free
+// (the women's Thursday 16:00–18:00 rule). Fixture Monday has only the 17:00
+// Level Play, so 12:00–14:00 is a clean window to crowd with live bookings.
+const live = (courts: number[]) =>
+  courts.map((cn) => ({
+    StartDateTime: '2026-07-13T12:00:00',
+    EndDateTime: '2026-07-13T14:00:00',
+    Courts: `Pickleball-Court #${cn}`,
+    EventId: 1,
+    EventName: 'Reservation',
+  }))
+
+const womens = () => ({
+  name: "Women's Advanced Intermediate Open Play",
+  day_of_week: 'Monday',
+  start_time: '12:00',
+  end_time: '14:00',
+  courts: 2,
+  max_participants: 10,
+  level: 'Advanced Intermediate',
+  event_id: 1717124,
+})
+
+describe('Pass 0 never drops a fixed event silently', () => {
+  it('books a 2-court fixed event on a single court when no pair is free', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(womens())
+    // Courts 1, 2 and 3 are taken: no priority pair fits, only court 4 is free.
+    const { recommendations, stats } = recommend(live([1, 2, 3]), MON, policy, {
+      popularity: new Map(),
+    })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)
+    expect(w).toBeDefined()
+    expect(w!.court_num).toBe(4)
+    expect(w!.extra_court_nums).toEqual([])
+    expect(w!.max_participants).toBe(5) // 10 configured for 2 courts -> 5 on 1
+    expect(stats.skipped_fixed_events).toEqual([])
+  })
+
+  it('keeps the full pair and max_participants when a pair is free', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(womens())
+    const { recommendations } = recommend([], MON, policy, { popularity: new Map() })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)!
+    expect(w.extra_court_nums).toHaveLength(1)
+    expect(w.max_participants).toBe(10)
+  })
+
+  it('reports no_court when every court is taken instead of skipping silently', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(womens())
+    const { recommendations, stats } = recommend(live([1, 2, 3, 4]), MON, policy, {
+      popularity: new Map(),
+    })
+
+    expect(recommendations.some((r) => r.event_id === 1717124)).toBe(false)
+    expect(stats.skipped_fixed_events).toContainEqual(
+      expect.objectContaining({ event_id: 1717124, reason: 'no_court', start_time: '12:00' }),
+    )
+  })
+})

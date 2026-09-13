@@ -5,6 +5,55 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-09-13 (later) — Women's AI Thursday 16:00–18:00 is a scheduler RULE; Thursday re-timed; Pass 0 never drops a fixed event silently
+
+**Supersedes the entry below.** Ron clarified: this is **not** a Court Reserve series and
+must not be entered as one — the daily job (14 days out) books it as an occurrence of
+CR event `1717124` every Thursday, and the other Thursday requirements shuffle to make
+room. Nothing to do by hand in CR. Wednesday **9/16** still stays as already booked.
+
+**State:** branch `claude/womens-schedule-wed-to-thu-n0wdsf`. TS typecheck clean,
+**97/97 tests pass** (was 94), goldens re-baselined via `regen_goldens.py` and
+`--check` exits 0. **⚠️ NOT DEPLOYED** — `git pull && ./setup.sh` on `wmpcMacMini1`.
+
+### ✅ Done
+- **Thursday `fixed_events` re-timed** so the 2-court women's block always fits under
+  hard constraint 6 (max 3 concurrent courts):
+
+  | Thursday | Before | After |
+  |---|---|---|
+  | Women's Advanced Intermediate (2 courts, `1717124`) | — (was Wed 15–17) | **16:00–18:00**, listed first so Pass 0 seats it first |
+  | Co-Ed 3.25-3.5 Level Play | 17:00–19:00 | 17:00–19:00 (unchanged; the one other court in 16–18) |
+  | Mens Advanced Plus | 17:00–19:00 | **18:00–20:00** |
+  | Co-Ed Advanced Intermediate | 16:00–18:00 | **18:00–20:00** |
+
+  Concurrency: 16–17 = 2 courts, 17–18 = 3, 18–19 = 3, 19–20 = 2. Dry run of the real
+  policy for Thu 10/1: women's on courts 4+3, nothing skipped.
+- **Pass 0 hardened in both engines** (`ts/src/recommender.ts`, `recommender.py`):
+  - A 2-court fixed event with no free court **pair** now falls back to the best single
+    court (`max_participants` scaled: 10 on 2 courts → 5 on 1) instead of vanishing —
+    what `recommendation_rules.two_court_pair_note` always said should happen.
+  - A fixed event with **no** court at all is recorded in `stats.skipped_fixed_events`
+    with `reason: no_court`. Constraints 3/3b are now checked *before* court
+    assignment, so an event already on the live schedule reads as `min_gap` /
+    `max_occurrences`, and `no_court` means a genuine court shortage.
+  - Goldens `2026-07-09` and `2026-07-13` gained skip entries that were silent before
+    (the fixture schedule already carries those fixed events). Recommendations unchanged.
+- 3 new tests in `ts/tests/fixed-events.test.ts` (single-court fallback, full pair kept
+  when free, `no_court` reported).
+
+### ⚠️ Open
+- `skipped_fixed_events` is only in the stats JSON / booking log — nothing posts it to
+  Discord yet. Worth surfacing so a dropped women's slot is seen the same morning.
+- The Mens-Advanced-Plus vs Co-Ed-3.25 choice (which stays at 17:00) was an engineering
+  call: Intermediate at 17:00 had recorded demand. Swap them in `policy.json` if wrong.
+- `1717124` remains unverified against the events list widened to 1/15/2025.
+
+### 🔜 Next
+- Deploy: `git pull && ./setup.sh` on `wmpcMacMini1`. First Thursday the job books
+  under the new rule is **10/1** (9/17 and 9/24 were booked under the old policy).
+
+---
 ## 2026-09-13 — Women's Advanced Intermediate moved Wednesday → Thursday 16:00–18:00
 
 **State:** `policy.json` only, on branch `claude/womens-schedule-wed-to-thu-n0wdsf`.

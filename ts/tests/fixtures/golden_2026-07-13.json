@@ -75,6 +75,14 @@
       "Advanced": 2
     },
     "rec_source": "rule_based",
-    "skipped_fixed_events": []
+    "skipped_fixed_events": [
+      {
+        "name": "Co-Ed 3.75+ Level Play",
+        "day_of_week": "Monday",
+        "start_time": "17:00",
+        "event_id": 1633147,
+        "reason": "min_gap"
+      }
+    ]
   }
 }

@@ -54,6 +54,13 @@
         "start_time": "10:00",
         "event_id": 1633147,
         "reason": "min_gap"
+      },
+      {
+        "name": "Co-Ed Advanced Intermediate Open Play",
+        "day_of_week": "Saturday",
+        "start_time": "16:00",
+        "event_id": 1672774,
+        "reason": "max_occurrences"
       }
     ]
   }

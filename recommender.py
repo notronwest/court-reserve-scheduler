@@ -7,6 +7,7 @@ Usage:
     recs, stats = recommend(schedule_items, "4/16/2026", policy)
 """
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -441,67 +442,76 @@ def recommend(
         if not eid:
             continue
 
+        # A fixed event is policy-mandated, so one that does not book is never
+        # dropped silently: every skip is recorded with why.
+        def _skip(reason: str, _fe=fe, _eid=eid) -> None:
+            skipped_fixed_events.append({
+                "name": _fe.get("name"), "day_of_week": _fe.get("day_of_week"),
+                "start_time": _fe.get("start_time"), "event_id": _eid,
+                "reason": reason,
+            })
+
+        # Hard constraint 3 (max occurrences) and 3b (min gap between occurrences
+        # of the same event) apply to fixed events too. Pass 0 used to check only
+        # the former, so a fixed event whose event id was already on the schedule
+        # (or already placed by Pass 0) at that hour booked a zero-gap duplicate.
+        # Checked before court assignment so an event already on the live
+        # schedule reads as min_gap, not as a court shortage.
+        if event_counts[eid] >= _max_occ_for(eid):
+            _skip("max_occurrences")
+            continue
+        if not event_gap_ok(eid, fe_start, fe_end):
+            _skip("min_gap")
+            continue
+
         # Determine courts to use — fixed events can span multiple courts
         n_courts_needed = fe.get("courts", 1)
         preferred = fe.get("preferred_courts", [])
-        courts_assigned = []
+
+        def _court_free(cn: int, _s=fe_start, _e=fe_end) -> bool:
+            return cn in COURTS and not already_on_schedule(cn, _s, _e) and rec_free(cn, _s, _e)
+
+        courts_assigned: list[int] = []
 
         if n_courts_needed == 2 and not preferred:
             # Use the ranked pair list from policy — try each pair until one fits
             pairs = policy["recommendation_rules"].get("two_court_priority_pairs", [[4, 3], [4, 1], [1, 2], [2, 3]])
             for pair in pairs:
-                if all(
-                    cn in COURTS
-                    and not already_on_schedule(cn, fe_start, fe_end)
-                    and rec_free(cn, fe_start, fe_end)
-                    for cn in pair
-                ):
+                if all(_court_free(cn) for cn in pair):
                     courts_assigned = list(pair)
                     break
+            # No pair free: fall back to the best single court rather than
+            # dropping the event (recommendation_rules.two_court_pair_note).
+            if not courts_assigned:
+                for cn in court_order:
+                    if _court_free(cn):
+                        courts_assigned = [cn]
+                        break
         elif preferred:
             # Explicit preferred_courts on this fixed event — use them directly
-            courts_assigned = [
-                cn for cn in preferred
-                if cn in COURTS
-                and not already_on_schedule(cn, fe_start, fe_end)
-                and rec_free(cn, fe_start, fe_end)
-            ][:n_courts_needed]
+            courts_assigned = [cn for cn in preferred if _court_free(cn)][:n_courts_needed]
         else:
             # Single-court: pick first available from court_order
             for cn in court_order:
                 if len(courts_assigned) >= n_courts_needed:
                     break
-                if cn in COURTS and not already_on_schedule(cn, fe_start, fe_end) and rec_free(cn, fe_start, fe_end):
+                if _court_free(cn):
                     courts_assigned.append(cn)
 
         if not courts_assigned:
+            _skip("no_court")
             continue
 
         # Book as ONE occurrence on the primary court, then edit to add extras.
         # This matches Court Reserve's workflow: add date → edit to assign all
         # courts and set max participants.
-        # Hard constraint 3 (max occurrences) and 3b (min gap between occurrences
-        # of the same event) apply to fixed events too. Pass 0 used to check only
-        # the former, so a fixed event whose event id was already on the schedule
-        # (or already placed by Pass 0) at that hour booked a zero-gap duplicate.
-        if event_counts[eid] >= _max_occ_for(eid):
-            skipped_fixed_events.append({
-                "name": fe.get("name"), "day_of_week": fe.get("day_of_week"),
-                "start_time": fe.get("start_time"), "event_id": eid,
-                "reason": "max_occurrences",
-            })
-        elif not event_gap_ok(eid, fe_start, fe_end):
-            skipped_fixed_events.append({
-                "name": fe.get("name"), "day_of_week": fe.get("day_of_week"),
-                "start_time": fe.get("start_time"), "event_id": eid,
-                "reason": "min_gap",
-            })
-        else:
-            primary = courts_assigned[0]
-            extras  = courts_assigned[1:]
-            max_p   = fe.get("max_participants", 0)
-            add(eid, primary, fe_start, fe_end,
-                extra_court_nums=extras, max_participants=max_p)
+        primary = courts_assigned[0]
+        extras  = courts_assigned[1:]
+        # max_participants is configured for the full court count; scale it
+        # down when the event settled for fewer courts (10 on 2 -> 5 on 1).
+        max_p   = math.ceil(fe.get("max_participants", 0) * len(courts_assigned) / n_courts_needed)
+        add(eid, primary, fe_start, fe_end,
+            extra_court_nums=extras, max_participants=max_p)
 
     # ── LLM path: replace Pass 1 + Pass 2 with Claude API call ──────────────
     llm_source = "rule_based"
