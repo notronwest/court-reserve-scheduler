@@ -23,8 +23,8 @@ room. Nothing to do by hand in CR. Wednesday **9/16** still stays as already boo
   | Thursday | Before | After |
   |---|---|---|
   | Women's Advanced Intermediate (2 courts, `1717124`) | — (was Wed 15–17) | **16:00–18:00**, listed first so Pass 0 seats it first |
-  | Co-Ed 3.25-3.5 Level Play | 17:00–19:00 | 17:00–19:00 (unchanged; the one other court in 16–18) |
-  | Mens Advanced Plus | 17:00–19:00 | **18:00–20:00** |
+  | Mens Advanced Plus | 17:00–19:00 | 17:00–19:00 (unchanged — Ron's call; the one other court in 16–18) |
+  | Co-Ed 3.25-3.5 Level Play | 17:00–19:00 | **18:00–20:00** |
   | Co-Ed Advanced Intermediate | 16:00–18:00 | **18:00–20:00** |
 
   Concurrency: 16–17 = 2 courts, 17–18 = 3, 18–19 = 3, 19–20 = 2. Dry run of the real
@@ -45,8 +45,10 @@ room. Nothing to do by hand in CR. Wednesday **9/16** still stays as already boo
 ### ⚠️ Open
 - `skipped_fixed_events` is only in the stats JSON / booking log — nothing posts it to
   Discord yet. Worth surfacing so a dropped women's slot is seen the same morning.
-- The Mens-Advanced-Plus vs Co-Ed-3.25 choice (which stays at 17:00) was an engineering
-  call: Intermediate at 17:00 had recorded demand. Swap them in `policy.json` if wrong.
+- The earlier "Thursday 17:00–19:00 Intermediate" ask (STATUS 2026-09-06) is now moot
+  as specified: 17:00–18:00 is full (women's ×2 + Mens). An Intermediate slot would
+  have to be 18:00–20:00 alongside Co-Ed 3.25-3.5, which resolves to the same
+  `1931656` — still needs its own `event_id`.
 - `1717124` remains unverified against the events list widened to 1/15/2025.
 
 ### 🔜 Next
