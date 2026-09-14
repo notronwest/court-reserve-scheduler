@@ -70,7 +70,7 @@
     "status": "ACTIVE",
     "defined_on": "2026-04-09",
     "python_pass0_caveat": "SUPERSEDED 2026-09-06 — was written 2026-09-01, when production still ran Python. The TS cutover is LIVE on wmpcMacMini1 (see STATUS 2026-09-03) and ts/src/recommender.ts DOES honour the optional fixed-event event_id (PR #30). So in production the women's entries (1240908 Friday, 1717124 Wednesday) and the Level Play entries now book as themselves — the co-ed-clone defect described here no longer affects production. LATENT, ROLLBACK-ONLY: recommender.py still never reads event_id — its Pass 0 maps level -> approved co-ed event id and add() uses APPROVED_EVENTS[eid]['name'], discarding the entry's own name. If anyone rolls back to the Python stack (ts/ops/rollback.sh) the co-ed clones return. Port event_id to recommender.py, or retire the Python engine.",
-    "pass0_min_gap_caveat": "FIXED 2026-09-06 (kept as a record). Pass 0 used to check only _max_occ_for(eid) / maxOccFor(eid) before add() and never call event_gap_ok(), so two fixed events resolving to the same event id at the same hour — or one whose event id was already on the live schedule then — booked a zero-gap duplicate, violating hard_constraint 3b. Both engines now apply the gap check in Pass 0 and report anything they decline in stats.skipped_fixed_events (reason: min_gap | max_occurrences). NOTE for adding fixed events: two entries at the same hour are only bookable when they are genuinely different CR events — give the branded one its own event_id. That is what the requested Thursday 17:00-19:00 Intermediate slot still needs: 'Co-Ed 3.25-3.5 Level Play' has no event_id of its own and resolves to 1931656, so a second generic entry is correctly skipped.",
+    "pass0_min_gap_caveat": "FIXED 2026-09-06 (kept as a record). Pass 0 used to check only _max_occ_for(eid) / maxOccFor(eid) before add() and never call event_gap_ok(), so two fixed events resolving to the same event id at the same hour — or one whose event id was already on the live schedule then — booked a zero-gap duplicate, violating hard_constraint 3b. Both engines now apply the gap check in Pass 0 and report anything they decline in stats.skipped_fixed_events (reason: min_gap | max_occurrences | no_court — the last added 2026-09-13, when Pass 0 also gained a single-court fallback for 2-court events with no free pair). NOTE for adding fixed events: two entries at the same hour are only bookable when they are genuinely different CR events — give the branded one its own event_id. That is what the requested Thursday 17:00-19:00 Intermediate slot still needs: 'Co-Ed 3.25-3.5 Level Play' has no event_id of its own and resolves to 1931656, so a second generic entry is correctly skipped.",
     "events": [
       {
         "name": "Co-Ed 3.75+ Level Play",
@@ -117,22 +117,14 @@
       },
       {
         "name": "Women's Advanced Intermediate Open Play",
-        "day_of_week": "Wednesday",
-        "start_time": "15:00",
-        "end_time": "17:00",
+        "day_of_week": "Thursday",
+        "start_time": "16:00",
+        "end_time": "18:00",
         "courts": 2,
         "max_participants": 10,
         "level": "Advanced Intermediate",
         "event_id": 1717124,
-        "note": "event_id added 2026-09-01 — pins the real CR women's series for the TS Pass 0."
-      },
-      {
-        "name": "Co-Ed Advanced Intermediate Open Play",
-        "day_of_week": "Thursday",
-        "start_time": "16:00",
-        "end_time": "18:00",
-        "courts": 1,
-        "level": "Advanced Intermediate"
+        "note": "RULE set by club management 2026-09-13: the daily job (14 days out) books this every Thursday 16:00-18:00 as an occurrence of CR event 1717124 — it is NOT a CR recurring series and must not be entered as one. Previously Wednesday 15:00-17:00; the already-booked Wednesday 2026-09-16 occurrence stays. Listed FIRST among Thursday entries so Pass 0 assigns its courts before the others. The other Thursday fixed events were re-timed on the same date so this one is never dropped: with 2 courts here, only one other fixed court fits in 16:00-18:00 under hard_constraint 6 (max 3 concurrent) — management kept Mens Advanced Plus 17:00-19:00 as that one. If no court pair is free Pass 0 now falls back to a single court (max_participants scaled down) rather than skipping; a skip is reported as stats.skipped_fixed_events reason no_court. event_id added 2026-09-01."
       },
       {
         "name": "Mens Advanced Plus Open Play",
@@ -140,15 +132,26 @@
         "start_time": "17:00",
         "end_time": "19:00",
         "courts": 1,
-        "level": "Advanced"
+        "level": "Advanced",
+        "note": "Kept at 17:00-19:00 by club management on 2026-09-13 as the one other Thursday fixed court allowed alongside the 2-court women's 16:00-18:00 block (hard_constraint 6, max 3 concurrent)."
       },
       {
         "name": "Co-Ed 3.25-3.5 Level Play",
         "day_of_week": "Thursday",
-        "start_time": "17:00",
-        "end_time": "19:00",
+        "start_time": "18:00",
+        "end_time": "20:00",
         "courts": 1,
-        "level": "Intermediate"
+        "level": "Intermediate",
+        "note": "Moved 17:00-19:00 -> 18:00-20:00 on 2026-09-13 to make room for the women's Advanced Intermediate 16:00-18:00 rule (Thursday 17:00-18:00 would otherwise need 5 courts); management kept Mens Advanced Plus at 17:00. Stays in the after-work window; operating_windows.weekday ends 20:00."
+      },
+      {
+        "name": "Co-Ed Advanced Intermediate Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "18:00",
+        "end_time": "20:00",
+        "courts": 1,
+        "level": "Advanced Intermediate",
+        "note": "Moved 16:00-18:00 -> 18:00-20:00 on 2026-09-13: the women's Advanced Intermediate block now owns 16:00-18:00. Distinct event id (1672774) from the women's 1717124, so both book the same day."
       },
       {
         "name": "Women's Intermediate Open Play",

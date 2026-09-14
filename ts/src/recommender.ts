@@ -113,8 +113,9 @@ export interface SkippedFixedEvent {
   day_of_week?: string
   start_time?: string
   event_id: number
-  /** `min_gap` = hard constraint 3b; `max_occurrences` = hard constraint 3. */
-  reason: 'min_gap' | 'max_occurrences'
+  /** `min_gap` = hard constraint 3b; `max_occurrences` = hard constraint 3;
+   *  `no_court` = every court it could use is already taken at that hour. */
+  reason: 'min_gap' | 'max_occurrences' | 'no_court'
 }
 
 export interface Stats {
@@ -467,62 +468,77 @@ function buildContext(
     const eid = distinctId ?? LEVEL_TO_EVENT_ID[feLevel]
     if (eid === undefined) continue
 
-    const nCourtsNeeded = fe.courts ?? 1
-    const preferred = fe.preferred_courts ?? []
-    let courtsAssigned: number[] = []
-
-    if (nCourtsNeeded === 2 && preferred.length === 0) {
-      const pairs =
-        policy.recommendation_rules.two_court_priority_pairs ?? [[4, 3], [4, 1], [1, 2], [2, 3]]
-      for (const pair of pairs) {
-        if (
-          pair.every(
-            (cn) => cn in COURTS && !alreadyOnSchedule(cn, feStart, feEnd) && recFree(cn, feStart, feEnd),
-          )
-        ) {
-          courtsAssigned = [...pair]
-          break
-        }
-      }
-    } else if (preferred.length > 0) {
-      courtsAssigned = preferred
-        .filter(
-          (cn) => cn in COURTS && !alreadyOnSchedule(cn, feStart, feEnd) && recFree(cn, feStart, feEnd),
-        )
-        .slice(0, nCourtsNeeded)
-    } else {
-      for (const cn of courtOrder) {
-        if (courtsAssigned.length >= nCourtsNeeded) break
-        if (cn in COURTS && !alreadyOnSchedule(cn, feStart, feEnd) && recFree(cn, feStart, feEnd)) {
-          courtsAssigned.push(cn)
-        }
-      }
+    // A fixed event is policy-mandated, so one that does not book is never
+    // dropped silently: every skip is recorded with why.
+    const skip = (reason: SkippedFixedEvent['reason']): void => {
+      skippedFixedEvents.push({
+        name: fe.name, day_of_week: fe.day_of_week, start_time: fe.start_time, event_id: eid, reason,
+      })
     }
-
-    if (courtsAssigned.length === 0) continue
 
     // Hard constraint 3 (max occurrences) and 3b (min gap between occurrences of
     // the same event) apply to fixed events too. Pass 0 used to check only the
     // former, so two fixed events resolving to the same event id at the same hour
     // booked it twice with zero gap. Give a fixed event its own `event_id` when it
     // is genuinely a distinct CR event rather than a second copy of the generic one.
+    // Checked before court assignment so an event already on the live schedule
+    // reads as `min_gap`, not as a court shortage.
     if ((eventCounts.get(eid) ?? 0) >= maxOccFor(eid)) {
-      skippedFixedEvents.push({
-        name: fe.name, day_of_week: fe.day_of_week, start_time: fe.start_time,
-        event_id: eid, reason: 'max_occurrences',
-      })
-    } else if (!eventGapOk(eid, feStart, feEnd)) {
-      skippedFixedEvents.push({
-        name: fe.name, day_of_week: fe.day_of_week, start_time: fe.start_time,
-        event_id: eid, reason: 'min_gap',
-      })
-    } else {
-      const primary = courtsAssigned[0]
-      const extras = courtsAssigned.slice(1)
-      const maxP = fe.max_participants ?? 0
-      const override = distinctId !== undefined ? { name: fe.name, level: feLevel } : undefined
-      add(eid, primary, feStart, feEnd, extras, maxP, override)
+      skip('max_occurrences')
+      continue
     }
+    if (!eventGapOk(eid, feStart, feEnd)) {
+      skip('min_gap')
+      continue
+    }
+
+    const nCourtsNeeded = fe.courts ?? 1
+    const preferred = fe.preferred_courts ?? []
+    const courtFree = (cn: number): boolean =>
+      cn in COURTS && !alreadyOnSchedule(cn, feStart, feEnd) && recFree(cn, feStart, feEnd)
+    let courtsAssigned: number[] = []
+
+    if (nCourtsNeeded === 2 && preferred.length === 0) {
+      const pairs =
+        policy.recommendation_rules.two_court_priority_pairs ?? [[4, 3], [4, 1], [1, 2], [2, 3]]
+      for (const pair of pairs) {
+        if (pair.every((cn) => courtFree(cn))) {
+          courtsAssigned = [...pair]
+          break
+        }
+      }
+      // No pair free: fall back to the best single court rather than dropping
+      // the event (recommendation_rules.two_court_pair_note). The occurrence
+      // is worth more on one court than not at all.
+      if (courtsAssigned.length === 0) {
+        for (const cn of courtOrder) {
+          if (courtFree(cn)) {
+            courtsAssigned = [cn]
+            break
+          }
+        }
+      }
+    } else if (preferred.length > 0) {
+      courtsAssigned = preferred.filter((cn) => courtFree(cn)).slice(0, nCourtsNeeded)
+    } else {
+      for (const cn of courtOrder) {
+        if (courtsAssigned.length >= nCourtsNeeded) break
+        if (courtFree(cn)) courtsAssigned.push(cn)
+      }
+    }
+
+    if (courtsAssigned.length === 0) {
+      skip('no_court')
+      continue
+    }
+
+    const primary = courtsAssigned[0]
+    const extras = courtsAssigned.slice(1)
+    // max_participants is configured for the full court count; scale it down
+    // when the event had to settle for fewer courts (10 on 2 courts -> 5 on 1).
+    const maxP = Math.ceil((fe.max_participants ?? 0) * (courtsAssigned.length / nCourtsNeeded))
+    const override = distinctId !== undefined ? { name: fe.name, level: feLevel } : undefined
+    add(eid, primary, feStart, feEnd, extras, maxP, override)
   }
 
   const saturationThreshold =

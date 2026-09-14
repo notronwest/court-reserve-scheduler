@@ -47,6 +47,28 @@
       "Advanced": 3
     },
     "rec_source": "rule_based",
-    "skipped_fixed_events": []
+    "skipped_fixed_events": [
+      {
+        "name": "Co-Ed Advanced Intermediate Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "16:00",
+        "event_id": 1672774,
+        "reason": "max_occurrences"
+      },
+      {
+        "name": "Mens Advanced Plus Open Play",
+        "day_of_week": "Thursday",
+        "start_time": "17:00",
+        "event_id": 1633147,
+        "reason": "max_occurrences"
+      },
+      {
+        "name": "Co-Ed 3.25-3.5 Level Play",
+        "day_of_week": "Thursday",
+        "start_time": "17:00",
+        "event_id": 1931656,
+        "reason": "max_occurrences"
+      }
+    ]
   }
 }
