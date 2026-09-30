@@ -276,10 +276,13 @@ export async function executeMove(deps: ExecDeps, params: MoveParams): Promise<v
   const level = (params.level as string | undefined) ?? ''
   const emoji = LEVEL_EMOJI[level] ?? '⚪'
   const targetDate = params.date as string
+  const newDate = (params.new_date as string | undefined) ?? targetDate
   const currentStart = params.current_start_time as string
   const newStart = params.new_start_time as string
   const newEnd = params.new_end_time as string
-  const newCourtNum = params.new_court_num ?? null
+  const newCourtId = params.new_court_id ?? null
+  const editSeries = params.edit_series === true
+  const crossDay = String(newDate) !== String(targetDate)
 
   const items = (await cr.schedule(targetDate, targetDate)) as ScheduleItem[]
   const targetHhmm = to24h(currentStart)
@@ -303,37 +306,40 @@ export async function executeMove(deps: ExecDeps, params: MoveParams): Promise<v
     return
   }
 
-  log(`Move: ${eventName} occ_id=${occurrenceId} from ${currentStart} → ${newStart}`)
+  log(`Move: ${eventName} occ_id=${occurrenceId} ${targetDate} ${currentStart} → ${newDate} ${newStart}`)
   const result = await callCr(() =>
     cr.move({
-      res_id: String(occurrenceId),
-      new_date: targetDate,
+      event_id: String(eventId),
+      occurrence_id: String(occurrenceId),
+      current_date: targetDate,
+      new_date: newDate,
       new_start: newStart,
       new_end: newEnd,
+      new_court_id: newCourtId != null ? String(newCourtId) : null,
+      event_name: eventName,
+      edit_series: editSeries,
     }),
   )
 
   if (result.success) {
-    // NOTE: the current /move endpoint changes time only. A requested court change
-    // is surfaced but NOT applied — changing courts safely needs the max_people the
-    // occurrence already has, which /move doesn't return. Tracked for Phase 5.
-    const courtNote = newCourtNum
-      ? `\n⚠️ Court change to #${newCourtNum} not applied — the move endpoint changes time only. ` +
-        'Use `!book`/cancel to change courts.'
-      : ''
+    // Cross-day moves are cancel+rebook on the API side; same-day is an in-place
+    // edit (the whole series forward when edit_series is set). The API applies the
+    // court and reload-verifies, so there is nothing left unapplied to warn about.
+    const seriesNote = !crossDay && editSeries ? '  ·  _whole series_' : ''
+    const when = crossDay
+      ? `~~${targetDate} ${currentStart}~~ → **${newDate}, ${newStart} – ${newEnd}**`
+      : `${targetDate}  ·  ~~${currentStart}~~ → **${newStart} – ${newEnd}**${seriesNote}`
     await rest.postEmbed({
       embeds: [
         {
-          title: '✅ Moved!',
+          title: crossDay ? '✅ Moved (rebooked)!' : '✅ Moved!',
           color: 0x2ecc71,
-          description:
-            `${emoji} **${eventName}**\n` +
-            `${targetDate}  ·  ~~${currentStart}~~ → **${newStart} – ${newEnd}**${courtNote}`,
+          description: `${emoji} **${eventName}**\n${when}`,
           footer: { text: 'White Mountain Pickleball • Court Reserve Scheduler' },
         },
       ],
     })
-    log(`Move succeeded: ${eventName} ${currentStart} → ${newStart}`)
+    log(`Move succeeded: ${eventName} ${targetDate} ${currentStart} → ${newDate} ${newStart}`)
   } else {
     await rest.postMessage(`❌ Move failed: ${result.error ?? 'unknown error'}`)
     log(`Move failed: ${result.error}`)
