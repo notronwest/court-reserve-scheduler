@@ -53,10 +53,15 @@ export interface BookRequest {
   dry_run?: boolean
 }
 export interface MoveRequest {
-  res_id: string
-  new_date: string
+  event_id: string        // the parent event (needed to open the occurrences grid)
+  occurrence_id: string   // the reservation/occurrence being moved
+  current_date: string    // M/D/YYYY the occurrence sits on today
+  new_date: string        // M/D/YYYY to move it to (== current_date for a same-day retime)
   new_start: string
   new_end: string
+  new_court_id?: string | null
+  event_name?: string
+  edit_series?: boolean    // same-day only: apply to the whole series forward
 }
 export interface CancelRequest {
   res_id: string

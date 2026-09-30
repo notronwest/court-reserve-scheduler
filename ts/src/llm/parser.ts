@@ -34,12 +34,14 @@ export interface BookParams {
 export interface MoveParams {
   event_id: number | null
   event_name?: string
-  date?: string
+  date?: string              // the day the occurrence sits on TODAY (M/D/YYYY)
+  new_date?: string          // the day to move it TO (M/D/YYYY); omitted/equal = same-day retime
   current_start_time?: string
   new_start_time?: string
   new_end_time?: string
   new_court_id?: number | null
   new_court_num?: number | null
+  edit_series?: boolean      // "the whole series" vs (default) "just this one"
   error?: string | null
   [k: string]: unknown
 }
@@ -182,10 +184,15 @@ ${eventsText(policy)}
 Available courts:
 ${courtsText(policy)}
 
-The user wants to move an existing event occurrence to a new timeslot on the same day.
+The user wants to move an existing event occurrence to a new time, a new day, or both.
+"date" = the day the occurrence sits on TODAY. "new_date" = the day to move it TO.
+If the user only changes the time (no new day), set new_date to the SAME value as date.
 "from X to Y" means: event currently starts at X, move it to start at Y.
-All open play sessions are exactly 2 hours long (new end = new start + 2h).
+All open play sessions are exactly 2 hours long (new end = new start + 2h), so if the
+user gives only a new start, set new_end = new_start + 2h.
 If a court is mentioned, it becomes the new court (new_court_id/new_court_num); otherwise leave null.
+"edit_series": true ONLY if the user clearly means the whole recurring series ("every week",
+"the series", "going forward"); otherwise false (just this one occurrence). Default false.
 
 Move request: "${text}"
 
@@ -194,11 +201,13 @@ Return ONLY valid JSON:
   "event_id": <int>,
   "event_name": <string>,
   "date": "<M/D/YYYY>",
+  "new_date": "<M/D/YYYY>",
   "current_start_time": "<H:MM AM/PM>",
   "new_start_time": "<H:MM AM/PM>",
   "new_end_time": "<H:MM AM/PM>",
   "new_court_id": <int or null>,
   "new_court_num": <int or null>,
+  "edit_series": <true or false>,
   "error": null
 }
 

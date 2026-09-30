@@ -485,8 +485,57 @@ describe('executeMove', () => {
       error: null,
     })
     expect(moves).toHaveLength(1)
-    expect((moves[0] as { res_id: string }).res_id).toBe('777')
+    const req = moves[0] as {
+      event_id: string; occurrence_id: string; current_date: string
+      new_date: string; new_start: string; edit_series: boolean
+    }
+    expect(req.occurrence_id).toBe('777')
+    expect(req.event_id).toBe('1931656')
+    expect(req.current_date).toBe('7/22/2026')
+    expect(req.new_date).toBe('7/22/2026') // same-day retime defaults new_date to date
+    expect(req.edit_series).toBe(false)
     expect(posted.embeds.some((e) => JSON.stringify(e).includes('Moved'))).toBe(true)
+  })
+
+  it('cross-day move sends the new day and labels the embed a rebook', async () => {
+    const posted: Posted = { embeds: [], messages: [] }
+    const moves: unknown[] = []
+    const cr = {
+      schedule: async () => [
+        { Id: 60990845, EventId: 1717124, StartDateTime: '2026-09-30T15:00:00' },
+      ],
+      move: async (r: unknown) => {
+        moves.push(r)
+        return { success: true }
+      },
+    }
+    const ctx = makeCtx({ rest: makeRest(posted), cr })
+    const deps = {
+      rest: ctx.rest,
+      cr: ctx.cr,
+      state: ctx.state,
+      saveState: () => {},
+      clearPending: () => {},
+    }
+    await executeMove(deps as never, {
+      event_id: 1717124,
+      event_name: "Women's Advanced Intermediate Open Play",
+      date: '9/30/2026',
+      new_date: '10/1/2026',
+      current_start_time: '3:00 PM',
+      new_start_time: '3:00 PM',
+      new_end_time: '5:00 PM',
+      new_court_id: null,
+      new_court_num: null,
+      edit_series: false,
+      error: null,
+    })
+    expect(moves).toHaveLength(1)
+    const req = moves[0] as { occurrence_id: string; current_date: string; new_date: string }
+    expect(req.occurrence_id).toBe('60990845')
+    expect(req.current_date).toBe('9/30/2026')
+    expect(req.new_date).toBe('10/1/2026')
+    expect(posted.embeds.some((e) => JSON.stringify(e).includes('rebook'))).toBe(true)
   })
 
   it('reports when no occurrence matches', async () => {
