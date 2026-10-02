@@ -9,6 +9,7 @@ import {
   packLinesIntoFields,
   buildRecommendationsEmbed,
   buildBookingResultsEmbed,
+  buildAutoBookSummaryEmbed,
   type BookingResult,
 } from '../src/discord/notify'
 import {
@@ -246,6 +247,64 @@ describe('buildRecommendationsEmbed', () => {
       embeds: { fields: { name: string }[] }[]
     }
     expect(payload.embeds[0].fields.some((f) => f.name.includes('Preview'))).toBe(true)
+  })
+  it('footers the policy sha when provenance is given, no stale warning when in sync', () => {
+    const payload = buildRecommendationsEmbed('7/22/2026', [rec()], STATS, false, {
+      policy_sha: 'abcdef1234567',
+      head_sha: 'abcdef1234567',
+      behind_origin_main: 0,
+    }) as { embeds: { description?: string; footer: { text: string } }[] }
+    expect(payload.embeds[0].footer.text).toContain('policy @ abcdef1')
+    expect(payload.embeds[0].description).toBeUndefined()
+  })
+  it('shows a visible STALE POLICY warning when behind_origin_main > 0', () => {
+    const payload = buildRecommendationsEmbed('7/22/2026', [rec()], STATS, false, {
+      policy_sha: 'abcdef1234567',
+      head_sha: 'ffffff1234567',
+      behind_origin_main: 2,
+    }) as { embeds: { description?: string }[] }
+    expect(payload.embeds[0].description).toContain('STALE POLICY')
+    expect(payload.embeds[0].description).toContain('2')
+  })
+  it('omits the stale warning and uses no sha suffix when provenance is unavailable (null policy_sha)', () => {
+    const payload = buildRecommendationsEmbed('7/22/2026', [rec()], STATS, false, {
+      policy_sha: null,
+      head_sha: null,
+      behind_origin_main: null,
+    }) as { embeds: { description?: string; footer: { text: string } }[] }
+    expect(payload.embeds[0].description).toBeUndefined()
+    expect(payload.embeds[0].footer.text).not.toContain('policy @')
+  })
+})
+
+describe('buildAutoBookSummaryEmbed', () => {
+  const items = [
+    {
+      event_name: 'Co-ed Intermediate Open Play',
+      level: 'Intermediate',
+      start_time: '2:00 PM',
+      end_time: '4:00 PM',
+      court_num: 3,
+      success: true,
+    },
+  ]
+  it('footers the policy sha', () => {
+    const payload = buildAutoBookSummaryEmbed('7/22/2026', items, {
+      policy_sha: 'abcdef1234567',
+      head_sha: 'abcdef1234567',
+      behind_origin_main: 0,
+    }) as { embeds: { footer: { text: string }; description: string }[] }
+    expect(payload.embeds[0].footer.text).toContain('policy @ abcdef1')
+    expect(payload.embeds[0].description).not.toContain('STALE POLICY')
+  })
+  it('prefixes a STALE POLICY warning when behind origin/main', () => {
+    const payload = buildAutoBookSummaryEmbed('7/22/2026', items, {
+      policy_sha: 'abcdef1234567',
+      head_sha: 'ffffff1234567',
+      behind_origin_main: 5,
+    }) as { embeds: { description: string }[] }
+    expect(payload.embeds[0].description).toContain('STALE POLICY')
+    expect(payload.embeds[0].description).toContain('5')
   })
 })
 
