@@ -5,6 +5,43 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-01 — Builder: non-interactive `--yes` booking path for approved backfills (issue #51)
+
+**Done:** Opened [PR #56](https://github.com/notronwest/court-reserve-scheduler/pull/56)
+(`Closes #51`, branch `feature/issue-51-non-interactive-booking`, built in an
+isolated worktree — `main` untouched). Adds `--yes` / `--non-interactive` and
+`--only "<HH:MM,...>"` to `run.py run` so an already-approved backfill can book
+end to end with no Discord reply or terminal prompt:
+
+- Skips the Discord-wait / terminal-prompt selection path entirely; books
+  every recommendation (or just the `--only` subset) directly.
+- Still posts results to Discord afterward, but never posts-and-waits for a
+  retry reply in this mode.
+- Last stdout line is a machine-readable `booked=N failed=M`; exits non-zero
+  only on a genuine booking failure.
+- Idempotence: reuses the existing pre-booking live-schedule conflict check
+  (`_check_conflict` / `_overlaps`) and does **not** count a conflict-skip as
+  a failure, so re-running against an already-completed date converges to
+  `booked=0 failed=0` / exit 0 instead of failing forever — satisfies the
+  issue's constraint that a half-completed run must be safely re-runnable.
+- `--yes` absent → behavior is byte-for-byte unchanged (same Discord/terminal
+  flow, same retry loop).
+
+Verified: `python3 -m py_compile`, `--help` output, and a direct check of the
+new `--only` time parser — no live Court Reserve credentials in this
+environment, so the actual booking/idempotence behavior against live data is
+**unverified by the agent**; the PR's validation steps call this out and lead
+with a `--dry-run` check before a real `--yes` run.
+
+**In flight:** `gh`'s GraphQL quota was fully exhausted when moving the board
+card — a background watcher is moving issue #51's board card to **In Review**
+once the quota resets (~02:11 UTC); if STATUS.md says this and the board
+still shows it elsewhere, the move may need to be done by hand.
+
+**Next:** Ron reviews PR #56 on a real backfill date with `--dry-run` first
+per the validation steps, then merges.
+
+---
 ## 2026-09-13 (later) — Women's AI Thursday 16:00–18:00 is a scheduler RULE; Thursday re-timed; Pass 0 never drops a fixed event silently
 
 **Supersedes the entry below.** Ron clarified: this is **not** a Court Reserve series and
