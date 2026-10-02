@@ -352,6 +352,35 @@ export function buildFixedEventsReminderEmbed(pendingSince: string, daysPending:
   }
 }
 
+// ── Failure alert (schedule fetch, zero recommendations) ──────────────────────
+
+/** Loud red alert for a run that can't produce or book anything — the #50
+ *  incident: a dead `/schedule` fetch died silently with nothing posted. */
+export function buildFailureAlertEmbed(targetDate: string, title: string, detail: string): unknown {
+  return {
+    embeds: [
+      {
+        title: `🚨 ${title} — ${dayLabel(targetDate)}`,
+        color: 0xe74c3c,
+        description: detail.slice(0, 3900),
+        footer: {
+          text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}`,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  }
+}
+
+export function sendFailureAlert(
+  rest: DiscordRest,
+  targetDate: string,
+  title: string,
+  detail: string,
+): Promise<string | null> {
+  return rest.postEmbed(buildFailureAlertEmbed(targetDate, title, detail))
+}
+
 // ── Send helpers ───────────────────────────────────────────────────────────────
 
 export function sendRecommendations(

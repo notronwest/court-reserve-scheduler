@@ -201,4 +201,37 @@ describe('runScheduler', () => {
       ),
     ).toBe(true)
   })
+
+  it('a dead schedule fetch posts a Discord alert and rethrows — never exits silently (#50)', async () => {
+    const posted: { embeds?: { title?: string; description?: string }[] }[] = []
+    const d = {
+      ...deps(posted),
+      cr: {
+        schedule: async () => {
+          throw new Error('courtreserve-api GET /schedule -> 500: boom')
+        },
+      } as never,
+    }
+    await expect(runScheduler(DATE, d, { llm: false, autoBook: true })).rejects.toThrow('500')
+    expect(posted.length).toBe(1)
+    expect(posted[0].embeds?.[0].title).toContain('Schedule fetch failed')
+    expect(posted[0].embeds?.[0].description).toContain('boom')
+    expect(existsSync(resolve(tmp, 'pending_approval.json'))).toBe(false)
+  })
+
+  it('zero recommendations in auto-book mode posts a loud alert (#50)', async () => {
+    const posted: { embeds?: { title?: string }[] }[] = []
+    // Every court occupied all day — recommend() legitimately has nothing to add.
+    const fullDay: ScheduleItem[] = [1, 2, 3, 4].map((n) => ({
+      EventId: 999,
+      Id: n,
+      StartDateTime: '2026-07-13T09:00:00',
+      EndDateTime: '2026-07-13T20:00:00',
+      Courts: `Court #${n}`,
+    }))
+    const d = { ...deps(posted), cr: { schedule: async () => fullDay } as never }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+    expect(res.recommendations.length).toBe(0)
+    expect(posted.some((p) => p.embeds?.[0].title?.includes('Zero recommendations'))).toBe(true)
+  })
 })
