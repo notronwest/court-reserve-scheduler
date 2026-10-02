@@ -141,6 +141,22 @@ def fmt_date(d: str) -> str:
     return dt.strftime("%A, %B %-d %Y")
 
 
+def _parse_only_times(only_arg: str) -> set[str]:
+    """'--only' → a set of 24-hour 'HH:MM' strings, for matching against a
+    recommendation's start time. Accepts either '13:00' or '1:00 PM' per entry."""
+    times = set()
+    for part in only_arg.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            t = datetime.strptime(part, "%H:%M")
+        except ValueError:
+            t = datetime.strptime(part.upper(), "%I:%M %p")
+        times.add(t.strftime("%H:%M"))
+    return times
+
+
 def print_existing(items: list[dict], target_date: str):
     from recommender import _parse_date
     td = _parse_date(target_date)
@@ -353,6 +369,12 @@ def main():
                             help="Print the system + user prompt that would be sent to the AI, then exit")
     run_parser.add_argument("--llm",         action="store_true",
                             help="Use Claude API for Pass 1+2 recommendations (requires ANTHROPIC_API_KEY)")
+    run_parser.add_argument("--yes", "--non-interactive", dest="yes", action="store_true",
+                            help="Book every recommendation with no Discord wait or terminal prompt "
+                                 "(for an already-approved, unattended run)")
+    run_parser.add_argument("--only", dest="only", default=None,
+                            help="With --yes: comma-separated start times (e.g. '9:00 AM,1:00 PM' or "
+                                 "'09:00,13:00') to book only a named subset of recommendations")
 
     # If no subcommand given, default to "run" and re-parse under it
     argv = sys.argv[1:]
@@ -368,9 +390,11 @@ def main():
         return
 
     target_date  = args.date
-    do_book      = args.book or args.dry_run
+    non_interactive = getattr(args, "yes", False)
+    do_book      = args.book or args.dry_run or non_interactive
     dry_run      = args.dry_run
     show_prompt  = getattr(args, "show_prompt", False)
+    only_times   = _parse_only_times(args.only) if getattr(args, "only", None) else None
 
     policy = load_policy()
 
@@ -406,30 +430,40 @@ def main():
                 print("  (Run with --book to book recommendations, --dry-run to test form fills)")
             return
 
-        # Get selection — via Discord listener (zero-timeout) or terminal fallback
-        if WEBHOOK_URL and BOT_TOKEN and CHANNEL_ID:
-            print("\n  Sending recommendations to Discord...")
-            # listener_mode=True → returns Discord message ID immediately;
-            # the persistent listener (discord_listener.py) handles approval.
-            msg_id = send_and_wait(target_date, recs, stats, listener_mode=True)
-            _save_pending_approval(target_date, recs, stats, msg_id)
-            print("  Pending approval saved — listener will book when you reply in Discord.")
-            print("  (Run with --no-listener to fall back to terminal input instead.)")
-            return
-        elif WEBHOOK_URL:
-            print("\n  Sending recommendations to Discord...")
-            selected_indices = send_and_wait(target_date, recs, stats)
-            if selected_indices is None:
-                selected_indices = prompt_selection(recs)
+        if non_interactive:
+            # Already-approved run: no Discord wait, no terminal prompt.
+            selected = recs
+            if only_times:
+                selected = [r for r in selected if r.start.strftime("%H:%M") in only_times]
+            if not selected:
+                print("\n  Nothing matched --only (or no recommendations). Exiting.")
+                return
+            print(f"\n  Booking {len(selected)} event(s) (non-interactive)...\n")
         else:
-            selected_indices = prompt_selection(recs)
+            # Get selection — via Discord listener (zero-timeout) or terminal fallback
+            if WEBHOOK_URL and BOT_TOKEN and CHANNEL_ID:
+                print("\n  Sending recommendations to Discord...")
+                # listener_mode=True → returns Discord message ID immediately;
+                # the persistent listener (discord_listener.py) handles approval.
+                msg_id = send_and_wait(target_date, recs, stats, listener_mode=True)
+                _save_pending_approval(target_date, recs, stats, msg_id)
+                print("  Pending approval saved — listener will book when you reply in Discord.")
+                print("  (Run with --no-listener to fall back to terminal input instead.)")
+                return
+            elif WEBHOOK_URL:
+                print("\n  Sending recommendations to Discord...")
+                selected_indices = send_and_wait(target_date, recs, stats)
+                if selected_indices is None:
+                    selected_indices = prompt_selection(recs)
+            else:
+                selected_indices = prompt_selection(recs)
 
-        if not selected_indices:
-            print("\n  Nothing selected. Exiting.")
-            return
+            if not selected_indices:
+                print("\n  Nothing selected. Exiting.")
+                return
 
-        selected = [recs[i] for i in selected_indices]
-        print(f"\n  Booking {len(selected)} event(s)...\n")
+            selected = [recs[i] for i in selected_indices]
+            print(f"\n  Booking {len(selected)} event(s)...\n")
 
     # Re-open headed session for booking
     with browser_session(headless=False) as page:
@@ -507,73 +541,80 @@ def main():
         # ── Round 1: initial booking ──────────────────────────────────────────
         _run_booking_round(selected, results)
 
-        # ── Retry loop ────────────────────────────────────────────────────────
-        for attempt in range(1, MAX_RETRY_ROUNDS + 1):
-            # Post results to Discord
+        if non_interactive:
+            # Post the outcome for visibility, but never post-and-wait for a
+            # retry reply — there's no one watching Discord for this run.
             if not dry_run:
-                print(f"\n  Posting results to Discord (attempt {attempt}/{MAX_RETRY_ROUNDS})...")
-                failed_entries = [r for r in results if not r["result"].get("success")]
-                msg_id = send_booking_results(results, target_date, attempt, MAX_RETRY_ROUNDS)
+                print("\n  Posting results to Discord...")
+                send_booking_results(results, target_date, attempt=1, max_attempts=1)
+        else:
+            # ── Retry loop ────────────────────────────────────────────────
+            for attempt in range(1, MAX_RETRY_ROUNDS + 1):
+                # Post results to Discord
+                if not dry_run:
+                    print(f"\n  Posting results to Discord (attempt {attempt}/{MAX_RETRY_ROUNDS})...")
+                    failed_entries = [r for r in results if not r["result"].get("success")]
+                    msg_id = send_booking_results(results, target_date, attempt, MAX_RETRY_ROUNDS)
 
-                if not failed_entries:
-                    print("  All events booked successfully — no retry needed.")
-                    break
+                    if not failed_entries:
+                        print("  All events booked successfully — no retry needed.")
+                        break
 
-                if attempt >= MAX_RETRY_ROUNDS:
-                    print(f"  Retry cap reached ({MAX_RETRY_ROUNDS} attempts). Finishing.")
-                    break
+                    if attempt >= MAX_RETRY_ROUNDS:
+                        print(f"  Retry cap reached ({MAX_RETRY_ROUNDS} attempts). Finishing.")
+                        break
 
-                if not (BOT_TOKEN and CHANNEL_ID and msg_id):
-                    print("  (Discord bot not configured — skipping retry prompt)")
-                    break
+                    if not (BOT_TOKEN and CHANNEL_ID and msg_id):
+                        print("  (Discord bot not configured — skipping retry prompt)")
+                        break
 
-                # Ask Discord whether to retry
-                retry_positions = wait_for_retry_reply(msg_id, len(failed_entries))
+                    # Ask Discord whether to retry
+                    retry_positions = wait_for_retry_reply(msg_id, len(failed_entries))
 
-                if retry_positions == "skip" or not retry_positions:
-                    print("  Retry skipped.")
-                    break
+                    if retry_positions == "skip" or not retry_positions:
+                        print("  Retry skipped.")
+                        break
 
-                # Match failed entries back to original Recommendation objects
-                # by (event_id, start_time)
-                to_retry = []
-                for pos in retry_positions:
-                    if pos >= len(failed_entries):
-                        continue
-                    fe = failed_entries[pos]["recommendation"]
-                    key = (fe["event_id"], fe["start_time"])
-                    # find matching Recommendation
-                    for r in selected:
-                        if r.event_id == fe["event_id"] and r.start.strftime("%-I:%M %p") == fe["start_time"]:
-                            to_retry.append(r)
-                            break
+                    # Match failed entries back to original Recommendation objects
+                    # by (event_id, start_time)
+                    to_retry = []
+                    for pos in retry_positions:
+                        if pos >= len(failed_entries):
+                            continue
+                        fe = failed_entries[pos]["recommendation"]
+                        key = (fe["event_id"], fe["start_time"])
+                        # find matching Recommendation
+                        for r in selected:
+                            if r.event_id == fe["event_id"] and r.start.strftime("%-I:%M %p") == fe["start_time"]:
+                                to_retry.append(r)
+                                break
 
-                if not to_retry:
-                    break
+                    if not to_retry:
+                        break
 
-                print(f"\n  Retrying {len(to_retry)} event(s) (attempt {attempt + 1}/{MAX_RETRY_ROUNDS})...")
+                    print(f"\n  Retrying {len(to_retry)} event(s) (attempt {attempt + 1}/{MAX_RETRY_ROUNDS})...")
 
-                # Refresh conflict data before retry
-                try:
-                    live_items[:] = fetch_schedule(target_date, target_date, page=page)
-                except Exception as e:
-                    print(f"  ⚠  Could not refresh schedule before retry ({e}) — using cached data")
-                    # live_items already has stale data; retrying with it is better than crashing
+                    # Refresh conflict data before retry
+                    try:
+                        live_items[:] = fetch_schedule(target_date, target_date, page=page)
+                    except Exception as e:
+                        print(f"  ⚠  Could not refresh schedule before retry ({e}) — using cached data")
+                        # live_items already has stale data; retrying with it is better than crashing
 
-                # Remove old failed entries for the ones we're retrying so results
-                # reflects the latest outcome
-                retry_keys = {
-                    (r.event_id, r.start.strftime("%-I:%M %p")) for r in to_retry
-                }
-                results[:] = [
-                    entry for entry in results
-                    if (entry["recommendation"]["event_id"],
-                        entry["recommendation"]["start_time"]) not in retry_keys
-                ]
+                    # Remove old failed entries for the ones we're retrying so results
+                    # reflects the latest outcome
+                    retry_keys = {
+                        (r.event_id, r.start.strftime("%-I:%M %p")) for r in to_retry
+                    }
+                    results[:] = [
+                        entry for entry in results
+                        if (entry["recommendation"]["event_id"],
+                            entry["recommendation"]["start_time"]) not in retry_keys
+                    ]
 
-                _run_booking_round(to_retry, results)
-            else:
-                break  # dry-run: no retry loop
+                    _run_booking_round(to_retry, results)
+                else:
+                    break  # dry-run: no retry loop
 
         # ── Post-booking schedule verification ───────────────────────────────
         if not dry_run:
@@ -688,6 +729,17 @@ def main():
         booked  = sum(1 for r in results if r["result"]["success"])
         failed  = len(results) - booked
         print(f"\n  Done: {booked} booked, {failed} failed.")
+
+        if non_interactive:
+            # Conflict-skips are idempotent no-ops (already booked by an earlier
+            # run), not failures — only a genuine booking error should fail the run.
+            genuine_failures = sum(
+                1 for r in results
+                if not r["result"]["success"] and not r["result"].get("skipped")
+            )
+            print(f"booked={booked} failed={genuine_failures}")
+            if genuine_failures > 0:
+                sys.exit(1)
 
 
 if __name__ == "__main__":
