@@ -16,6 +16,7 @@ import {
   sendRecommendations,
   maybeSendFixedEventsReminder,
   sendAutoBookSummary,
+  sendFailureAlert,
 } from './discord/notify'
 import type { AutoBookResult } from './discord/execute'
 import type { DiscordRest } from './discord/rest'
@@ -96,12 +97,43 @@ export async function runScheduler(
   const provenance = resolveProvenance()
 
   log(`Fetching schedule for ${targetDate}…`)
-  const items = await deps.cr.schedule(targetDate, targetDate)
+  let items
+  try {
+    items = await deps.cr.schedule(targetDate, targetDate)
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    log(`Schedule fetch failed: ${message}`)
+    try {
+      await sendFailureAlert(
+        deps.rest,
+        targetDate,
+        'Schedule fetch failed — nothing booked',
+        `Could not fetch the live Court Reserve schedule:\n\`${message}\``,
+      )
+    } catch (alertErr) {
+      log(`Alert could not be posted: ${alertErr instanceof Error ? alertErr.message : String(alertErr)}`)
+    }
+    throw e
+  }
 
   const { recommendations, stats } = useLlm
     ? await recommendLlm(items, targetDate, deps.policy, { historyPath: deps.historyPath })
     : recommend(items, targetDate, deps.policy)
   log(`Generated ${recommendations.length} recommendation(s) [source=${stats.rec_source}]`)
+
+  if (recommendations.length === 0 && opts.autoBook && !opts.dryRun) {
+    try {
+      await sendFailureAlert(
+        deps.rest,
+        targetDate,
+        'Zero recommendations generated',
+        'The recommender produced no bookings for this date — nothing was booked. ' +
+          'This is unusual; check `policy.json` and the live schedule for this date.',
+      )
+    } catch (alertErr) {
+      log(`Alert could not be posted: ${alertErr instanceof Error ? alertErr.message : String(alertErr)}`)
+    }
+  }
 
   // Auto-book mode: book directly, no approval gate. Keep a durable booking log,
   // and post a Discord confirmation of the run (green = all booked, amber/red on

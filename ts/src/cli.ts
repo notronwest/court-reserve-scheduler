@@ -5,6 +5,7 @@ import { DiscordRest } from './discord/rest'
 import { loadPolicy } from './policy'
 import { recommend, recommendLlm, toDict } from './recommender'
 import { runScheduler } from './scheduler'
+import { runCatchUp } from './jobs/catchUp'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -103,12 +104,41 @@ async function main(): Promise<void> {
       break
     }
 
+    case 'catch-up': {
+      // Walk today..today+14, flag dates the daily job left empty or short,
+      // and (with --book) re-run the normal recommend+book path for those
+      // dates only — the #50 recovery path for a horizon with holes in it.
+      const rest = new DiscordRest({
+        botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+        channelId: process.env.DISCORD_CHANNEL_ID ?? '',
+        webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
+      })
+      const result = await runCatchUp(
+        makeCr(),
+        {
+          rest,
+          policy: loadPolicy(),
+          pendingPath: resolve(logsDir(), 'pending_approval.json'),
+          historyPath: resolve(logsDir(), '..', 'history', 'history_latest.json'),
+          log: (m) => console.log(`${new Date().toISOString()}  ${m}`),
+        },
+        { book: flags.has('--book'), log: (m) => console.log(m) },
+      )
+      const flagged = result.days.filter((d) => d.status !== 'ok')
+      console.log(
+        `Done: ${flagged.length} day(s) flagged` +
+          (result.booked.length ? `, ${result.booked.length} re-booked` : ''),
+      )
+      break
+    }
+
     default:
       console.error('commands:')
       console.error('  health                      — is the courtreserve-api service up?')
       console.error('  fetch <start> [end]         — pull the live CR schedule (M/D/YYYY)')
       console.error('  recommend <date> [--llm]    — compute + print recs (no Discord)')
       console.error('  schedule <date> [--dry-run] — generate, post to Discord, save pending approval')
+      console.error('  catch-up [--book]           — flag/re-book empty or short dates in the 14-day horizon')
       process.exit(1)
   }
 }

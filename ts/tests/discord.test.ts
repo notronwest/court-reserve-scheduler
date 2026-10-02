@@ -20,7 +20,7 @@ import {
   bookWindow,
   type ListenerCtx,
 } from '../src/discord/listener'
-import { normalizeCrResult, executeBookings, executeMove } from '../src/discord/execute'
+import { normalizeCrResult, executeBookings, executeMove, bookAll } from '../src/discord/execute'
 import { createState } from '../src/discord/state'
 import type { Stats, Recommendation, RecommendationDict } from '../src/recommender'
 import { NaiveDateTime } from '../src/datetime'
@@ -508,6 +508,51 @@ describe('executeBookings', () => {
     expect((setCourtsCalls[0] as { court_ids: string[] }).court_ids).toEqual(['52351', '52352'])
     // event_id must be forwarded — the service needs it to open the right grid.
     expect((setCourtsCalls[0] as { event_id: string }).event_id).toBe('1931656')
+  })
+})
+
+describe('bookAll retry (#50)', () => {
+  const noSleep = async () => {}
+
+  it('retries a 503 browser-busy error and succeeds on the next attempt', async () => {
+    let calls = 0
+    const cr = {
+      book: async () => {
+        calls += 1
+        return calls === 1
+          ? { success: false, error: 'POST /book -> 503 Court Reserve browser busy' }
+          : { success: true, occurrence_id: 1 }
+      },
+    } as never
+    const results = await bookAll(cr, [REC_DICT], () => {}, noSleep)
+    expect(calls).toBe(2)
+    expect(results[0].success).toBe(true)
+  })
+
+  it('retries "This operation was aborted" up to the attempt cap, then gives up', async () => {
+    let calls = 0
+    const cr = {
+      book: async () => {
+        calls += 1
+        return { success: false, error: 'This operation was aborted' }
+      },
+    } as never
+    const results = await bookAll(cr, [REC_DICT], () => {}, noSleep)
+    expect(calls).toBe(3) // MAX_BOOK_ATTEMPTS
+    expect(results[0].success).toBe(false)
+  })
+
+  it('does not retry a non-transient error', async () => {
+    let calls = 0
+    const cr = {
+      book: async () => {
+        calls += 1
+        return { success: false, error: 'court busy' }
+      },
+    } as never
+    const results = await bookAll(cr, [REC_DICT], () => {}, noSleep)
+    expect(calls).toBe(1)
+    expect(results[0].success).toBe(false)
   })
 })
 

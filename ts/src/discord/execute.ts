@@ -96,19 +96,54 @@ export interface AutoBookResult {
   error?: string
 }
 
+const MAX_BOOK_ATTEMPTS = 3
+const BOOK_RETRY_DELAYS_MS = [2000, 5000]
+
+/** `503 Court Reserve browser busy` and `This operation was aborted` are
+ *  contention errors the service clears on its own — worth a bounded retry
+ *  before counting the slot as failed (the #50 incident: both happened with
+ *  no retry, and nobody noticed the resulting holes). */
+function isTransientBookingError(message: string | undefined): boolean {
+  if (!message) return false
+  return /\b503\b/.test(message) || /aborted/i.test(message) || /browser busy/i.test(message)
+}
+
+async function bookOneWithRetry(
+  cr: CourtReserveClient,
+  rec: RecommendationDict,
+  log: (m: string) => void,
+  sleep: (ms: number) => Promise<void>,
+): Promise<CrActionResult> {
+  let result = await bookOne(cr, rec)
+  for (
+    let attempt = 1;
+    attempt < MAX_BOOK_ATTEMPTS && !result.success && isTransientBookingError(result.error);
+    attempt++
+  ) {
+    const delay = BOOK_RETRY_DELAYS_MS[attempt - 1] ?? BOOK_RETRY_DELAYS_MS[BOOK_RETRY_DELAYS_MS.length - 1]
+    log(`  retrying after transient error (attempt ${attempt + 1}/${MAX_BOOK_ATTEMPTS}): ${result.error}`)
+    await sleep(delay)
+    result = await bookOne(cr, rec)
+  }
+  return result
+}
+
 /**
  * Book a list of recommendations directly — no Discord, no approval gate.
  * Used by the daily scheduler's auto-book mode. Logs each result; returns the
- * per-event outcomes (for the booking log + failure alert).
+ * per-event outcomes (for the booking log + failure alert). Transient errors
+ * (CR service contention) are retried with a bounded backoff before a slot
+ * counts as failed.
  */
 export async function bookAll(
   cr: CourtReserveClient,
   recs: RecommendationDict[],
   log: (m: string) => void = noop,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<AutoBookResult[]> {
   const results: AutoBookResult[] = []
   for (const rec of recs) {
-    const r = await bookOne(cr, rec)
+    const r = await bookOneWithRetry(cr, rec, log, sleep)
     const where = `${rec.date} ${rec.start_time} Court #${rec.court_num} ${rec.level}`
     if (r.success) log(`  ✅ booked ${where}`)
     else log(`  ❌ FAILED ${where} — ${r.error ?? 'unknown error'}`)
