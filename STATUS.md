@@ -5,6 +5,50 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-02 — Builder: headless, fail-closed `redate` command (issue #53)
+
+**Done:** Opened [PR #58](https://github.com/notronwest/court-reserve-scheduler/pull/58)
+(`Closes #53`, branch `feature/issue-53-redate-headless`, built in an isolated
+worktree — `main` untouched). Adds `python run.py redate`, composing the
+existing `book_event` / `edit_occurrence_multi_court` / `cancel_occurrence`
+primitives into one fail-closed date-move:
+
+- Resolves the source occurrence live from the occurrences grid by
+  `--event-id` + `--from` date (never trusts `booking_log_*.json`, which can
+  record `occurrence_id: null` even on a successful booking).
+- Reports the registrant count before touching anything; refuses unless
+  `--force` when it's > 0.
+- Books the target date/time/courts, assigns extra courts + `MaxPeople` if
+  given, then **verifies** the new occurrence actually landed by re-reading
+  the target date's grid — only *after* that succeeds does it cancel the
+  source. Any failure along the way (booking, court/max assignment,
+  verification) leaves the source untouched.
+
+Verified: `py_compile`, `--help` for all three subcommands, and a mocked
+control-flow harness exercising every branch (dry-run, refuse-without-force,
+force-through, full success, booking failure, verification failure,
+single-court no-op) — no live Court Reserve creds in this environment, so the
+actual Playwright/Kendo interaction is unverified by the agent (the PR body
+calls this out; `book_event`/`edit_occurrence_multi_court`/
+`cancel_occurrence` themselves are unchanged — this PR only composes them).
+
+**Blocked (infra, not scope):** Same GraphQL rate-limit issue as the #51 and
+#52 sessions — **third consecutive session** this has blocked a board move.
+`gh project`/`gh pr create` need GraphQL, which returned a persistent
+rate-limit error for most of the session despite the REST quota reporting
+fully available; REST calls (issue read, PR create) worked fine throughout.
+PR creation went through the REST API directly as a fallback. A background
+poll was left running to move the #53 card to **In Review** the moment
+GraphQL recovers, but if this session ends first, the card still needs a
+manual move. Given this is now 3-for-3, it's worth a daemon ticket on its own
+merits rather than waiting for a 4th occurrence.
+
+**Next:** Ron reviews PR #58 — validation steps in the body are CLI-based
+(this repo has no web preview) and call out the untested-against-live-CR gap
+explicitly. Separately: file the daemon ticket on the recurring GraphQL
+rate-limit block mentioned above.
+
+---
 ## 2026-10-01 (later) — Builder: policy provenance tracking + staleness alert (issue #52)
 
 **Done:** Opened [PR #57](https://github.com/notronwest/court-reserve-scheduler/pull/57)
