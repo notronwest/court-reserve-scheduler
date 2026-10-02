@@ -5,6 +5,52 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-01 (later) — Builder: policy provenance tracking + staleness alert (issue #52)
+
+**Done:** Opened [PR #57](https://github.com/notronwest/court-reserve-scheduler/pull/57)
+(`Closes #52`, branch `feature/issue-52-policy-provenance`, built in an isolated
+worktree — `main` untouched). Addresses the #51/#52 incident (a merged
+`policy.json` change sat un-pulled on the mini for 12 days with nothing
+reporting the gap) by making staleness **visible, not auto-fixed**:
+
+- New `ts/src/policyProvenance.ts`: resolves `policy_sha` (last commit to
+  touch `policy.json`), `head_sha` (working-tree HEAD), and
+  `behind_origin_main` (via a quiet, 10s-capped `git fetch` + `git rev-list
+  --count`; `null` on any failure — no network, bad remote, timeout — never
+  throws).
+- `runScheduler` now writes `policy_provenance: { policy_sha, head_sha,
+  behind_origin_main }` into `logs/booking_log_<date>.json`, and both the
+  auto-book and `--recommend` Discord embeds get a `policy @ <short-sha>`
+  footer plus a visible `⚠️ STALE POLICY` warning line when
+  `behind_origin_main > 0`.
+- Extracted `buildAutoBookSummaryEmbed` as a pure function (matching the
+  existing `buildRecommendationsEmbed` pattern) so the new logic is
+  unit-tested directly.
+- Reporting only — exit code stays 0, booking behavior unchanged. Whether the
+  mini should auto-pull `origin/main` before each run is explicitly **out of
+  scope**, routed to daemon separately (an unreviewed auto-pull would book
+  live courts off unreviewed code).
+
+Verified: `tsc --noEmit` clean, full suite **109/109 passing** (4 new tests in
+`policyProvenance.test.ts` exercise all four ticket acceptance scenarios
+directly: in-sync, behind-origin, and network-failure cases).
+
+**In flight:** Same GraphQL rate-limit issue as the #51 session recurred —
+the WMPC Roadmap board card for #52 could not be moved to **In Review**
+(Projects v2 requires GraphQL, which returned a persistent rate-limit error
+all session despite the REST quota showing fully available). PR creation
+itself went through the REST API as a fallback and succeeded cleanly. Left a
+comment on issue #52 flagging the stuck card for a manual move or a later
+run once GraphQL recovers.
+
+**Next:** Ron reviews PR #57 (no live Court Reserve/Discord creds in this
+environment, so the Discord embed rendering and a real stale-checkout repro
+are unverified by the agent — validation steps in the PR body walk through
+both). Separately: whoever runs the next Builder session should check
+whether the GraphQL rate limit is a recurring/systemic issue worth a daemon
+ticket, since it's now blocked two consecutive board moves.
+
+---
 ## 2026-10-01 — Builder: non-interactive `--yes` booking path for approved backfills (issue #51)
 
 **Done:** Opened [PR #56](https://github.com/notronwest/court-reserve-scheduler/pull/56)
