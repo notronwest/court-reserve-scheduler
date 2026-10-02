@@ -19,6 +19,7 @@ import {
 } from './discord/notify'
 import type { AutoBookResult } from './discord/execute'
 import type { DiscordRest } from './discord/rest'
+import { resolvePolicyProvenance, type PolicyProvenance } from './policyProvenance'
 
 export interface SchedulerDeps {
   cr: CourtReserveClient
@@ -27,6 +28,8 @@ export interface SchedulerDeps {
   pendingPath: string
   historyPath?: string
   log?: (m: string) => void
+  /** Overridable for tests — defaults to resolving against the real git checkout. */
+  resolveProvenance?: () => PolicyProvenance
 }
 
 export interface SchedulerResult {
@@ -63,6 +66,7 @@ export function saveBookingLog(
   booked: number,
   failed: number,
   results: AutoBookResult[],
+  policyProvenance?: PolicyProvenance | null,
 ): void {
   mkdirSync(dirname(logPath), { recursive: true })
   const payload = {
@@ -70,6 +74,7 @@ export function saveBookingLog(
     ran_at: new Date().toISOString(),
     booked,
     failed,
+    policy_provenance: policyProvenance ?? null,
     results: results.map((r) => ({
       ...r.recommendation,
       success: r.success,
@@ -87,6 +92,8 @@ export async function runScheduler(
 ): Promise<SchedulerResult> {
   const log = deps.log ?? (() => {})
   const useLlm = opts.llm ?? true
+  const resolveProvenance = deps.resolveProvenance ?? resolvePolicyProvenance
+  const provenance = resolveProvenance()
 
   log(`Fetching schedule for ${targetDate}…`)
   const items = await deps.cr.schedule(targetDate, targetDate)
@@ -110,7 +117,7 @@ export async function runScheduler(
       dirname(deps.pendingPath),
       `booking_log_${targetDate.replace(/\//g, '-')}.json`,
     )
-    saveBookingLog(logPath, targetDate, booked, failed, results)
+    saveBookingLog(logPath, targetDate, booked, failed, results, provenance)
 
     try {
       await sendAutoBookSummary(
@@ -125,6 +132,7 @@ export async function runScheduler(
           success: r.success,
           error: r.error,
         })),
+        provenance,
       )
     } catch (e) {
       log(`Confirmation could not be posted: ${e instanceof Error ? e.message : String(e)}`)
@@ -140,6 +148,7 @@ export async function runScheduler(
     recommendations,
     stats,
     opts.dryRun ?? false,
+    provenance,
   )
   log(opts.dryRun ? 'Preview posted (dry-run — not saving pending).' : `Recommendations posted (msg=${messageId}).`)
 

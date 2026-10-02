@@ -90,6 +90,7 @@ describe('runScheduler', () => {
   afterEach(() => rmSync(tmp, { recursive: true, force: true }))
 
   const scheduleItems: ScheduleItem[] = []
+  const FAKE_PROVENANCE = { policy_sha: 'abc1234def', head_sha: 'abc1234def', behind_origin_main: 0 }
 
   function deps(posted: unknown[]) {
     return {
@@ -97,6 +98,8 @@ describe('runScheduler', () => {
       rest: { postEmbed: async (p: unknown) => { posted.push(p); return 'm1' } } as never,
       policy,
       pendingPath: resolve(tmp, 'pending_approval.json'),
+      // Avoid real git/network calls in tests that aren't exercising provenance itself.
+      resolveProvenance: () => FAKE_PROVENANCE,
     }
   }
 
@@ -140,6 +143,35 @@ describe('runScheduler', () => {
     const logged = JSON.parse(readFileSync(resolve(tmp, 'booking_log_7-13-2026.json'), 'utf8'))
     expect(logged.failed).toBe(0)
     expect(logged.results).toHaveLength(res.recommendations.length)
+    // Policy provenance recorded alongside the results — so a stale checkout shows up.
+    expect(logged.policy_provenance).toEqual(FAKE_PROVENANCE)
+  })
+
+  it('auto-book flags a stale checkout: STALE POLICY in the embed, behind_origin_main > 0 in the log', async () => {
+    const posted: { embeds?: { title?: string; description?: string }[] }[] = []
+    const d = {
+      ...deps(posted),
+      resolveProvenance: () => ({ policy_sha: 'abc1234def', head_sha: 'ffff000111', behind_origin_main: 3 }),
+      cr: {
+        schedule: async () => scheduleItems,
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+    expect(posted[0].embeds?.[0].description).toContain('STALE POLICY')
+    const logged = JSON.parse(readFileSync(resolve(tmp, 'booking_log_7-13-2026.json'), 'utf8'))
+    expect(logged.policy_provenance.behind_origin_main).toBeGreaterThan(0)
+    expect(res.booked).toBe(res.recommendations.length)
+  })
+
+  it('a run with no network tolerance still completes — behind_origin_main null, not thrown', async () => {
+    const posted: unknown[] = []
+    const d = {
+      ...deps(posted),
+      resolveProvenance: () => ({ policy_sha: 'abc1234def', head_sha: 'abc1234def', behind_origin_main: null }),
+    }
+    await expect(runScheduler(DATE, d, { llm: false })).resolves.toBeTruthy()
   })
 
   it('auto-book confirmation shows failures and the log records them', async () => {

@@ -8,6 +8,8 @@
 import os from 'node:os'
 import { NaiveDateTime } from '../datetime'
 import type { Stats, Recommendation, RecommendationDict } from '../recommender'
+import type { PolicyProvenance } from '../policyProvenance'
+import { shortSha } from '../policyProvenance'
 import type { DiscordRest } from './rest'
 
 const HOSTNAME = os.hostname().split('.')[0]
@@ -47,6 +49,25 @@ function isMultiCourt(r: Recommendation): boolean {
   return (r.extra_court_ids?.length ?? 0) > 0
 }
 
+// ── Policy provenance ────────────────────────────────────────────────────────────
+
+/** Appended to an embed's footer so every post states which policy revision ran. */
+function policyFooterSuffix(p?: PolicyProvenance | null): string {
+  const sha = shortSha(p?.policy_sha)
+  return sha ? ` • policy @ ${sha}` : ''
+}
+
+/** A visible warning when the checkout that ran is behind origin/main — the
+ *  #51/#52 incident (a merged policy change silently not reaching production). */
+function stalePolicyWarning(p?: PolicyProvenance | null): string | null {
+  const n = p?.behind_origin_main
+  if (n == null || n <= 0) return null
+  return (
+    `⚠️ **STALE POLICY** — this checkout is **${n}** commit${n === 1 ? '' : 's'} behind ` +
+    `origin/main; the schedule below may not reflect merged rules.`
+  )
+}
+
 // ── Progress bar ───────────────────────────────────────────────────────────────
 
 export function progressBar(pct: number, target: number, width = 20): string {
@@ -70,6 +91,7 @@ export function buildRecommendationsEmbed(
   recs: Recommendation[],
   stats: Stats,
   previewOnly = false,
+  provenance?: PolicyProvenance | null,
 ): unknown {
   const label = dayLabel(targetDate)
   const fields: EmbedField[] = []
@@ -132,13 +154,17 @@ export function buildRecommendationsEmbed(
   }
 
   const color = (stats.levels_missing?.length ?? 0) === 0 ? 0x2ecc71 : 0xf39c12
+  const staleWarning = stalePolicyWarning(provenance)
   return {
     embeds: [
       {
         title: `🏓 Schedule Recommendations — ${label}`,
         color,
+        ...(staleWarning ? { description: staleWarning } : {}),
         fields,
-        footer: { text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}` },
+        footer: {
+          text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}${policyFooterSuffix(provenance)}`,
+        },
         timestamp: new Date().toISOString(),
       },
     ],
@@ -334,8 +360,9 @@ export function sendRecommendations(
   recs: Recommendation[],
   stats: Stats,
   previewOnly = false,
+  provenance?: PolicyProvenance | null,
 ): Promise<string | null> {
-  return rest.postEmbed(buildRecommendationsEmbed(targetDate, recs, stats, previewOnly))
+  return rest.postEmbed(buildRecommendationsEmbed(targetDate, recs, stats, previewOnly, provenance))
 }
 
 export function sendBookingResults(
@@ -358,13 +385,11 @@ export interface AutoBookSummaryItem {
   error?: string
 }
 
-/** Post a confirmation of an auto-book run: green when all booked, amber if some
- *  failed, red if none. Lists each reservation so you can see it worked. */
-export function sendAutoBookSummary(
-  rest: DiscordRest,
+export function buildAutoBookSummaryEmbed(
   targetDate: string,
   results: AutoBookSummaryItem[],
-): Promise<string | null> {
+  provenance?: PolicyProvenance | null,
+): unknown {
   const booked = results.filter((r) => r.success)
   const failed = results.filter((r) => !r.success)
   const total = results.length
@@ -383,17 +408,34 @@ export function sendAutoBookSummary(
     (failed.length ? ` — ${failed.length} failed` : '') +
     ` · ${dayLabel(targetDate)}`
 
-  return rest.postEmbed({
+  const staleWarning = stalePolicyWarning(provenance)
+  const body = lines.join('\n') || '_No events to book._'
+  const description = (staleWarning ? `${staleWarning}\n\n${body}` : body).slice(0, 3900)
+
+  return {
     embeds: [
       {
         title,
         color,
-        description: (lines.join('\n') || '_No events to book._').slice(0, 3900),
-        footer: { text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}` },
+        description,
+        footer: {
+          text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}${policyFooterSuffix(provenance)}`,
+        },
         timestamp: new Date().toISOString(),
       },
     ],
-  })
+  }
+}
+
+/** Post a confirmation of an auto-book run: green when all booked, amber if some
+ *  failed, red if none. Lists each reservation so you can see it worked. */
+export function sendAutoBookSummary(
+  rest: DiscordRest,
+  targetDate: string,
+  results: AutoBookSummaryItem[],
+  provenance?: PolicyProvenance | null,
+): Promise<string | null> {
+  return rest.postEmbed(buildAutoBookSummaryEmbed(targetDate, results, provenance))
 }
 
 export async function maybeSendFixedEventsReminder(
