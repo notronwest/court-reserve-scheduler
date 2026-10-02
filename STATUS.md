@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-02 (later) — Builder: GraphQL rate limit cleared, #53 board card now In Review
+
+**Update to the entry below:** the GraphQL rate limit recovered later in the
+same session. Card #53 is now correctly **In Review** (linked to PR #58) with
+**Type = feature** set. No manual board move needed on this one — the
+"Blocked (infra, not scope)" / "Next" notes below are superseded on the board
+move specifically; the daemon-ticket suggestion for the recurring rate limit
+still stands (3-for-3 across #51/#52/#53 before it cleared).
+
+---
 ## 2026-10-02 — Builder: headless, fail-closed `redate` command (issue #53)
 
 **Done:** Opened [PR #58](https://github.com/notronwest/court-reserve-scheduler/pull/58)
