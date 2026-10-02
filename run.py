@@ -15,7 +15,7 @@ from pathlib import Path
 
 from cr_client import browser_session, fetch_schedule
 from recommender import recommend, APPROVED_EVENTS, COURTS, _overlaps, _parse_court_nums
-from book_event import book_event, fix_event_court, edit_occurrence_multi_court
+from book_event import book_event, fix_event_court, edit_occurrence_multi_court, cancel_occurrence
 from discord_notify import (
     send_and_wait, maybe_send_fixed_events_reminder, WEBHOOK_URL,
     send_booking_results, wait_for_retry_reply, BOT_TOKEN, CHANNEL_ID,
@@ -324,6 +324,172 @@ def cmd_fix(args):
             print(f"    Screenshot: {result.get('screenshot')}")
 
 
+def cmd_redate(args):
+    """
+    Move a booked occurrence to a different date, headless and fail-closed.
+
+    Resolves the live occurrence on --from, refuses to touch it if players
+    are registered (unless --force), books the same event on --to, verifies
+    that booking actually landed, and only then cancels --from. If the
+    target booking or its verification fails, --from is left untouched —
+    a duplicate booking on both dates is recoverable by hand; a cancelled
+    source with no replacement isn't.
+
+    Usage:
+        python run.py redate --event-id 1717124 --from 9/30/2026 --to 10/1/2026 \
+            --start "4:00 PM" --end "6:00 PM" --courts 3,4 --max 10 [--dry-run] [--force]
+    """
+    event_id   = args.event_id
+    from_date  = args.from_date
+    to_date    = args.to_date
+    start_time = args.start
+    end_time   = args.end
+    dry_run    = args.dry_run
+    force      = args.force
+
+    policy = load_policy()
+    court_map = {int(v["label"].split("#")[-1]): int(k)
+                 for k, v in policy["courts"].items()}
+
+    court_nums = [c.strip() for c in args.courts.split(",") if c.strip()]
+    try:
+        court_nums = [int(c) for c in court_nums]
+    except ValueError:
+        print(f"  Invalid --courts value {args.courts!r} — expected e.g. '3,4'")
+        return
+    if not court_nums:
+        print("  --courts must name at least one court.")
+        return
+    unknown = [n for n in court_nums if n not in court_map]
+    if unknown:
+        print(f"  Unknown court(s) {unknown}. Valid: {sorted(court_map)}")
+        return
+
+    primary_court_id = court_map[court_nums[0]]
+    extra_court_ids  = [court_map[n] for n in court_nums[1:]]
+    courts_display   = ", ".join(f"#{n}" for n in court_nums)
+
+    print(f"\nFetching schedule for {fmt_date(from_date)} to resolve the source occurrence...")
+    with browser_session() as page:
+        from_items = fetch_schedule(from_date, from_date, page=page)
+
+        matches = [
+            item for item in from_items
+            if item.get("EventId") and int(item["EventId"]) == event_id
+        ]
+        if not matches:
+            print(f"  No occurrence of event {event_id} found on {from_date}.")
+            print("  (An event with no future instances is archived — widen the date range "
+                  "back to 1/15/2025 in Court Reserve to confirm it still exists.)")
+            return
+        if len(matches) > 1:
+            print(f"  {len(matches)} occurrences of event {event_id} found on {from_date} — "
+                  f"redate only supports a single occurrence per source day. Found:")
+            for m in matches:
+                s = datetime.fromisoformat(m["StartDateTime"]).strftime("%-I:%M %p")
+                print(f"    Id={m.get('Id')}  {s}  {m.get('Courts')}")
+            return
+
+        source           = matches[0]
+        source_occ_id    = source.get("Id")
+        source_start     = datetime.fromisoformat(source["StartDateTime"]).strftime("%-I:%M %p")
+        source_end       = datetime.fromisoformat(source["EndDateTime"]).strftime("%-I:%M %p")
+        source_courts    = source.get("Courts") or "(none)"
+        registrant_count = int(source.get("MembersCount") or 0)
+        event_name       = source.get("EventName") or source.get("ReservationType") or f"Event {event_id}"
+
+        print(f"\n  Source occurrence:")
+        print(f"    Event:          {event_name}")
+        print(f"    Date:           {from_date}  {source_start} – {source_end}")
+        print(f"    Courts:         {source_courts}")
+        print(f"    Occurrence Id:  {source_occ_id}")
+        print(f"    Registrants:    {registrant_count}")
+
+        print(f"\n  Target booking:")
+        print(f"    Date:           {to_date}  {start_time} – {end_time}")
+        print(f"    Courts:         {courts_display}")
+        if args.max_participants:
+            print(f"    Max players:    {args.max_participants}")
+
+        if dry_run:
+            print("\n  [DRY RUN] No writes made.")
+            return
+
+        if registrant_count > 0 and not force:
+            print(f"\n  Refusing: {registrant_count} player(s) registered on the source occurrence.")
+            print("  Re-run with --force to redate anyway.")
+            return
+
+        # ── Step 1: book the target. The source is never touched until this verifies. ──
+        print(f"\n  Booking target: {event_name}  {to_date}  {start_time}-{end_time}  "
+              f"Court(s) {courts_display}...")
+        book_result = book_event(
+            page=page, event_id=event_id, date=to_date,
+            start_time=start_time, end_time=end_time,
+            court_id=primary_court_id, dry_run=False,
+        )
+        if not book_result.get("success"):
+            print(f"  ✗ Target booking failed: {book_result.get('error')}")
+            print(f"    Source occurrence on {from_date} is untouched.")
+            return
+
+        target_occ_id = book_result.get("occurrence_id")
+        needs_edit = extra_court_ids or args.max_participants
+
+        if needs_edit:
+            label = (f"courts {courts_display}" if extra_court_ids else "max players")
+            print(f"  Assigning {label}"
+                  + (f" + max {args.max_participants} players" if extra_court_ids and args.max_participants else "")
+                  + "...")
+            if not target_occ_id:
+                print("  ✗ No occurrence_id returned for the new booking — cannot assign extra "
+                      "courts or max players.")
+                print(f"    Source occurrence on {from_date} is untouched. Check Court Reserve "
+                      f"manually before retrying.")
+                return
+            edit_result = edit_occurrence_multi_court(
+                page=page, occurrence_id=target_occ_id,
+                all_court_ids=[primary_court_id] + extra_court_ids,
+                event_id=event_id, max_participants=args.max_participants,
+                dry_run=False,
+            )
+            if not edit_result.get("success"):
+                print(f"  ✗ Court/max-players assignment failed: {edit_result.get('error')}")
+                print(f"    Source occurrence on {from_date} is untouched. Check Court Reserve "
+                      f"manually before retrying.")
+                return
+
+        # ── Step 2: verify the target landed before touching the source. ──
+        print(f"\n  Verifying target occurrence on {to_date}...")
+        to_items = fetch_schedule(to_date, to_date, page=page)
+        verified = any(
+            item.get("EventId") and int(item["EventId"]) == event_id
+            and datetime.fromisoformat(item["StartDateTime"]).strftime("%-I:%M %p") == start_time
+            for item in to_items
+        )
+        if not verified:
+            print(f"  ✗ Could not find the new occurrence on the {to_date} grid.")
+            print(f"    Source occurrence on {from_date} is untouched. Check Court Reserve "
+                  f"manually before retrying.")
+            return
+        print(f"  ✓ Target verified on {to_date}.")
+
+        # ── Step 3: only now cancel the source. ──
+        print(f"\n  Cancelling source occurrence {source_occ_id} on {from_date}...")
+        cancel_result = cancel_occurrence(
+            page=page, event_id=event_id, occurrence_id=source_occ_id,
+            date=from_date, dry_run=False,
+        )
+        if not cancel_result.get("success"):
+            print(f"  ✗ Source cancellation failed: {cancel_result.get('error')}")
+            print(f"    BOTH occurrences are now live — {to_date} (new) and {from_date} "
+                  f"(old, uncancelled). Cancel {from_date} manually in Court Reserve.")
+            return
+
+        print(f"\n  ✓ Redate complete: {event_name} moved from {from_date} "
+              f"{source_start}-{source_end} to {to_date} {start_time}-{end_time}.")
+
+
 def main():
     two_weeks_out = (date.today() + timedelta(days=14)).strftime("%-m/%-d/%Y")
 
@@ -354,9 +520,26 @@ def main():
     run_parser.add_argument("--llm",         action="store_true",
                             help="Use Claude API for Pass 1+2 recommendations (requires ANTHROPIC_API_KEY)")
 
+    # ── redate subcommand ────────────────────────────────────────────────────
+    redate_parser = subparsers.add_parser(
+        "redate", help="Move a booked occurrence to a different date, headless and fail-closed")
+    redate_parser.add_argument("--event-id", dest="event_id", type=int, required=True)
+    redate_parser.add_argument("--from",     dest="from_date", required=True, help="Source date M/D/YYYY")
+    redate_parser.add_argument("--to",       dest="to_date",   required=True, help="Target date M/D/YYYY")
+    redate_parser.add_argument("--start",    dest="start",     required=True, help="Target start time, e.g. '4:00 PM'")
+    redate_parser.add_argument("--end",      dest="end",       required=True, help="Target end time, e.g. '6:00 PM'")
+    redate_parser.add_argument("--courts",   dest="courts",    required=True,
+                                help="Comma-separated court numbers, e.g. '3,4'")
+    redate_parser.add_argument("--max",      dest="max_participants", type=int, default=0,
+                                help="Set MaxPeople on the new occurrence")
+    redate_parser.add_argument("--dry-run",  dest="dry_run", action="store_true",
+                                help="Print the plan and registrant count only — no writes")
+    redate_parser.add_argument("--force",    dest="force", action="store_true",
+                                help="Redate even if players are registered on the source occurrence")
+
     # If no subcommand given, default to "run" and re-parse under it
     argv = sys.argv[1:]
-    if argv and argv[0] not in ("fix", "run", "-h", "--help"):
+    if argv and argv[0] not in ("fix", "run", "redate", "-h", "--help"):
         argv = ["run"] + argv
     elif not argv or argv[0] in ("--book", "--dry-run"):
         argv = ["run"] + argv
@@ -365,6 +548,10 @@ def main():
 
     if args.command == "fix":
         cmd_fix(args)
+        return
+
+    if args.command == "redate":
+        cmd_redate(args)
         return
 
     target_date  = args.date
