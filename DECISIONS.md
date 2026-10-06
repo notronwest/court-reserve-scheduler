@@ -174,6 +174,59 @@ Done, REQUEST CHANGES / CONFLICTING → rework lane; (3) Builder: rework lane (r
 (4) the watchdog's board checks. Each ships as its own PR; the first live auto-merge is announced in the
 standup.
 
+### D-0056 — Recurring club events are standing weekly patterns booked by the scheduler, not Court Reserve series; a human ask to create an event is authorized — confirm, never refuse
+
+*2026-10-06 · scope: `supabase/functions/wmpc-command/**, web/src/views/events/**, web/src/lib/command.ts, courtreserve_api/events_create.py, courtreserve_api/events_drain.py, courtreserve_api/profile.py, courtreserve_api/cr_profile.json, policy.json, ts/src/recommender.ts, ts/src/policy.ts` · source: Ron 2026-10-06, after the dashboard refused "resurrect Structured Play on Tue 5–7, Thu 10–12, Sat 3–5, Sun 10–12" (not approved for automation / one weekday per series / no end date) — "the event piece is still unaware of how the scheduler works. We don't use the standard recurring feature in CR because it's not flexible. This request comes from me — 'not approved' is a bad response; 'are you sure you want to create a new recurring event?' would be fine. This is the dead-end stuff that makes GSD not work." Table compiled the same day: wmpc-web, club-dashboard, courtreserve-api, court-reserve-scheduler — four CONCERNs, no veto; each is folded in below. Extends D-0021, D-0026, D-0036 (overlay model), D-0053.*
+
+**Decision.**
+
+**Why.**
+
+**Forbids.**
+
+**Decision.**
+
+1. **A recurring club event is a standing weekly pattern, not a Court Reserve series.** The
+   pattern is the scheduler's `fixed_events` shape — name, Court Reserve event id, any number
+   of (day, start, end, courts) slots, no end date (an optional `until` ends it). The daily
+   scheduler's Pass 0 books it 14 days out, as it books the 15 slots that exist today.
+   Automation never writes Court Reserve's recurrence form; `build_recurrence_writes` stays
+   only for an explicit "as a Court Reserve series" ask, where its end-date rule is correct.
+2. **A human's ask authorizes a new event (D-0053).** The scheduler's `approved_events` is its
+   AUTONOMY whitelist — what the 8 AM run may book on its own — and is never a gate on an ask
+   from the dashboard. The interpreter offers the whole Court Reserve catalogue plus the
+   templates; an ask naming an event outside the whitelist resolves to that event; a name
+   that matches nothing becomes **"This is a new event — create it and put it on the weekly
+   schedule?"** That confirm is the only gate, and it is the real one: the scheduler books
+   the pattern unattended the next morning (Pass 0 has no approval step — the voice is right
+   and the record says so).
+3. **One authoritative copy, written by the mini, read everywhere.** The pattern and the
+   whitelist live in Postgres (`courtreserve.fixed_events`, `automation_approved` on the
+   catalogue overlay), published to the dashboard as read-only `public.cr_*` views like
+   D-0021's catalogue. The browser never writes the `courtreserve` schema: the dashboard's
+   confirm lands a request row (the existing `wmpc_events` rail) and the mini drain — service
+   role — writes the pattern and whitelists the event. `cr_profile.json` / `policy.json`
+   become seeds and fallbacks; the daily sync MERGES (never overwrites a row the mini wrote)
+   and reports drift. The scheduler reads the pattern over courtreserve-api's HTTP (it has
+   no DB client, by design) with a local cache; if the read fails at 8:00 it books from the
+   last good cache and alerts — never from a stale seed silently.
+4. **The payload contract** between the interpreter and the pipeline, fixed here so neither
+   side guesses: `recurrence: {"kind":"standing","slots":[{"day":"Tue","start":"17:00",
+   "end":"19:00","courts":2},…],"until":"YYYY-MM-DD"?}` with `new_event: true|false` and the
+   template to stamp from when new. Multiple weekdays are one pattern, never N proposals.
+
+**Why.** The dashboard reused the scheduler's autonomy whitelist as a permission gate on the
+owner, modelled recurrence as Court Reserve's one-day series, and demanded an end date Court
+Reserve needs but the club never uses. Each refusal was a dead end on an ask the owner had
+already authorized. The club's real recurrence engine has run since July; the dashboard must
+write to it, not around it.
+
+**Forbids.** Refusing a human-authored event because it is "not approved for automation".
+Splitting one weekly ask into per-weekday series. Requiring an end date for a standing
+pattern. A browser-writable row in the `courtreserve` schema. A sync that overwrites a
+pattern the mini wrote. Deploying `wmpc-command` by merge alone (it deploys by hand —
+DEPLOYMENT.md must say so).
+
 ## Proposed (not binding yet)
 
 _None._
