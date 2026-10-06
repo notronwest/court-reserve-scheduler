@@ -21,6 +21,7 @@ import {
 import type { AutoBookResult } from './discord/execute'
 import type { DiscordRest } from './discord/rest'
 import { resolvePolicyProvenance, type PolicyProvenance } from './policyProvenance'
+import { resolveFixedEvents as resolveFixedEventsDefault, type FixedEventsResult } from './fixedEvents'
 
 export interface SchedulerDeps {
   cr: CourtReserveClient
@@ -28,9 +29,13 @@ export interface SchedulerDeps {
   policy: Policy
   pendingPath: string
   historyPath?: string
+  /** Where the fixed-events cache lives — defaults to `CR_STATE_DIR` / `../state`. */
+  stateDir?: string
   log?: (m: string) => void
   /** Overridable for tests — defaults to resolving against the real git checkout. */
   resolveProvenance?: () => PolicyProvenance
+  /** Overridable for tests — defaults to resolveFixedEvents(deps.cr, deps.policy). */
+  resolveFixedEvents?: () => Promise<FixedEventsResult>
 }
 
 export interface SchedulerResult {
@@ -96,6 +101,23 @@ export async function runScheduler(
   const resolveProvenance = deps.resolveProvenance ?? resolvePolicyProvenance
   const provenance = resolveProvenance()
 
+  const resolveFixed =
+    deps.resolveFixedEvents ??
+    (() => resolveFixedEventsDefault(deps.cr, deps.policy, { dir: deps.stateDir, log }))
+  const fixedResult = await resolveFixed()
+  const policy: Policy = {
+    ...deps.policy,
+    fixed_events: { ...deps.policy.fixed_events, events: fixedResult.events },
+  }
+  if (fixedResult.alert) {
+    log(fixedResult.alert)
+    try {
+      await sendFailureAlert(deps.rest, targetDate, 'Fixed events read failed', fixedResult.alert)
+    } catch (alertErr) {
+      log(`Alert could not be posted: ${alertErr instanceof Error ? alertErr.message : String(alertErr)}`)
+    }
+  }
+
   log(`Fetching schedule for ${targetDate}…`)
   let items
   try {
@@ -117,8 +139,8 @@ export async function runScheduler(
   }
 
   const { recommendations, stats } = useLlm
-    ? await recommendLlm(items, targetDate, deps.policy, { historyPath: deps.historyPath })
-    : recommend(items, targetDate, deps.policy)
+    ? await recommendLlm(items, targetDate, policy, { historyPath: deps.historyPath })
+    : recommend(items, targetDate, policy)
   log(`Generated ${recommendations.length} recommendation(s) [source=${stats.rec_source}]`)
 
   if (recommendations.length === 0 && opts.autoBook && !opts.dryRun) {
@@ -173,7 +195,7 @@ export async function runScheduler(
     return { recommendations, stats, messageId: null, booked, failed }
   }
 
-  await maybeSendFixedEventsReminder(deps.rest, deps.policy)
+  await maybeSendFixedEventsReminder(deps.rest, policy)
   const messageId = await sendRecommendations(
     deps.rest,
     targetDate,

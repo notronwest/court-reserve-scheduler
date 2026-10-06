@@ -150,11 +150,18 @@ One environment, one machine. Everything is **`ts/.env`** on that machine, plus
 two committed policy files:
 
 - **`ts/.env`** — `CRAPI_URL`/`CRAPI_KEY` for `courtreserve-api`, Discord webhook
-  / bot token, Anthropic API key. Gitignored; see
-  [`ts/.env.template`](./ts/.env.template). The repo-root `.env` still feeds the
-  Python rollback path — keep both populated on the host.
-- **`policy.json`** — booking policy the recommender applies.
+  / bot token, Anthropic API key, and optionally `CR_STATE_DIR` (defaults to
+  `../state`). Gitignored; see [`ts/.env.template`](./ts/.env.template). The
+  repo-root `.env` still feeds the Python rollback path — keep both populated
+  on the host.
+- **`policy.json`** — booking policy the recommender applies; also the fallback
+  seed for the standing weekly pattern (`fixed_events`, D-0056) when
+  `courtreserve-api GET /fixed-events` and the local cache are both unavailable.
 - **`courts.json`** — court inventory.
+- **`state/fixed-events.json`** — last-good cache of the `GET /fixed-events`
+  read, written on every successful fetch (not committed). On a failed read the
+  scheduler falls back to this cache, then to `policy.json`'s seed, and posts a
+  Discord alert either way — see `CLAUDE.md` → State Files.
 
 Both JSON files are **committed**, so changing them is a code change and takes
 effect on the next scheduled run — no restart needed for the cron-style jobs, but

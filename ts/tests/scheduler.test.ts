@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { recommend, recommendLlm, toDict, type ScheduleItem } from '../src/recommender'
 import type { Policy } from '../src/policy'
 import { savePendingApproval, runScheduler } from '../src/scheduler'
+import { resolveFixedEvents } from '../src/fixedEvents'
 
 const FX = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const readJson = <T>(name: string): T => JSON.parse(readFileSync(resolve(FX, name), 'utf8')) as T
@@ -94,10 +95,16 @@ describe('runScheduler', () => {
 
   function deps(posted: unknown[]) {
     return {
-      cr: { schedule: async () => scheduleItems } as never,
+      cr: {
+        schedule: async () => scheduleItems,
+        // Mirrors a healthy live read — tests not exercising fixed-events resolution
+        // itself shouldn't see a fallback alert mixed into their `posted` assertions.
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
+      } as never,
       rest: { postEmbed: async (p: unknown) => { posted.push(p); return 'm1' } } as never,
       policy,
       pendingPath: resolve(tmp, 'pending_approval.json'),
+      stateDir: resolve(tmp, 'state'),
       // Avoid real git/network calls in tests that aren't exercising provenance itself.
       resolveProvenance: () => FAKE_PROVENANCE,
     }
@@ -125,6 +132,7 @@ describe('runScheduler', () => {
       ...deps(posted),
       cr: {
         schedule: async () => scheduleItems,
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
         book: async (r: unknown) => {
           booked.push(r)
           return { success: true, occurrence_id: 111 }
@@ -154,6 +162,7 @@ describe('runScheduler', () => {
       resolveProvenance: () => ({ policy_sha: 'abc1234def', head_sha: 'ffff000111', behind_origin_main: 3 }),
       cr: {
         schedule: async () => scheduleItems,
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
         book: async () => ({ success: true, occurrence_id: 111 }),
         setCourts: async () => ({ success: true }),
       } as never,
@@ -181,6 +190,7 @@ describe('runScheduler', () => {
       ...deps(posted),
       cr: {
         schedule: async () => scheduleItems,
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
         book: async () => {
           n += 1
           return n === 1 ? { success: false, error: 'court busy' } : { success: true, occurrence_id: 1 }
@@ -210,6 +220,7 @@ describe('runScheduler', () => {
         schedule: async () => {
           throw new Error('courtreserve-api GET /schedule -> 500: boom')
         },
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
       } as never,
     }
     await expect(runScheduler(DATE, d, { llm: false, autoBook: true })).rejects.toThrow('500')
@@ -229,9 +240,62 @@ describe('runScheduler', () => {
       EndDateTime: '2026-07-13T20:00:00',
       Courts: `Court #${n}`,
     }))
-    const d = { ...deps(posted), cr: { schedule: async () => fullDay } as never }
+    const d = {
+      ...deps(posted),
+      cr: { schedule: async () => fullDay, fixedEvents: async () => policy.fixed_events?.events ?? [] } as never,
+    }
     const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
     expect(res.recommendations.length).toBe(0)
     expect(posted.some((p) => p.embeds?.[0].title?.includes('Zero recommendations'))).toBe(true)
+  })
+
+  it('fixed-events API down with a good cache: books from cache and alerts (#62)', async () => {
+    const posted: { embeds?: { title?: string; description?: string }[] }[] = []
+    const stateDir = resolve(tmp, 'state')
+    // Seed a good cache, as a prior successful run would have left behind.
+    await resolveFixedEvents({ fixedEvents: async () => policy.fixed_events?.events ?? [] } as never, policy, {
+      dir: stateDir,
+    })
+
+    const d = {
+      ...deps(posted),
+      stateDir,
+      cr: {
+        schedule: async () => scheduleItems,
+        fixedEvents: async () => {
+          throw new Error('courtreserve-api GET /fixed-events -> 500: down')
+        },
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+
+    expect(res.booked).toBe(res.recommendations.length)
+    const alert = posted.find((p) => p.embeds?.[0].title?.includes('Fixed events read failed'))
+    expect(alert).toBeDefined()
+    expect(alert!.embeds?.[0].description).toContain('booked from cache dated')
+  })
+
+  it('fixed-events API down with no cache: falls back to the policy.json seed and alerts (#62)', async () => {
+    const posted: { embeds?: { title?: string; description?: string }[] }[] = []
+    const d = {
+      ...deps(posted),
+      stateDir: resolve(tmp, 'no-cache-state'),
+      cr: {
+        schedule: async () => scheduleItems,
+        fixedEvents: async () => {
+          throw new Error('courtreserve-api GET /fixed-events -> 500: down')
+        },
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+
+    expect(res.booked).toBe(res.recommendations.length)
+    const alert = posted.find((p) => p.embeds?.[0].title?.includes('Fixed events read failed'))
+    expect(alert).toBeDefined()
+    expect(alert!.embeds?.[0].description).toContain('no cache available')
   })
 })

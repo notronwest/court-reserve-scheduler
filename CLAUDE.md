@@ -68,6 +68,7 @@ reachable ad hoc but not what the 8 AM agent runs.
 | `logs/booking_log_*.json` | Per-day booking results (audit trail) |
 | `history/history_latest.json` | Attendance data used by recommender |
 | `cache/chrome_profile/` | Saved Court Reserve browser session |
+| `state/fixed-events.json` | Last-good cache of the standing weekly pattern (D-0056), read from `courtreserve-api GET /fixed-events`; used when that read fails |
 
 ## Hard Constraints (policy.json)
 
