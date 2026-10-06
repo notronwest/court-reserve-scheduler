@@ -227,6 +227,43 @@ pattern. A browser-writable row in the `courtreserve` schema. A sync that overwr
 pattern the mini wrote. Deploying `wmpc-command` by merge alone (it deploys by hand —
 DEPLOYMENT.md must say so).
 
+### D-0058 — An event ask resolves down a ladder — approved, then anything the club has ever run (pick from close matches), and only then a new event with title and description prefilled; first use approves it
+
+*2026-10-06 · scope: `supabase/functions/wmpc-command/**, web/src/views/events/**, courtreserve_api/events_drain.py, courtreserve_api/events_create.py, courtreserve_api/profile.py` · source: Ron 2026-10-06, on "Add an Intro to Pickleball this coming Sunday @ 10AM on Court 1" being treated as a brand-new event with blank title and description: "there is already an Intro event in the system — we don't need to create a new one. Since it hasn't been used in a while it won't show up in the standard list. Check the approved list, then whether it has been defined before (or closely resembles something we ran) — if so, use it and schedule a new instance. Only after that create a new event. Moving forward that event becomes approved. If there is a close event, give me selections with title and description and let me pick. Last resort is a new event — Title and Description prefilled." Refines D-0056 §2.*
+
+**Decision.**
+
+**Why.**
+
+**Forbids.**
+
+**Decision.** An ask that names an event resolves down this ladder, stopping at the first rung that
+matches:
+
+1. **Approved events** — the scheduler's autonomy whitelist. A match schedules a new occurrence of
+   that event. Nothing to confirm.
+2. **Anything the club has ever run** — the full Court Reserve catalogue the mirror already holds,
+   dormant events included (`courtreserve.events` keeps every event with its last date; "Intro to
+   Pickleball" last ran 2025-03-21 and is there). One clear match → use it, schedule the occurrence,
+   and say "using the Intro to Pickleball you ran in March 2025". Several close matches (same words,
+   a "II", a women's twin) → show them as selections — **title, description, last run, courts,
+   price** — and the owner picks one. Never a blank form.
+3. **A new event — last resort.** Only when nothing matches. The proposal arrives with **title and
+   description prefilled** from the ask and the best template (price, capacity, length inherited),
+   and one confirm line: "This is a new event. Create it?"
+
+**First use approves.** Whichever rung resolves, the event used becomes an approved event when the
+occurrence is created (the mini drain sets `automation_approved`, D-0056 §3), so the next ask for it
+resolves at rung 1.
+
+**Why.** The interpreter listed only approved events, so a dormant event the club had run twenty times
+read as "brand new", and the owner was handed empty title and description fields and a template
+quiz. The club's history is the first thing to consult, not the last.
+
+**Forbids.** Querying the catalogue with `automation_approved = true` when resolving an ask.
+Presenting a new-event form with empty title or description. Asking the owner to pick a template
+when a close match exists in the catalogue.
+
 ## Proposed (not binding yet)
 
 _None._
