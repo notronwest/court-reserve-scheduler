@@ -54,14 +54,20 @@
       "level": "Advanced Intermediate",
       "default_duration_hours": 2,
       "womens": true,
-      "note": "Added 2026-09-01 by club management so !book/!move can address the Wednesday women's series. Event id from the Court Reserve Events/Edit URL — NOT independently verified."
+      "note": "Added 2026-09-01 by club management so !book/!move can address the Wednesday women's series. Event id from the Court Reserve Events/Edit URL \u2014 NOT independently verified."
     },
     "1240908": {
       "name": "Women's Intermediate Open Play",
       "level": "Intermediate",
       "default_duration_hours": 2,
       "womens": true,
-      "note": "Added 2026-09-01 by club management so !book/!move can address the Friday women's series. llm_parser builds its whole event vocabulary from approved_events (llm_parser.py:43); without this entry 'womens intermediate' fell through to co-ed 1931656. Event id from the Court Reserve Events/Edit URL — NOT independently verified."
+      "note": "Added 2026-09-01 by club management so !book/!move can address the Friday women's series. llm_parser builds its whole event vocabulary from approved_events (llm_parser.py:43); without this entry 'womens intermediate' fell through to co-ed 1931656. Event id from the Court Reserve Events/Edit URL \u2014 NOT independently verified."
+    },
+    "1135589": {
+      "name": "Co-Ed Advanced Structured Play",
+      "level": "Advanced",
+      "default_duration_hours": 2,
+      "note": "Added 2026-10-06 on Ron's ask (dashboard command bar): resurrect Structured Play. Last ran Feb 2025 on Courts 3+4."
     }
   },
   "approved_events_womens_flag_note": "Entries flagged womens:true share a 'level' with a co-ed event. Any map built as {level -> event_id} by iteration is LAST-WINS and will silently resolve that level to the women's id. fix_imbalance.py (_BY_LEVEL) and ts/src/jobs/fixImbalance.ts (buildCtx) therefore skip womens entries. recommender.py is unaffected: it hardcodes its own APPROVED_EVENTS at line 24 and never reads this block, which contradicts governance.eventid_whitelist_change_policy.",
@@ -69,8 +75,8 @@
     "note": "Recurring weekly events that are always on the schedule. Used by the recommender for saturation calculations and to avoid recommending conflicting events. Courts and max_participants are informational.",
     "status": "ACTIVE",
     "defined_on": "2026-04-09",
-    "python_pass0_caveat": "SUPERSEDED 2026-09-06 — was written 2026-09-01, when production still ran Python. The TS cutover is LIVE on wmpcMacMini1 (see STATUS 2026-09-03) and ts/src/recommender.ts DOES honour the optional fixed-event event_id (PR #30). So in production the women's entries (1240908 Friday, 1717124 Wednesday) and the Level Play entries now book as themselves — the co-ed-clone defect described here no longer affects production. LATENT, ROLLBACK-ONLY: recommender.py still never reads event_id — its Pass 0 maps level -> approved co-ed event id and add() uses APPROVED_EVENTS[eid]['name'], discarding the entry's own name. If anyone rolls back to the Python stack (ts/ops/rollback.sh) the co-ed clones return. Port event_id to recommender.py, or retire the Python engine.",
-    "pass0_min_gap_caveat": "FIXED 2026-09-06 (kept as a record). Pass 0 used to check only _max_occ_for(eid) / maxOccFor(eid) before add() and never call event_gap_ok(), so two fixed events resolving to the same event id at the same hour — or one whose event id was already on the live schedule then — booked a zero-gap duplicate, violating hard_constraint 3b. Both engines now apply the gap check in Pass 0 and report anything they decline in stats.skipped_fixed_events (reason: min_gap | max_occurrences | no_court — the last added 2026-09-13, when Pass 0 also gained a single-court fallback for 2-court events with no free pair). NOTE for adding fixed events: two entries at the same hour are only bookable when they are genuinely different CR events — give the branded one its own event_id. That is what the requested Thursday 17:00-19:00 Intermediate slot still needs: 'Co-Ed 3.25-3.5 Level Play' has no event_id of its own and resolves to 1931656, so a second generic entry is correctly skipped.",
+    "python_pass0_caveat": "SUPERSEDED 2026-09-06 \u2014 was written 2026-09-01, when production still ran Python. The TS cutover is LIVE on wmpcMacMini1 (see STATUS 2026-09-03) and ts/src/recommender.ts DOES honour the optional fixed-event event_id (PR #30). So in production the women's entries (1240908 Friday, 1717124 Wednesday) and the Level Play entries now book as themselves \u2014 the co-ed-clone defect described here no longer affects production. LATENT, ROLLBACK-ONLY: recommender.py still never reads event_id \u2014 its Pass 0 maps level -> approved co-ed event id and add() uses APPROVED_EVENTS[eid]['name'], discarding the entry's own name. If anyone rolls back to the Python stack (ts/ops/rollback.sh) the co-ed clones return. Port event_id to recommender.py, or retire the Python engine.",
+    "pass0_min_gap_caveat": "FIXED 2026-09-06 (kept as a record). Pass 0 used to check only _max_occ_for(eid) / maxOccFor(eid) before add() and never call event_gap_ok(), so two fixed events resolving to the same event id at the same hour \u2014 or one whose event id was already on the live schedule then \u2014 booked a zero-gap duplicate, violating hard_constraint 3b. Both engines now apply the gap check in Pass 0 and report anything they decline in stats.skipped_fixed_events (reason: min_gap | max_occurrences | no_court \u2014 the last added 2026-09-13, when Pass 0 also gained a single-court fallback for 2-court events with no free pair). NOTE for adding fixed events: two entries at the same hour are only bookable when they are genuinely different CR events \u2014 give the branded one its own event_id. That is what the requested Thursday 17:00-19:00 Intermediate slot still needs: 'Co-Ed 3.25-3.5 Level Play' has no event_id of its own and resolves to 1931656, so a second generic entry is correctly skipped.",
     "events": [
       {
         "name": "Co-Ed 3.75+ Level Play",
@@ -88,7 +94,7 @@
         "end_time": "18:00",
         "courts": 1,
         "level": "Intermediate",
-        "note": "Added 2026-09-01 by club management — permanent Intermediate slot."
+        "note": "Added 2026-09-01 by club management \u2014 permanent Intermediate slot."
       },
       {
         "name": "Co-ed Intermediate Open Play",
@@ -97,7 +103,7 @@
         "end_time": "13:00",
         "courts": 1,
         "level": "Intermediate",
-        "note": "Added 2026-09-01 by club management — permanent Intermediate slot."
+        "note": "Added 2026-09-01 by club management \u2014 permanent Intermediate slot."
       },
       {
         "name": "Women's Advanced Contract Time",
@@ -124,7 +130,7 @@
         "max_participants": 10,
         "level": "Advanced Intermediate",
         "event_id": 1717124,
-        "note": "RULE set by club management 2026-09-13: the daily job (14 days out) books this every Thursday 16:00-18:00 as an occurrence of CR event 1717124 — it is NOT a CR recurring series and must not be entered as one. Previously Wednesday 15:00-17:00; the already-booked Wednesday 2026-09-16 occurrence stays. Listed FIRST among Thursday entries so Pass 0 assigns its courts before the others. The other Thursday fixed events were re-timed on the same date so this one is never dropped: with 2 courts here, only one other fixed court fits in 16:00-18:00 under hard_constraint 6 (max 3 concurrent) — management kept Mens Advanced Plus 17:00-19:00 as that one. If no court pair is free Pass 0 now falls back to a single court (max_participants scaled down) rather than skipping; a skip is reported as stats.skipped_fixed_events reason no_court. event_id added 2026-09-01."
+        "note": "RULE set by club management 2026-09-13: the daily job (14 days out) books this every Thursday 16:00-18:00 as an occurrence of CR event 1717124 \u2014 it is NOT a CR recurring series and must not be entered as one. Previously Wednesday 15:00-17:00; the already-booked Wednesday 2026-09-16 occurrence stays. Listed FIRST among Thursday entries so Pass 0 assigns its courts before the others. The other Thursday fixed events were re-timed on the same date so this one is never dropped: with 2 courts here, only one other fixed court fits in 16:00-18:00 under hard_constraint 6 (max 3 concurrent) \u2014 management kept Mens Advanced Plus 17:00-19:00 as that one. If no court pair is free Pass 0 now falls back to a single court (max_participants scaled down) rather than skipping; a skip is reported as stats.skipped_fixed_events reason no_court. event_id added 2026-09-01."
       },
       {
         "name": "Mens Advanced Plus Open Play",
@@ -161,7 +167,7 @@
         "courts": 1,
         "level": "Intermediate",
         "event_id": 1240908,
-        "note": "Moved 09:00 -> 10:00 on 2026-09-01 by club management. WOMEN'S ONLY. event_id pins the real CR series so the TS Pass 0 books it as itself (see PR #30). recommender.py ignores event_id and still books a co-ed clone — see fixed_events.python_pass0_caveat."
+        "note": "Moved 09:00 -> 10:00 on 2026-09-01 by club management. WOMEN'S ONLY. event_id pins the real CR series so the TS Pass 0 books it as itself (see PR #30). recommender.py ignores event_id and still books a co-ed clone \u2014 see fixed_events.python_pass0_caveat."
       },
       {
         "name": "Co-Ed up to 3.25 Level Play",
@@ -205,6 +211,46 @@
         "end_time": "11:00",
         "courts": 1,
         "level": "Advanced"
+      },
+      {
+        "name": "Co-Ed Advanced Structured Play",
+        "day_of_week": "Tuesday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 2,
+        "level": "Advanced",
+        "event_id": 1135589,
+        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
+      },
+      {
+        "name": "Co-Ed Advanced Structured Play",
+        "day_of_week": "Thursday",
+        "start_time": "10:00",
+        "end_time": "12:00",
+        "courts": 2,
+        "level": "Advanced",
+        "event_id": 1135589,
+        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
+      },
+      {
+        "name": "Co-Ed Advanced Structured Play",
+        "day_of_week": "Saturday",
+        "start_time": "15:00",
+        "end_time": "17:00",
+        "courts": 2,
+        "level": "Advanced",
+        "event_id": 1135589,
+        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
+      },
+      {
+        "name": "Co-Ed Advanced Structured Play",
+        "day_of_week": "Sunday",
+        "start_time": "10:00",
+        "end_time": "12:00",
+        "courts": 2,
+        "level": "Advanced",
+        "event_id": 1135589,
+        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
       }
     ]
   },
