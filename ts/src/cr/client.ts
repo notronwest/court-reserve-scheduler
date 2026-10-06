@@ -9,6 +9,7 @@ import type {
   CheckinCandidate,
   CheckinResult,
 } from './types'
+import type { FixedEvent } from '../policy'
 
 /**
  * HTTP client for the `courtreserve-api` service — the fleet's single Court Reserve
@@ -30,6 +31,13 @@ export class CourtReserveClient {
     const q = new URLSearchParams({ start, end })
     const data = await this.request<{ items: ScheduleItem[] }>('GET', `/schedule?${q}`)
     return data.items
+  }
+
+  /** The standing weekly pattern (D-0056) — Postgres-backed, written by the mini on a
+   *  dashboard confirm; read here over HTTP rather than from policy.json directly. */
+  async fixedEvents(): Promise<FixedEvent[]> {
+    const data = await this.request<{ events: FixedEvent[] }>('GET', '/fixed-events')
+    return data.events
   }
 
   /** Full occurrences with a waitlist in the next `days` days, for the given events. */

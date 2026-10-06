@@ -40,6 +40,18 @@ describe('CourtReserveClient', () => {
     expect(JSON.parse(opts.body as string).court_id).toBe('3')
   })
 
+  it('fixedEvents() GETs /fixed-events and returns the events array', async () => {
+    const events = [{ name: 'Co-Ed Advanced Structured Play', day_of_week: 'Tuesday', start_time: '17:00', end_time: '19:00' }]
+    const f = mockFetch(200, { events })
+    vi.stubGlobal('fetch', f)
+    const cr = new CourtReserveClient('http://svc', 'secret')
+    const result = await cr.fixedEvents()
+    expect(result).toEqual(events)
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit]
+    expect(String(url)).toContain('/fixed-events')
+    expect(opts.method).toBe('GET')
+  })
+
   it('throws on non-2xx with the status and body', async () => {
     vi.stubGlobal('fetch', mockFetch(500, 'boom'))
     const cr = new CourtReserveClient('http://svc', 'k')

@@ -24,6 +24,9 @@ logs/
 # History data (fetched at runtime)
 history/
 
+# Fixed-events cache (fetched at runtime, D-0056)
+state/
+
 # macOS
 .DS_Store
 
