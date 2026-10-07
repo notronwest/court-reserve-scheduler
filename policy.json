@@ -79,15 +79,6 @@
     "pass0_min_gap_caveat": "FIXED 2026-09-06 (kept as a record). Pass 0 used to check only _max_occ_for(eid) / maxOccFor(eid) before add() and never call event_gap_ok(), so two fixed events resolving to the same event id at the same hour \u2014 or one whose event id was already on the live schedule then \u2014 booked a zero-gap duplicate, violating hard_constraint 3b. Both engines now apply the gap check in Pass 0 and report anything they decline in stats.skipped_fixed_events (reason: min_gap | max_occurrences | no_court \u2014 the last added 2026-09-13, when Pass 0 also gained a single-court fallback for 2-court events with no free pair). NOTE for adding fixed events: two entries at the same hour are only bookable when they are genuinely different CR events \u2014 give the branded one its own event_id. That is what the requested Thursday 17:00-19:00 Intermediate slot still needs: 'Co-Ed 3.25-3.5 Level Play' has no event_id of its own and resolves to 1931656, so a second generic entry is correctly skipped.",
     "events": [
       {
-        "name": "Co-Ed 3.75+ Level Play",
-        "day_of_week": "Monday",
-        "start_time": "17:00",
-        "end_time": "19:00",
-        "courts": 1,
-        "level": "Advanced",
-        "event_id": 1982138
-      },
-      {
         "name": "Co-ed Intermediate Open Play",
         "day_of_week": "Monday",
         "start_time": "16:00",
@@ -114,14 +105,6 @@
         "level": "Advanced"
       },
       {
-        "name": "Co-ed 3.5-3.75+ Level Play",
-        "day_of_week": "Tuesday",
-        "start_time": "17:00",
-        "end_time": "19:00",
-        "courts": 1,
-        "level": "Advanced Intermediate"
-      },
-      {
         "name": "Women's Advanced Intermediate Open Play",
         "day_of_week": "Thursday",
         "start_time": "16:00",
@@ -142,15 +125,6 @@
         "note": "Kept at 17:00-19:00 by club management on 2026-09-13 as the one other Thursday fixed court allowed alongside the 2-court women's 16:00-18:00 block (hard_constraint 6, max 3 concurrent)."
       },
       {
-        "name": "Co-Ed 3.25-3.5 Level Play",
-        "day_of_week": "Thursday",
-        "start_time": "18:00",
-        "end_time": "20:00",
-        "courts": 1,
-        "level": "Intermediate",
-        "note": "Moved 17:00-19:00 -> 18:00-20:00 on 2026-09-13 to make room for the women's Advanced Intermediate 16:00-18:00 rule (Thursday 17:00-18:00 would otherwise need 5 courts); management kept Mens Advanced Plus at 17:00. Stays in the after-work window; operating_windows.weekday ends 20:00."
-      },
-      {
         "name": "Co-Ed Advanced Intermediate Open Play",
         "day_of_week": "Thursday",
         "start_time": "18:00",
@@ -168,15 +142,6 @@
         "level": "Intermediate",
         "event_id": 1240908,
         "note": "Moved 09:00 -> 10:00 on 2026-09-01 by club management. WOMEN'S ONLY. event_id pins the real CR series so the TS Pass 0 books it as itself (see PR #30). recommender.py ignores event_id and still books a co-ed clone \u2014 see fixed_events.python_pass0_caveat."
-      },
-      {
-        "name": "Co-Ed up to 3.25 Level Play",
-        "day_of_week": "Friday",
-        "start_time": "12:00",
-        "end_time": "14:00",
-        "courts": 1,
-        "level": "Beginner",
-        "event_id": 1986151
       },
       {
         "name": "Co-Ed Advanced Open Play",
@@ -251,6 +216,51 @@
         "level": "Advanced",
         "event_id": 1135589,
         "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
+      }
+    ],
+    "retired_events_note": "Paused recurring events kept here verbatim (not deleted) so club management can reinstate a slot by copying it back into events, rather than re-deriving its time/courts/event_id. Nothing reads this block \u2014 neither engine iterates fixed_events.retired_events, only fixed_events.events (ts/src/recommender.ts, ts/src/policy.ts, ts/src/fixedEvents.ts, recommender.py).",
+    "retired_events": [
+      {
+        "name": "Co-Ed 3.75+ Level Play",
+        "day_of_week": "Monday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Advanced",
+        "event_id": 1982138,
+        "retired_on": "2026-10-07",
+        "retired_reason": "Level Play paused by club management until further notice"
+      },
+      {
+        "name": "Co-ed 3.5-3.75+ Level Play",
+        "day_of_week": "Tuesday",
+        "start_time": "17:00",
+        "end_time": "19:00",
+        "courts": 1,
+        "level": "Advanced Intermediate",
+        "retired_on": "2026-10-07",
+        "retired_reason": "Level Play paused by club management until further notice"
+      },
+      {
+        "name": "Co-Ed 3.25-3.5 Level Play",
+        "day_of_week": "Thursday",
+        "start_time": "18:00",
+        "end_time": "20:00",
+        "courts": 1,
+        "level": "Intermediate",
+        "retired_on": "2026-10-07",
+        "retired_reason": "Level Play paused by club management until further notice"
+      },
+      {
+        "name": "Co-Ed up to 3.25 Level Play",
+        "day_of_week": "Friday",
+        "start_time": "12:00",
+        "end_time": "14:00",
+        "courts": 1,
+        "level": "Beginner",
+        "event_id": 1986151,
+        "retired_on": "2026-10-07",
+        "retired_reason": "Level Play paused by club management until further notice"
       }
     ]
   },
