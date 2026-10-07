@@ -5,6 +5,39 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-07 (later) — Reviewer: PR #66 (issue #65) → APPROVE
+
+**Done:** Reviewed [PR #66](https://github.com/notronwest/court-reserve-scheduler/pull/66)
+(`Closes #65`, retires the four Level Play fixed events) against the issue's
+acceptance criteria, per `agents/reviewer/PROMPT.md`/`ROLE.md`. `gh pr diff`/
+`gh pr view`/`gh pr comment` hit `GraphQL: API rate limit already exceeded`
+repeatedly (REST calls to the same endpoints worked fine — looks like a
+GraphQL-specific throttle, same flakiness class the Builder noted above);
+worked around it by using `gh api` REST endpoints throughout, including for
+posting the verdict comment and the label. Verified directly rather than
+trusting the PR body: fetched the head commit's `policy.json` and parsed it
+— 15 active `fixed_events.events`, zero matching `/level play/i`, exactly
+the four issue-table entries in the new `retired_events` block with
+`day_of_week`/`start_time`/`end_time`/`courts`/`level`/`event_id` preserved
+byte-for-byte; grepped `ts/src/recommender.ts`, `ts/src/policy.ts`,
+`ts/src/fixedEvents.ts`, `recommender.py` to confirm none reads
+`fixed_events.retired_events`; diffed `main` against the PR branch to
+confirm zero `approved_events` lines touched (satisfies the issue's
+"do not touch" constraint on 1982138/1986151); confirmed
+`ts/tests/fixtures/policy.json` is a separate file from the root
+`policy.json` this PR edits, so the Level Play references in
+`fixed-events.test.ts` are correctly left alone. No UI in this diff (pure
+JSON), so design-system/phone-gate/D-0049 checks don't apply; no steps
+handed to Ron (D-0068 n/a); CI ("PR links an issue") green,
+`mergeable_state: clean`, not a draft. Posted `VERDICT: APPROVE` as a PR
+comment with cited findings, added label `reviewed:approve`.
+
+**Next:** Per D-0052 the dispatcher merges on this APPROVE (CI green, not
+draft/conflicting) and moves the board card to Done — no Ron click needed
+for this one. Once merged, the daily 8 AM scheduler stops
+recommending/booking Level Play, as tracked in the Builder entry below.
+
+---
 ## 2026-10-07 — Builder: PR #66 (issue #65) → retire the four Level Play fixed events
 
 **Done:** Single-item Builder run on issue #65 ("Stop generating recurring
