@@ -5,6 +5,49 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-07 — Builder: PR #66 (issue #65) → retire the four Level Play fixed events
+
+**Done:** Single-item Builder run on issue #65 ("Stop generating recurring
+Level Play events"). Confirmed #65 had no existing sub-issues/open PRs (clean
+build, not rework), moved the card In Progress → In Review, worked in an
+isolated worktree (`/tmp/wt-issue-65`, removed on completion). Edited
+`policy.json` only: moved the four Level Play entries (Mon 17:00, Tue 17:00,
+Thu 18:00, Fri 12:00) out of `fixed_events.events` into a new sibling
+`fixed_events.retired_events` block, preserved verbatim with
+`retired_on`/`retired_reason`, so club management can reinstate a slot by
+copying it back. No code touched — confirmed both engines
+(`ts/src/recommender.ts` prod, `recommender.py` rollback-only) only ever
+iterate `fixed_events.events`. Verified: `npm run typecheck` clean, full
+vitest suite green (128/128 — the `fixed-events.test.ts` / golden fixtures
+the issue flagged load their own `tests/fixtures/policy.json` copy, untouched
+and unaffected), and a 5-day Mon–Fri dry-run diffed against the pre-change
+policy showed the only delta is the four Level Play slots disappearing (freed
+capacity absorbed by the recommender's normal demand-fill, not a replacement
+event, per the issue's own instruction not to backfill). Opened
+[PR #66](https://github.com/notronwest/court-reserve-scheduler/pull/66)
+(`Closes #65`), confirmed GitHub's closing-issue link registered (lagged a
+few seconds behind a run of transient GraphQL 500s on `gh project item-edit`
+— same class of flakiness as the recurring rate-limit note below, retried
+until it took), moved the board card to In Review.
+
+**Flagged, not fixed:** the issue's "Constraints" section asserts `1982138`
+and `1986151` "stay in the `approved_events` whitelist" — checked, and
+neither ID is actually present in `approved_events` in the current
+`policy.json`; `!book`/`!move` validation only accepts IDs that are keys
+there, not in `fixed_events`. So ad-hoc `!book` of these two by number wasn't
+working before this change either, and this PR doesn't change that (both IDs
+are preserved verbatim in `retired_events`; `approved_events` itself is
+untouched, as the issue explicitly required). Noted in the PR's Reviewer
+notes rather than guessing at a fix — restoring that would need an explicit
+`approved_events` addition, which is a separate ask.
+
+**Next:** Ron reviews and merges PR #66 (the only gate); once merged the
+daily 8 AM scheduler stops recommending/booking Level Play. The three
+already-booked zero-registrant Level Play occurrences (10/9, 10/16, 10/19)
+are being cancelled separately through the approval rail per the issue —
+not part of this PR.
+
+---
 ## 2026-10-02 (later still) — Reviewer: PR #56 (issue #51) → APPROVE
 
 **Done:** Reviewed [PR #56](https://github.com/notronwest/court-reserve-scheduler/pull/56)
