@@ -21,6 +21,7 @@ import {
 import type { AutoBookResult } from './discord/execute'
 import type { DiscordRest } from './discord/rest'
 import { resolvePolicyProvenance, type PolicyProvenance } from './policyProvenance'
+import { withRetry } from './retry'
 import { resolveFixedEvents as resolveFixedEventsDefault, type FixedEventsResult } from './fixedEvents'
 
 export interface SchedulerDeps {
@@ -94,7 +95,14 @@ export function saveBookingLog(
 export async function runScheduler(
   targetDate: string,
   deps: SchedulerDeps,
-  opts: { dryRun?: boolean; llm?: boolean; autoBook?: boolean } = {},
+  opts: {
+    dryRun?: boolean
+    llm?: boolean
+    autoBook?: boolean
+    /** Retry delays for the live schedule fetch (default 20 s, 60 s); tests pass []. */
+    fetchRetryDelaysMs?: number[]
+    sleep?: (ms: number) => Promise<void>
+  } = {},
 ): Promise<SchedulerResult> {
   const log = deps.log ?? (() => {})
   const useLlm = opts.llm ?? true
@@ -121,7 +129,14 @@ export async function runScheduler(
   log(`Fetching schedule for ${targetDate}…`)
   let items
   try {
-    items = await deps.cr.schedule(targetDate, targetDate)
+    // One flaky browser page-load at 8:00:04 cost the whole day three times
+    // (10/05, 10/06, 10/14). The read is idempotent — retry it before alerting.
+    items = await withRetry(() => deps.cr.schedule(targetDate, targetDate), {
+      delaysMs: opts.fetchRetryDelaysMs,
+      sleep: opts.sleep,
+      label: `schedule fetch ${targetDate}`,
+      log,
+    })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     log(`Schedule fetch failed: ${message}`)

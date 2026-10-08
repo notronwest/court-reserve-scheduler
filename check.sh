@@ -112,7 +112,7 @@ fi
 
 # ── launchd services ─────────────────────────────────────────────────────────
 head "launchd services"
-for svc in com.whitemountain.listener com.whitemountain.scheduler com.whitemountain.fetch-history com.whitemountain.check-waitlists com.whitemountain.checkin; do
+for svc in com.whitemountain.listener com.whitemountain.scheduler com.whitemountain.catch-up com.whitemountain.fetch-history com.whitemountain.check-waitlists com.whitemountain.checkin; do
     plist="$HOME/Library/LaunchAgents/${svc}.plist"
     if [[ ! -f "$plist" ]]; then
         fail "$svc.plist not installed — run ./setup.sh"
