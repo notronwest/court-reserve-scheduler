@@ -98,6 +98,12 @@ async function main(): Promise<void> {
       )
       if (autoBook) {
         console.log(`Done: booked ${result.booked ?? 0}, failed ${result.failed ?? 0} for ${date}`)
+        // A run that was meant to book and booked nothing is a failed run — exit
+        // non-zero so launchd's err log and the heartbeat wrapper both see it.
+        if ((result.booked ?? 0) === 0 && result.recommendations.length > 0) {
+          console.error(`schedule ${date}: 0 of ${result.recommendations.length} recommendation(s) booked`)
+          process.exit(1)
+        }
       } else {
         console.log(`Done: ${result.recommendations.length} rec(s), source=${result.stats.rec_source}`)
       }
@@ -105,9 +111,9 @@ async function main(): Promise<void> {
     }
 
     case 'catch-up': {
-      // Walk today..today+14, flag dates the daily job left empty or short,
-      // and (with --book) re-run the normal recommend+book path for those
-      // dates only — the #50 recovery path for a horizon with holes in it.
+      // Walk today..today+14, flag dates the daily job left empty / missed /
+      // thin, and (with --book) re-run the normal recommend+book path for the
+      // empty + missed dates only — the #50 recovery path, scheduled at 8:30.
       const rest = new DiscordRest({
         botToken: process.env.DISCORD_BOT_TOKEN ?? '',
         channelId: process.env.DISCORD_CHANNEL_ID ?? '',
@@ -122,13 +128,21 @@ async function main(): Promise<void> {
           historyPath: resolve(logsDir(), '..', 'history', 'history_latest.json'),
           log: (m) => console.log(`${new Date().toISOString()}  ${m}`),
         },
-        { book: flags.has('--book'), log: (m) => console.log(m) },
+        {
+          book: flags.has('--book'),
+          bookThin: flags.has('--book-thin'),
+          logsDir: logsDir(),
+          log: (m) => console.log(m),
+        },
       )
       const flagged = result.days.filter((d) => d.status !== 'ok')
-      console.log(
-        `Done: ${flagged.length} day(s) flagged` +
-          (result.booked.length ? `, ${result.booked.length} re-booked` : ''),
-      )
+      const reBooked = result.booked.filter((b) => !b.error && b.booked > 0).length
+      console.log(`Done: ${flagged.length} day(s) flagged` + (reBooked ? `, ${reBooked} re-booked` : ''))
+      // Unreadable days or a failed re-book are a failed run: exit non-zero so
+      // the wrapper withholds the heartbeat and launchd's err log shows it.
+      if (result.days.some((d) => d.status === 'unknown') || result.booked.some((b) => b.error)) {
+        process.exit(1)
+      }
       break
     }
 
@@ -138,7 +152,7 @@ async function main(): Promise<void> {
       console.error('  fetch <start> [end]         — pull the live CR schedule (M/D/YYYY)')
       console.error('  recommend <date> [--llm]    — compute + print recs (no Discord)')
       console.error('  schedule <date> [--dry-run] — generate, post to Discord, save pending approval')
-      console.error('  catch-up [--book]           — flag/re-book empty or short dates in the 14-day horizon')
+      console.error('  catch-up [--book] [--book-thin] — flag/re-book empty or missed dates in the 14-day horizon')
       process.exit(1)
   }
 }

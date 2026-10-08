@@ -52,8 +52,11 @@ step "1. Stopping launchd services"
 
 SERVICES=(
     "com.whitemountain.scheduler"
+    "com.whitemountain.catch-up"
     "com.whitemountain.fetch-history"
     "com.whitemountain.listener"
+    "com.whitemountain.check-waitlists"
+    "com.whitemountain.checkin"
 )
 
 for svc in "${SERVICES[@]}"; do

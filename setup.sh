@@ -261,6 +261,7 @@ install_plist() {
 }
 
 install_plist "com.whitemountain.scheduler"
+install_plist "com.whitemountain.catch-up"
 install_plist "com.whitemountain.fetch-history"
 install_plist "com.whitemountain.listener"
 install_plist "com.whitemountain.check-waitlists"

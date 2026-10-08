@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.whitemountain.catch-up</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/notronwest/data/web/wmpc/projects/court-reserve-scheduler/ts/ops/run-catch-up.sh</string>
+    </array>
+
+    <!-- Daily at 8:30 AM — after the 8:00 scheduler has had its ~8 minutes.
+         Walks today..today+14 and re-books any day the 8:00 run missed. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>8</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_catch_up.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/notronwest/Library/Logs/court_reserve/launchd_catch_up_err.log</string>
+</dict>
+</plist>

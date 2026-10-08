@@ -223,7 +223,7 @@ describe('runScheduler', () => {
         fixedEvents: async () => policy.fixed_events?.events ?? [],
       } as never,
     }
-    await expect(runScheduler(DATE, d, { llm: false, autoBook: true })).rejects.toThrow('500')
+    await expect(runScheduler(DATE, d, { llm: false, autoBook: true, fetchRetryDelaysMs: [] })).rejects.toThrow('500')
     expect(posted.length).toBe(1)
     expect(posted[0].embeds?.[0].title).toContain('Schedule fetch failed')
     expect(posted[0].embeds?.[0].description).toContain('boom')
@@ -297,5 +297,62 @@ describe('runScheduler', () => {
     const alert = posted.find((p) => p.embeds?.[0].title?.includes('Fixed events read failed'))
     expect(alert).toBeDefined()
     expect(alert!.embeds?.[0].description).toContain('no cache available')
+  })
+})
+
+describe('runScheduler — flaky fetch retry (#50, 10/14 hole)', () => {
+  let tmp: string
+  beforeEach(() => (tmp = mkdtempSync(resolve(tmpdir(), 'sched-retry-'))))
+  afterEach(() => rmSync(tmp, { recursive: true, force: true }))
+
+  it('retries a schedule fetch that times out and then books normally — no alert posted', async () => {
+    const posted: { embeds?: { title?: string }[] }[] = []
+    const log: string[] = []
+    let fetches = 0
+    const d = {
+      cr: {
+        schedule: async () => {
+          fetches += 1
+          if (fetches < 3) throw new Error('courtreserve-api GET /schedule -> 500: Page.goto: Timeout 30000ms exceeded')
+          return [] as ScheduleItem[]
+        },
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
+        book: async () => ({ success: true, occurrence_id: 1 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+      rest: { postEmbed: async (p: unknown) => { posted.push(p as never); return 'm1' } } as never,
+      policy,
+      pendingPath: resolve(tmp, 'pending_approval.json'),
+      stateDir: resolve(tmp, 'state'),
+      resolveProvenance: () => ({ policy_sha: 'abc1234def', head_sha: 'abc1234def', behind_origin_main: 0 }),
+      log: (m: string) => log.push(m),
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true, fetchRetryDelaysMs: [0, 0] })
+    expect(fetches).toBe(3)
+    expect(res.booked).toBe(res.recommendations.length)
+    expect(log.filter((l) => l.includes('retrying'))).toHaveLength(2)
+    expect(posted.some((p) => p.embeds?.[0].title?.includes('Schedule fetch failed'))).toBe(false)
+  })
+
+  it('a fetch dead after every retry still alerts and rethrows', async () => {
+    const posted: { embeds?: { title?: string }[] }[] = []
+    let fetches = 0
+    const d = {
+      cr: {
+        schedule: async () => {
+          fetches += 1
+          throw new Error('courtreserve-api GET /schedule -> 500: boom')
+        },
+        fixedEvents: async () => policy.fixed_events?.events ?? [],
+      } as never,
+      rest: { postEmbed: async (p: unknown) => { posted.push(p as never); return 'm1' } } as never,
+      policy,
+      pendingPath: resolve(tmp, 'pending_approval.json'),
+      stateDir: resolve(tmp, 'state'),
+      resolveProvenance: () => ({ policy_sha: 'abc1234def', head_sha: 'abc1234def', behind_origin_main: 0 }),
+    }
+    await expect(runScheduler(DATE, d, { llm: false, autoBook: true, fetchRetryDelaysMs: [0, 0] })).rejects.toThrow('500')
+    expect(fetches).toBe(3)
+    expect(posted.some((p) => p.embeds?.[0].title?.includes('Schedule fetch failed'))).toBe(true)
   })
 })

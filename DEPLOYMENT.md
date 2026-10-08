@@ -35,6 +35,16 @@ targets:
     config_scope: ts/.env on that machine (CRAPI_URL/KEY, Discord webhook + bot token, Anthropic API key) + policy.json + courts.json
     verify: ./check.sh, and the logs under ~/Library/Logs/court_reserve/
     rollback: git checkout an earlier commit and re-run ./setup.sh
+  - name: catch-up
+    kind: mac-mini-launchd
+    trigger: launchd com.whitemountain.catch-up — daily at 8:30 AM (installed/reloaded by ./setup.sh)
+    source: ts/ops/run-catch-up.sh → ts/src/cli.ts catch-up --book
+    env: PROD
+    url: n/a — re-books any date in today..today+14 the 8:00 run left empty or never finished (#50); posts one Discord embed only when it found something; heartbeats daemon job scheduler-catch-up on exit 0
+    host: same machine
+    config_scope: same ts/.env; reads logs/booking_log_*.json written by the 8:00 run
+    verify: ~/Library/Logs/court_reserve/launchd_catch_up.log — every date lists OK / MISSED / EMPTY / THIN / UNKNOWN with hours vs target
+    rollback: launchctl unload the plist
   - name: check-waitlists
     kind: mac-mini-launchd
     trigger: launchd com.whitemountain.check-waitlists — 9:00, 11:00, 13:00, 15:00, 17:00 daily
@@ -93,6 +103,7 @@ targets:
 | Target | Trigger | Runs |
 |---|---|---|
 | `scheduler` | launchd | daily 8:00 AM |
+| `catch-up` | launchd | daily 8:30 AM — re-books what 8:00 missed |
 | `check-waitlists` | launchd | 9:00 · 11:00 · 13:00 · 15:00 · 17:00 daily |
 | `fetch-history` | launchd | Mondays 7:00 AM |
 | `checkin` | launchd | Mondays 6:00 AM |

@@ -381,6 +381,92 @@ export function sendFailureAlert(
   return rest.postEmbed(buildFailureAlertEmbed(targetDate, title, detail))
 }
 
+// ── Catch-up report (#50, scheduled 8:30 AM) ───────────────────────────────────
+
+export interface CatchUpDayLine {
+  date: string
+  day_of_week: string
+  status: 'empty' | 'missed' | 'thin' | 'ok' | 'unknown'
+  existing_court_hours: number
+  target_court_hours: number
+  booking_log: 'ok' | 'none' | 'zero_booked'
+  error?: string
+}
+
+export interface CatchUpBookedLine {
+  date: string
+  booked: number
+  failed: number
+  error?: string
+}
+
+const CATCH_UP_WHY: Record<CatchUpDayLine['status'], string> = {
+  empty: 'nothing on the calendar',
+  missed: 'the 8 AM run never finished for this day',
+  thin: 'under half the target (cancelled, or bookings failed)',
+  unknown: 'live calendar could not be read',
+  ok: '',
+}
+
+/** One embed per catch-up run that found anything. Green when every gap was
+ *  re-booked, amber when something was only reported, red when a re-book or a
+ *  fetch failed. Silent (no post) when the horizon is clean — liveness is the
+ *  heartbeat's job, not Discord's. */
+export function buildCatchUpEmbed(
+  days: CatchUpDayLine[],
+  booked: CatchUpBookedLine[],
+  opts: { bookMode: boolean },
+): unknown {
+  const flagged = days.filter((d) => d.status !== 'ok')
+  const byDate = new Map(booked.map((b) => [b.date, b]))
+  const anyFailed = flagged.some((d) => d.status === 'unknown') || booked.some((b) => b.error || (b.booked === 0 && !b.error))
+  const allHandled = flagged.every((d) => {
+    const b = byDate.get(d.date)
+    return b && !b.error && b.booked > 0
+  })
+  const color = anyFailed ? 0xe74c3c : allHandled ? 0x2ecc71 : 0xf39c12
+
+  const lines = flagged.map((d) => {
+    const b = byDate.get(d.date)
+    const hours = `${d.existing_court_hours}h of ${d.target_court_hours}h`
+    let action: string
+    if (b?.error) action = `→ re-book FAILED: ${b.error.slice(0, 120)}`
+    else if (b) action = `→ re-booked ${b.booked}${b.failed ? ` (${b.failed} failed)` : ''}`
+    else if (d.status === 'unknown') action = `→ ${d.error?.slice(0, 120) ?? 'fetch failed'}`
+    else if (d.status === 'thin') action = opts.bookMode ? '→ reported only (thin days are never auto-filled)' : '→ reported'
+    else action = opts.bookMode ? '→ not booked' : '→ run `catch-up --book` to fill'
+    return `• **${d.day_of_week.slice(0, 3)} ${d.date}** — ${d.status.toUpperCase()}: ${CATCH_UP_WHY[d.status]} (${hours}) ${action}`
+  })
+
+  const nBooked = booked.filter((b) => !b.error && b.booked > 0).length
+  const title =
+    nBooked > 0
+      ? `🩹 Catch-up re-booked ${nBooked} day${nBooked === 1 ? '' : 's'} the 8 AM run missed`
+      : `🩹 Catch-up: ${flagged.length} day${flagged.length === 1 ? '' : 's'} need attention`
+
+  return {
+    embeds: [
+      {
+        title,
+        color,
+        description: lines.join('\n').slice(0, 3900),
+        footer: { text: `White Mountain Pickleball • Court Reserve Scheduler • ${HOSTNAME}` },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  }
+}
+
+export function sendCatchUpReport(
+  rest: DiscordRest,
+  days: CatchUpDayLine[],
+  booked: CatchUpBookedLine[],
+  opts: { bookMode: boolean },
+): Promise<string | null> {
+  if (days.every((d) => d.status === 'ok')) return Promise.resolve(null)
+  return rest.postEmbed(buildCatchUpEmbed(days, booked, opts))
+}
+
 // ── Send helpers ───────────────────────────────────────────────────────────────
 
 export function sendRecommendations(
