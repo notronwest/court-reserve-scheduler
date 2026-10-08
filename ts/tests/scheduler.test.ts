@@ -298,6 +298,105 @@ describe('runScheduler', () => {
     expect(alert).toBeDefined()
     expect(alert!.embeds?.[0].description).toContain('no cache available')
   })
+
+  // ── The feed IS the source of record, not policy.json (D-0056, #62) ──────────
+  // `FEED_ONLY` carries an event_id that appears nowhere in the policy fixture, so
+  // booking it proves the pattern came off the wire rather than off disk.
+  const FEED_ONLY = {
+    name: 'Feed-Only Structured Play',
+    day_of_week: 'Monday',
+    start_time: '13:00',
+    end_time: '15:00',
+    courts: 1,
+    max_participants: 5,
+    level: 'Intermediate',
+    event_id: 1990777,
+  }
+
+  it('books a standing slot that exists only in the feed, and records its source', async () => {
+    const posted: { embeds?: { title?: string; description?: string }[] }[] = []
+    const log: string[] = []
+    const d = {
+      ...deps(posted),
+      log: (m: string) => log.push(m),
+      cr: {
+        schedule: async () => scheduleItems,
+        fixedEvents: async () => [FEED_ONLY],
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+
+    expect(res.recommendations.some((r) => r.event_id === 1990777)).toBe(true)
+    // A clean live read never alerts.
+    expect(posted.some((p) => p.embeds?.[0].title?.includes('Fixed events read failed'))).toBe(false)
+    expect(log.some((m) => m.includes('Standing pattern: 1 active slot(s) from live'))).toBe(true)
+
+    const logged = JSON.parse(readFileSync(resolve(tmp, 'booking_log_7-13-2026.json'), 'utf8'))
+    expect(logged.fixed_events.source).toBe('live')
+    expect(logged.fixed_events.skipped).toEqual([])
+    expect(logged.fixed_events.expired).toBe(0)
+  })
+
+  it('does NOT book a feed row whose `until` has passed, and says so in the log', async () => {
+    const posted: { embeds?: { title?: string }[] }[] = []
+    const log: string[] = []
+    const retiredRow = { ...FEED_ONLY, event_id: 1990778, start_time: '16:00', end_time: '18:00', until: '2020-01-01' }
+    const d = {
+      ...deps(posted),
+      log: (m: string) => log.push(m),
+      cr: {
+        schedule: async () => scheduleItems,
+        fixedEvents: async () => [FEED_ONLY, retiredRow],
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+
+    expect(res.recommendations.some((r) => r.event_id === 1990777)).toBe(true)
+    expect(res.recommendations.some((r) => r.event_id === 1990778)).toBe(false)
+    expect(log.some((m) => m.includes('1 retired pattern(s) skipped'))).toBe(true)
+
+    const logged = JSON.parse(readFileSync(resolve(tmp, 'booking_log_7-13-2026.json'), 'utf8'))
+    expect(logged.fixed_events.expired).toBe(1)
+  })
+
+  it('logs and records a pinned slot that could not be placed (every pinned court taken)', async () => {
+    const posted: { embeds?: { title?: string }[] }[] = []
+    const log: string[] = []
+    // Court 2 is booked solid over the slot, and the pattern pins ONLY court 2.
+    const busy: ScheduleItem[] = [
+      {
+        EventId: 999,
+        Id: 2,
+        StartDateTime: '2026-07-13T13:00:00',
+        EndDateTime: '2026-07-13T15:00:00',
+        Courts: 'Pickleball-Court #2',
+      },
+    ]
+    const d = {
+      ...deps(posted),
+      log: (m: string) => log.push(m),
+      cr: {
+        schedule: async () => busy,
+        fixedEvents: async () => [{ ...FEED_ONLY, preferred_courts: [2] }],
+        book: async () => ({ success: true, occurrence_id: 111 }),
+        setCourts: async () => ({ success: true }),
+      } as never,
+    }
+    const res = await runScheduler(DATE, d, { llm: false, autoBook: true })
+
+    expect(res.recommendations.some((r) => r.event_id === 1990777)).toBe(false)
+    expect(res.stats.skipped_fixed_events).toContainEqual(
+      expect.objectContaining({ event_id: 1990777, reason: 'no_court' }),
+    )
+    expect(log.some((m) => m.includes('Fixed event NOT booked') && m.includes('reason=no_court'))).toBe(true)
+
+    const logged = JSON.parse(readFileSync(resolve(tmp, 'booking_log_7-13-2026.json'), 'utf8'))
+    expect(logged.fixed_events.skipped[0].reason).toBe('no_court')
+  })
 })
 
 describe('runScheduler — flaky fetch retry (#50, 10/14 hole)', () => {

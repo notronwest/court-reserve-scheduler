@@ -177,3 +177,82 @@ describe('Pass 0 never drops a fixed event silently', () => {
     )
   })
 })
+
+// ── preferred_courts: the pinned-court assignment from the dashboard ───────────
+// The `preferred_courts` branch in Pass 0 already worked; until D-0056 was wired
+// up nothing ever SET it, so pinning a court from the dashboard was a control
+// with no effect. These lock in the behaviour now that the feed supplies it.
+describe('preferred_courts (pinned courts from the standing pattern)', () => {
+  const pinned = (preferred_courts: number[], courts = 1) => ({
+    name: "Women's Advanced Intermediate Open Play",
+    day_of_week: 'Monday',
+    start_time: '12:00',
+    end_time: '14:00',
+    courts,
+    max_participants: courts === 2 ? 10 : 5,
+    level: 'Advanced Intermediate',
+    event_id: 1717124,
+    preferred_courts,
+  })
+
+  it('books the pinned court instead of the default court order', () => {
+    const policy = basePolicy()
+    // Court 2 is nobody's first choice — the default order prefers 4 — so seeing
+    // 2 proves the pin, not a coincidence.
+    policy.fixed_events!.events!.unshift(pinned([2]))
+    const { recommendations, stats } = recommend([], MON, policy, { popularity: new Map() })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)!
+    expect(w.court_num).toBe(2)
+    expect(w.extra_court_nums).toEqual([])
+    expect(stats.skipped_fixed_events).toEqual([])
+  })
+
+  it('honours a pinned PAIR over the two_court_priority_pairs default', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(pinned([1, 2], 2))
+    const { recommendations } = recommend([], MON, policy, { popularity: new Map() })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)!
+    expect([w.court_num, ...w.extra_court_nums].sort()).toEqual([1, 2])
+    expect(w.max_participants).toBe(10)
+  })
+
+  it('falls back to the free subset of the pins when one pinned court is taken', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(pinned([1, 2], 2))
+    // Court 1 is busy 12:00–14:00; the event keeps its other pin rather than dying.
+    const { recommendations, stats } = recommend(live([1]), MON, policy, { popularity: new Map() })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)!
+    expect(w.court_num).toBe(2)
+    expect(w.extra_court_nums).toEqual([])
+    expect(w.max_participants).toBe(5) // 10 configured for 2 courts -> 5 on 1
+    expect(stats.skipped_fixed_events).toEqual([])
+  })
+
+  it('never silently drops the event when EVERY pinned court is taken — reports no_court', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(pinned([1, 2], 2))
+    // Both pins busy. Courts 3 and 4 are free, but a pin is an instruction, not a
+    // hint: it does NOT spill onto an unpinned court. The slot is skipped, loudly.
+    const { recommendations, stats } = recommend(live([1, 2]), MON, policy, {
+      popularity: new Map(),
+    })
+
+    expect(recommendations.some((r) => r.event_id === 1717124)).toBe(false)
+    expect(stats.skipped_fixed_events).toContainEqual(
+      expect.objectContaining({ event_id: 1717124, reason: 'no_court', start_time: '12:00' }),
+    )
+  })
+
+  it('ignores a pinned court number that is not in the club inventory', () => {
+    const policy = basePolicy()
+    policy.fixed_events!.events!.unshift(pinned([9, 3], 1))
+    const { recommendations, stats } = recommend([], MON, policy, { popularity: new Map() })
+
+    const w = recommendations.find((r) => r.event_id === 1717124)!
+    expect(w.court_num).toBe(3)
+    expect(stats.skipped_fixed_events).toEqual([])
+  })
+})

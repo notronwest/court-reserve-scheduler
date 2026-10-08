@@ -5,6 +5,65 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-08 — D-0056 finished: the standing pattern comes off the feed, and a never-worked read bug
+
+**Context:** D-0056's ticket (#62, "Read the standing pattern from courtreserve-api
+(GET /fixed-events) with a local cache; policy.json becomes the fallback seed; alert
+on read failure") was handed over as *closed without being built*. It was not: PR #63
+(`af597c2`) built `ts/src/fixedEvents.ts`, wired it into `runScheduler`, and shipped
+the cache + alert + seed-fallback. Verified on `origin/main` before writing anything.
+What was actually missing is smaller and worse.
+
+**Done:**
+
+- **Fixed a read that has never worked.** `CourtReserveClient.fixedEvents()` read
+  `data.events`; the service returns the rows under `items` (courtreserve-api
+  `queries.fixed_events`, the same shape as `/schedule`, from the endpoint's first
+  commit). So a *successful* read resolved `undefined`, Pass 0 iterated an empty
+  pattern, and **nothing alerted** — the whole standing weekly schedule would stop
+  being booked in silence. `ts/tests/cr-client.test.ts` mocked `{ events }`, so the
+  test asserted the bug and passed. A payload with no `items` array is now a failed
+  read, which routes to the cache and fires the Discord alert.
+  This was **latent, not yet firing**: the courtreserve-api instance at the
+  scheduler's configured `CRAPI_URL` does not serve `/fixed-events` at all (41
+  endpoints, no `/fixed-events`), so today every read 404s, falls back to the
+  `policy.json` seed and alerts — correct, loud behaviour. The silent-empty failure
+  would have struck the *day courtreserve-api was redeployed* and the feed came up.
+- **`until` is now honoured, on every source.** A row whose `until` is on or before
+  today is not booked. The service filters it server-side, but the cache and the seed
+  do not — so a slot retired yesterday came back from a stale cache. The cache is
+  stored unfiltered and the cutoff re-applied on each read, so it is judged against
+  today's date, not the date it was written. This is the mechanism that makes the
+  dashboard's retirement switch actually reach the booker.
+- **An empty pattern alerts.** "Everything is retired" and "the read quietly returned
+  nothing" are indistinguishable to the recommender, and the second one has now
+  happened once.
+- **`preferred_courts` is live.** The `preferred_courts` branch in Pass 0 was already
+  correct; nothing ever *set* it, so pinning a court from the dashboard was a control
+  with no effect. It now receives values off the feed. A pin is an instruction, not a
+  hint: the slot takes the free subset of its pins and does not spill onto an unpinned
+  court; if every pinned court is taken it is skipped as `no_court`.
+- **An unplaced fixed event is no longer invisible.** `stats.skipped_fixed_events` was
+  computed and then dropped on the floor on the auto-book path (`stats` is never
+  written there). Each skip is now logged, and `logs/booking_log_<date>.json` carries
+  `fixed_events` (`source`, `skipped`, `expired`).
+- **Corrected `policy.json`'s `retired_events_note`**, which claimed "Nothing reads
+  this block". courtreserve-api's seed sync does read it, to stamp `until` on the
+  matching table rows — that is the whole retirement path.
+- 159 tests pass (142 before; +17), typecheck clean, no pre-existing failures.
+  `ts/src/recommender.ts` is untouched: no booking decision changed, and no mutating
+  Court Reserve call was added anywhere.
+
+**Next:** Review and merge
+[PR #68](https://github.com/notronwest/court-reserve-scheduler/pull/68). Then two
+things are needed before the chain actually works end to end, neither in this repo:
+**(1)** redeploy courtreserve-api on the host so `GET /fixed-events` exists, and
+**(2)** add the `preferred_courts int[]` column (the parallel contract work). Until
+(1), the scheduler books from the `policy.json` seed and alerts daily — safe, but the
+dashboard's court assignment stays cosmetic. This repo ships by `./setup.sh` on the
+club Mac mini; merging to `main` deploys nothing.
+
+---
 ## 2026-10-07 (later) — Reviewer: PR #66 (issue #65) → APPROVE
 
 **Done:** Reviewed [PR #66](https://github.com/notronwest/court-reserve-scheduler/pull/66)

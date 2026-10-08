@@ -68,7 +68,32 @@ reachable ad hoc but not what the 8 AM agent runs.
 | `logs/booking_log_*.json` | Per-day booking results (audit trail) |
 | `history/history_latest.json` | Attendance data used by recommender |
 | `cache/chrome_profile/` | Saved Court Reserve browser session |
-| `state/fixed-events.json` | Last-good cache of the standing weekly pattern (D-0056), read from `courtreserve-api GET /fixed-events`; used when that read fails |
+| `state/fixed-events.json` | Last-good cache of the standing weekly pattern (D-0056), read from `courtreserve-api GET /fixed-events` (which returns the rows under `items`); used when that read fails. Cached **unfiltered** — the `until` cutoff is re-applied on every read, so a slot retired since the cache was written is still not booked |
+
+## The standing weekly pattern (D-0056)
+
+`courtreserve.fixed_events` is the **source of record** for the recurring slots the
+daily job books 14 days out — not `policy.json`. The scheduler reads it over
+`courtreserve-api GET /fixed-events` (rows under `items`) at the top of every run
+(`ts/src/fixedEvents.ts`), and resolves in this order:
+
+1. **live** — the HTTP read; on success the rows are cached to `state/fixed-events.json`.
+2. **cache** — the last-good read, when the service is unreachable. Alerts.
+3. **seed** — `policy.json`'s `fixed_events.events`, when there is no usable cache. Alerts.
+
+Three rules that exist because of real incidents:
+
+- **A fallback is never silent.** Anything but a clean live read posts a Discord
+  failure alert (D-0049's path, `sendFailureAlert`). So does a pattern that resolves
+  to **zero** active slots, because "everything is retired" and "the read quietly
+  returned nothing" are indistinguishable to the recommender.
+- **`until` is the retirement switch, honoured on every source.** A row whose `until`
+  is on or before today is not booked. The service filters it server-side, but the
+  cache and the seed do not — so the cutoff is re-applied on each read.
+- **`preferred_courts` pins courts by number (1–4).** A pin is an instruction, not a
+  hint: the slot takes the free subset of its pins and does **not** spill onto an
+  unpinned court. If every pinned court is taken the slot is skipped as `no_court`,
+  logged, and recorded in `logs/booking_log_<date>.json` under `fixed_events.skipped`.
 
 ## Hard Constraints (policy.json)
 

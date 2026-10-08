@@ -74,6 +74,11 @@ export function saveBookingLog(
   failed: number,
   results: AutoBookResult[],
   policyProvenance?: PolicyProvenance | null,
+  fixedEvents?: {
+    source: FixedEventsResult['source']
+    skipped: Stats['skipped_fixed_events']
+    expired: number
+  } | null,
 ): void {
   mkdirSync(dirname(logPath), { recursive: true })
   const payload = {
@@ -82,6 +87,10 @@ export function saveBookingLog(
     booked,
     failed,
     policy_provenance: policyProvenance ?? null,
+    // Where the standing pattern came from and which slots it could not place
+    // (D-0056). Without this an unbooked fixed event left no durable trace at
+    // all: `stats` is not written on the auto-book path.
+    fixed_events: fixedEvents ?? null,
     results: results.map((r) => ({
       ...r.recommendation,
       success: r.success,
@@ -113,6 +122,10 @@ export async function runScheduler(
     deps.resolveFixedEvents ??
     (() => resolveFixedEventsDefault(deps.cr, deps.policy, { dir: deps.stateDir, log }))
   const fixedResult = await resolveFixed()
+  log(
+    `Standing pattern: ${fixedResult.events.length} active slot(s) from ${fixedResult.source}` +
+      (fixedResult.expired.length > 0 ? `, ${fixedResult.expired.length} retired (until passed)` : ''),
+  )
   const policy: Policy = {
     ...deps.policy,
     fixed_events: { ...deps.policy.fixed_events, events: fixedResult.events },
@@ -158,6 +171,16 @@ export async function runScheduler(
     : recommend(items, targetDate, policy)
   log(`Generated ${recommendations.length} recommendation(s) [source=${stats.rec_source}]`)
 
+  // A fixed event is policy-mandated, so one that did not book is never dropped
+  // silently — including the case this PR enables: every court pinned via
+  // `preferred_courts` was already taken, which lands here as `no_court`.
+  for (const s of stats.skipped_fixed_events) {
+    log(
+      `Fixed event NOT booked: ${s.name} ${s.day_of_week ?? '?'} ${s.start_time ?? '?'} ` +
+        `(event ${s.event_id}) — reason=${s.reason}`,
+    )
+  }
+
   if (recommendations.length === 0 && opts.autoBook && !opts.dryRun) {
     try {
       await sendFailureAlert(
@@ -186,7 +209,11 @@ export async function runScheduler(
       dirname(deps.pendingPath),
       `booking_log_${targetDate.replace(/\//g, '-')}.json`,
     )
-    saveBookingLog(logPath, targetDate, booked, failed, results, provenance)
+    saveBookingLog(logPath, targetDate, booked, failed, results, provenance, {
+      source: fixedResult.source,
+      skipped: stats.skipped_fixed_events,
+      expired: fixedResult.expired.length,
+    })
 
     try {
       await sendAutoBookSummary(
