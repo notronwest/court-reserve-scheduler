@@ -34,10 +34,26 @@ export class CourtReserveClient {
   }
 
   /** The standing weekly pattern (D-0056) — Postgres-backed, written by the mini on a
-   *  dashboard confirm; read here over HTTP rather than from policy.json directly. */
+   *  dashboard confirm; read here over HTTP rather than from policy.json directly.
+   *
+   *  The service wraps the rows in `items`, like every other list endpoint here
+   *  (`schedule()` above, `waitlists()` below) — see courtreserve-api
+   *  `queries.fixed_events`. This used to read `data.events`, which is a key the
+   *  endpoint has never sent: the read "succeeded" with `undefined`, Pass 0 then
+   *  iterated an empty pattern, and NOTHING alerted — the whole standing weekly
+   *  schedule silently stopped being booked. So a payload without an `items`
+   *  array is a FAILED read and throws, which routes `resolveFixedEvents` to its
+   *  cache and fires the Discord alert instead of booking nothing in silence. */
   async fixedEvents(): Promise<FixedEvent[]> {
-    const data = await this.request<{ events: FixedEvent[] }>('GET', '/fixed-events')
-    return data.events
+    const data = await this.request<{ items?: FixedEvent[] }>('GET', '/fixed-events')
+    const items = data?.items
+    if (!Array.isArray(items)) {
+      throw new Error(
+        'courtreserve-api GET /fixed-events -> no `items` array in the payload: ' +
+          `${JSON.stringify(data ?? null).slice(0, 200)}`,
+      )
+    }
+    return items
   }
 
   /** Full occurrences with a waitlist in the next `days` days, for the given events. */

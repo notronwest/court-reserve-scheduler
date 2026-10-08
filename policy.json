@@ -218,7 +218,7 @@
         "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
       }
     ],
-    "retired_events_note": "Paused recurring events kept here verbatim (not deleted) so club management can reinstate a slot by copying it back into events, rather than re-deriving its time/courts/event_id. Nothing reads this block \u2014 neither engine iterates fixed_events.retired_events, only fixed_events.events (ts/src/recommender.ts, ts/src/policy.ts, ts/src/fixedEvents.ts, recommender.py).",
+    "retired_events_note": "Paused recurring events kept here verbatim (not deleted) so club management can reinstate a slot by copying it back into events, rather than re-deriving its time/courts/event_id. This block IS read, but not by the booking engines: courtreserve-api's seed sync (load.py fixed_events_retired_rows / merge-and-retire, run by fixed_events_sync.py) matches each entry to its courtreserve.fixed_events row and stamps until = retired_on. The scheduler then honours that `until` on every source it reads \u2014 the live GET /fixed-events feed, the state/fixed-events.json cache, and this file's seed \u2014 so a row retired on or before today is never booked (D-0056, ts/src/fixedEvents.ts dropExpired). Neither recommender iterates retired_events directly; they only ever see fixed_events.events (ts/src/recommender.ts, recommender.py).",
     "retired_events": [
       {
         "name": "Co-Ed 3.75+ Level Play",

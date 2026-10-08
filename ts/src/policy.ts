@@ -26,6 +26,10 @@ export interface FixedEvent {
   preferred_courts?: number[]
   max_participants?: number
   level?: string
+  /** Last date this pattern runs, `YYYY-MM-DD`, from `courtreserve.fixed_events.until`
+   *  (D-0056). The retirement switch: the dashboard stamps it rather than deleting the
+   *  row. On or before today means retired — see `dropExpired` in `fixedEvents.ts`. */
+  until?: string | null
 }
 
 export interface Policy {
