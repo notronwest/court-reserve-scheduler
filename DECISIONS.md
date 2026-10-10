@@ -558,6 +558,138 @@ caught. It now matches any file under a component directory, at any depth.
 - A guard without a typed, deliberate override — the override is what distinguishes a chosen
   retirement from an accident in the reflog.
 
+### D-0115 — Contract time is a public form on the website, one approval card, and a priced restricted event; no new money write path is built
+
+*2026-10-06 · scope: `web/src/components/Form.tsx, supabase/functions/wmpc-submit-form/**, courtreserve_api/contract_time*, courtreserve_api/events_create.py, courtreserve_api/accounts.py` · source: Hopper card "Contract time — members book a standing court slot from a public form" (2026-10-06), sent to daemon because "almost none of the plumbing exists yet". Table compiled per PROCESS.md: club-dashboard NO OBJECTION, wmpc-web CONCERN (deploy ordering), courtreserve-api CONCERN (two untraced CR write surfaces become load-bearing at once). No veto. Both concerns are folded into the decision below. Extends D-0049, D-0053, D-0056, D-0057. AMENDED 2026-10-07, before merge: Ron answered the rate approval (daemon#243 comment) — items 6 and 7 are rewritten to the answered rate and the start-time prime rule, and items 10–13 rule Q5, mid-contract churn, which his answer left open.*
+
+**Decision.**
+
+1. **The public form already exists — it gets one new form type, on the website.** wmpc-web's
+   `Form.tsx` + the `wmpc-submit-form` edge function are a public, no-login, Turnstile-protected
+   submission rail writing to `wmpc_submissions`. Contract time is one new entry in that function's
+   `ALLOWED` set and one `Field[]` config on a public page: requester name, email and phone; day;
+   start time; courts; start week; end week; the names of the group. **club-dashboard grows no public
+   page and no anonymous route.** The card said sign-in and roles being mid-build (D-0057) blocked
+   this; they do not, because the form was never the dashboard's to host.
+2. **The website writes nothing to Court Reserve and matches nobody.** A submission is inert data.
+   Every Court Reserve read and write happens later, on the mini, in courtreserve-api. A public form
+   that could create member records in the club's live system is an abuse surface, and this is the
+   line that prevents it.
+3. **One approval card, and it is the only click.** The drain turns a submission into one
+   `cos_approvals` row, `action_kind='contract_time'` (free text — no migration). It carries, in
+   plain words: who asked, which slot, how many weeks, who is in the group, **which of them are not
+   Court Reserve members yet, by name**, and what it will bill in total. Contract time commits courts
+   and money, so it is D-0053 lane 2 — an unclear path, resolved by one readable plan. Ron accepts
+   once and everything downstream runs unattended. **Never a second card for the same contract.**
+4. **The standing slot is a scheduler pattern, not a Court Reserve recurrence** (D-0056 §1): a
+   `fixed_events` entry — day, start, end, courts — with an `until` at the contract's end week. Pass 0
+   books it 14 days out like every other standing slot.
+5. **The group restriction uses fields this repo already writes.** The Contract Time event is created
+   with `member_groups` set to the contract's group and
+   `hide_event_if_member_not_match_restrictions` on, so only that group sees and books it — both are
+   existing, traced event fields (#225). What is new is **creating** the group and adding members to
+   it: one new browser-driven write in courtreserve-api, built to the `package_write` discipline —
+   trace the live Kendo form first, write, reload-verify against the live grid, and raise-and-park
+   rather than report a success it cannot prove.
+6. **No charge-posting path is built, now or later, for this.** The Contract Time event carries a
+   per-occurrence price. Court Reserve posts the fee itself when the group is registered onto the
+   occurrences, and those unpaid fees arrive in the **existing** Monday `billing.py` proposed batch
+   that Ron already reviews and approves. A contract has exactly one rate for its whole
+   run, because **prime is decided by the slot's start time** (Ron, 2026-10-07) — a 2–4 PM slot bills
+   off-prime for every week even though it crosses 3 PM. The earlier reasoning here, that a slot is
+   wholly prime or wholly off-prime because day and time are fixed, was wrong: a fixed slot can
+   straddle the boundary. The conclusion survives; the rule that gets you there is the start time, and
+   it is the only prime test any code in this feature may implement.
+   **Nothing in this feature can move money.**
+7. **The rate is answered, and an unpriced contract event is never created.** Ron settled it on
+   2026-10-07: **$10 per member per week off-prime, $12 per member per week prime**, prime = 3–10 PM
+   weekdays and all day Saturday and Sunday, billed **weekly as the occurrences run**, never up front.
+   The **basis is per member, per week** — not per court and not once per contract, so the court count
+   does not change what any member pays: four members on two courts each pay what four on one court
+   pay. The rate still ships as **configuration, not a literal**, so changing it later is a config
+   change; what changes is the default, which is now set rather than unset. **If the rate config is
+   missing or unreadable, the drain parks the card and raises — it does not create the event.** The
+   earlier rule, that an unset rate yields an unpriced event and a card that says so, is withdrawn:
+   an unpriced Contract Time event is a standing reservation on club courts that bills nothing, which
+   is a worse failure than a contract that visibly did not provision. Worked example, for acceptance:
+   a 4-person group on a 10-week prime slot bills **$480** ($12 × 4 × 10).
+
+8. **Two things are traced live before anything is trusted unattended** (D-0039 supervised first
+   run): `accounts.create_member`, whose CR endpoints have been a documented best guess since
+   club-phone shipped, and the member-group create. Each gets a `--dry-run`, then one watched
+   `--one <uuid>`, before the tick is trusted.
+9. **The edge function deploys before the page.** wmpc-web's `web` target auto-deploys on merge to
+   `main` but `wmpc-submit-form` is hand-deployed, so merging the page first puts a live form in front
+   of members that the backend rejects as an invalid form type. The deploy order goes in the issue and
+   in the PR body, not in anyone's memory.
+
+10. **Mid-contract churn is a registration change, never a billing change.** The fee follows
+    registration — Court Reserve posts a member's fee for an occurrence when that member is registered
+    onto it. So every churn case is handled by changing who is registered to the remaining
+    occurrences, and **nothing in this feature ever writes a credit, refund, waiver or adjustment**;
+    that is the money write path item 6 forbids, and churn does not get an exception to it.
+    - **A member leaves mid-contract:** unregister them from the remaining occurrences. Their fee stops
+      at the next occurrence by itself. They may stay in the member group or be removed from it — it
+      changes nothing, because the group controls who can *see and book* the slot, not who is billed.
+    - **The group skips one week:** unregister the group from that one occurrence. No one is registered,
+      so no fee posts for it.
+    - **A member joins mid-contract:** add them to the group and register them from the next occurrence
+      forward. They pay from that week. No proration is needed or allowed — a per-member-per-week rate
+      prorates itself.
+
+11. **Weeks that have already run are never unwound, and the end date never moves.** A fee posted for a
+    week that happened stays posted; forgiving one is a human money call Ron makes in Court Reserve, not
+    something this feature offers. And a skipped week is **not** made up by extending the contract: the
+    run is `n` weeks on the calendar, fixed at accept, and the scheduler pattern's `until` (item 4) is
+    set once. Letting the end date drift puts the scheduler pattern, the event's occurrences and the
+    billing on three different calendars, which is precisely the class of bug this fleet keeps paying
+    for. A group that wants a make-up week books it as an ordinary court reservation, or signs a new
+    contract.
+
+12. **Churn is human-initiated and desk-executed in this increment — no change rail is built.** There
+    is no second form, no `contract_time_change` approval kind and no drain for amendments. Every case
+    in item 10 is a staff action in the Court Reserve admin that takes under a minute, and the volume
+    does not justify doubling the feature's write surface against the two Court Reserve writes that
+    have never been traced at all (item 8). **Nothing in the fleet may unregister a member or cancel an
+    occurrence on its own** — not on a non-payment signal, not on a membership lapse, not on a schedule.
+    If the volume ever argues otherwise, that is a new decision with its own record.
+
+13. **The desk can answer "who is on this slot, and until when" without reading the Court Reserve grid.**
+    The drain records the accepted contract — slot, first and last week, roster, rate, and the resulting
+    Court Reserve group and event — as its own row. Item 12 makes the desk the place churn is executed,
+    and a desk that has to reconstruct a contract from the event grid will get it wrong. This row is the
+    record of what was agreed; Court Reserve stays the record of what is booked and what is owed, and
+    the row is never used to compute a charge.
+
+**Why.** The card's own framing was that almost none of the plumbing exists. Most of it does — it was
+just in the other repo. The public no-login form, the spam gate, the submissions table, the event
+restriction fields, the weekly billing batch and the standing-slot scheduler are all shipped and
+working; what is genuinely new is a member group, a member create, and a drain to join them up. Naming
+that correctly turns a feature that reads as blocked on a half-built auth system into one that is
+blocked on nothing.
+
+The money design is the part worth defending. The obvious build is a charge-poster: for each member,
+each week, write a fee into their Court Reserve account. That is a new unattended money write path,
+and the fleet has spent months keeping money behind one human step. Pricing the event instead gets the
+same fees posted by Court Reserve's own billing, through the Monday batch Ron already reads. The
+feature ships with no new way for software to charge a member, which is a smaller system and a safer
+one (D-0049 — reuse before you build).
+
+courtreserve-api is right that two never-traced Court Reserve write surfaces become load-bearing in
+the same feature, and that is the honest price. It is paid in the build order: trace both before
+either is wired to a drain, and let an untraced form fail loudly rather than half-create a group.
+
+**Forbids.** A public no-login route in club-dashboard. Any Court Reserve read or write from the
+website or the browser. Creating a Court Reserve member, or a member group, before Ron has accepted
+the contract card. Writing a fee, charge, invoice or payment into a member account from this feature
+by any path. Booking the slot as a Court Reserve recurring series instead of a scheduler pattern.
+A second approval card for the same contract, or a separate card asking for the rate. Creating a Contract Time event with no
+price, for any reason. Any prime test other than the slot's start time. Writing a credit, refund, waiver
+or adjustment for a member who leaves, or for a week the group skips. Extending a contract's end date to
+make up a skipped week. Unregistering a member, or cancelling an occurrence, from any automatic path. Merging the website page without deploying
+`wmpc-submit-form` in the same breath. Trusting `accounts.create_member` or the member-group write
+unattended before a supervised live run (D-0039).
+
 ## Proposed (not binding yet)
 
 _None._
