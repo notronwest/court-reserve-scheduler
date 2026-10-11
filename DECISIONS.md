@@ -305,6 +305,157 @@ DEPLOYMENT.md" or any doc in place of the steps. A command with a comment, a pro
 ellipsis or a value to edit by hand. Several form values in one copy box. A secret written into
 a command or a reply.
 
+### D-0074 — Cancelling a session is one executor kind with a registrants-zero gate, and retiring the standing pattern is half the cancel
+
+*2026-10-07 · scope: `courtreserve_api/cancel_session_drain.py, courtreserve_api/booking.py (cancel_occurrence), courtreserve_api/service.py (CancelReq, POST /cancel), courtreserve_api/migrations (fixed_events retire + drift), courtreserve-scheduler/policy.json (fixed_events.retired_events), agents/chief-of-staff/HOPPER-PROMPT.md` · source: daemon #254, routed from CoS cos_approvals 0ff97f7c "architecture — route through daemon: the cancel-a-session rail". Trigger 2026-10-07 — three remaining Level Play sessions had to come off the calendar; the approval row named a cancel call that cannot run as written, so the CoS drove courtreserve_api.cancel_occurrence by hand under an ad-hoc cos-cancel.lock, verified registrants at zero, and got 3 of 3. Table compiled the same day — courtreserve-api, court-reserve-scheduler, club-dashboard, daemon. Extends D-0026, D-0028, D-0053, D-0056; D-0002 for the lock.*
+
+**Decision.**
+
+**Why.**
+
+**Forbids.**
+
+**Decision.**
+
+**0. A cancel is TWO writes, and only the second one makes it stick.** Taking a recurring club
+session off the calendar means (a) the already-booked occurrences come off Court Reserve, and
+(b) the **standing weekly pattern** is retired — or the daily scheduler's Pass 0 re-books it 14
+days out and the cancel quietly un-does itself. **On 10/7 the second half did not actually
+happen**, and the table found it: `ts/src/scheduler.ts:110` overwrites `policy.fixed_events.events`
+with whatever `GET /fixed-events` returns, so `policy.json` commit `9fca000` retired the four
+Level Play slots only in the **seed** — the fallback read when both the HTTP call and the cache
+fail. Verified live while ruling: all four Level Play rows in `courtreserve.fixed_events` are
+`active=true`, so **Pass 0 has been re-booking Level Play ever since Ron asked for it to stop**
+(daemon #254 → courtreserve-api ticket, P0). This is the failure mode below, found in production
+rather than predicted. Under [[D-0056]] a recurring club event is a standing weekly
+pattern, **not** a Court Reserve series, so "cancel the series" is a pattern retirement and
+never a CR recurrence write. `build_recurrence_writes` stays only for an explicit "as a Court
+Reserve series" ask. **A cancel rail that does only (a) is a bug, not a v1.**
+
+**1. One structured kind: `action_kind='cancel_session'`.** Typed `scope`:
+`{event_id, occurrence_id, event_name, date, start, court?, retire_pattern?}`. Generic
+`delete` is retired for this purpose — it is too broad to gate safely and has exactly one
+historical row, already executed by hand. **One ask covering N occurrences is N rows**
+([[D-0053]]), never one bundled row: the 10/7 row carried three occurrences in a single
+`scope.occurrences` array, which is precisely why no executor could claim, verify, refuse or
+retry it per occurrence. The CoS proposes one row per occurrence, each independently claimable.
+
+**2. The registrant gate — the executor refuses; nobody's judgement substitutes.** Immediately
+before the write the executor re-reads the occurrence live via `event_move.read_occurrence` (the
+Edit → occurrences Kendo grid: `registered_count`, `max_people`, and CR's own
+`has_registrants`). It **refuses** when `registered_count > 0`, when `has_registrants` is true,
+or when `registered_count is None` — an unparsable cell is UNSAFE, not zero. A refusal parks the
+row `exec_status='failed'` with the reason, and surfaces as a plain to-do with **Done / Can't**,
+never an Approve button ([[D-0053]] §3). The count comes from the live grid, never the 5 AM
+mirror and never the proposer's number — the proposer's count is stale by construction, since
+approval and execution are minutes-to-days apart. `needs_human` is a field **inside the `result`
+jsonb** and on the refusal exception — it is not a `cos_approvals` column; written as one it
+silently does nothing.
+
+**3. Retiring a pattern is in scope for v1, and it is TWO writes — the DB one is the live
+path, the file one is what makes it durable and auditable.** `retire_pattern: true` sets
+`active=false` on the matching `courtreserve.fixed_events` row (migration 0044). That is the
+write that actually takes effect, because `GET /fixed-events` serves active, unexpired rows only
+and `scheduler.ts:110` replaces the file's events with that read. It is **not sufficient**:
+`active=false` lives only in PROD Postgres, while the 0044 seed and
+`courtreserve-scheduler/policy.json` still carry the slot, so a rebuilt or empty table
+re-inserts it `active=true`; the last-good `state/fixed-events.json` cache still holds the
+pattern until the next successful fetch; and `governance.fixed_events_change_policy` says a
+fixed event is removed by editing `fixed_events.events` in that file, with git history as the
+audit log (`governance.version_control`) — a DB-only retire contradicts both. So the retire is
+**both**: the executor writes `active=false` (immediate), and opens a Builder PR moving the slot
+into `policy.json`'s `fixed_events.retired_events` block — which exists for exactly this and
+keeps the slot verbatim so it can be reinstated by copying it back. The approval that authorized
+the cancel is the "explicit business approval" that policy requires; the PR is the audit record.
+Two further requirements, both named by the table: **`fixed_events_drift` must report on
+`active`** (today it ignores the column, so a retire in one place and not the other is
+invisible — the exact state the fleet is in now), and **the rail needs an un-retire path**
+(`active=true` + copy the slot back out of `retired_events`), because `merge_fixed_events` will
+never do it. A cancel ask that names a repeating session and does NOT retire the pattern is
+**reported as such on the row**, so nobody believes it stuck while Pass 0 is still booking it.
+
+**4. Idempotency and verify.** The atomic DB claim is the only retry guard —
+`update … where status='approved' and action_kind='cancel_session' and exec_status='none'
+returning` — so two drains cannot claim one row and a crash cannot double-fire. After the write,
+reload the occurrences grid and require the row to read cancelled or absent; **unverified is
+`failed`, never `done`**. An occurrence already cancelled is `done` and idempotent, not an error
+(cancel is destructive and not undoable by the same path, so re-running must be safe). A `failed`
+row is never auto-retried — a human resolves it, exactly as `event_move_drain` does.
+
+**5. The lock is the one that already exists.** The committed `EVENTS-DRAIN-HOST` fact
+(`wmpcMacMini1`) plus a dedicated `~/.local/state/wmpc-crapi/cancel-session-drain.lock` flock,
+mirroring `event_move_drain` and `package_write_drain` ([[D-0002]]: a committed host fact plus a
+same-machine lock, never install discipline). The ad-hoc `cos-cancel.lock` from the 10/7 manual
+pass is retired. Every Court Reserve write already shares one browser lock on one host; a cancel
+joins that discipline rather than inventing a second one.
+
+**6. The generic drain must NOT be able to claim a cancel — three plumbing edits ship in the
+same change.** This is the condition the table put on its no-objection, and it is a safety gate,
+not tidiness:
+- `infrastructure/cos-triage-schedule/cos-triage-schedule.sh` (`DRAIN_BODY` + its count query)
+  and `infrastructure/cos-dispatch/cos-dispatch.sh` (inline prompt) exclude only
+  `event_move,membership_change` from Rachel's generic drain. Unamended, **Rachel's generic drain
+  claims an approved `cancel_session` row and drives it to `done` herself, skipping the live
+  registrant re-read** — the registrants gate failing silently, which is the one failure this
+  record exists to prevent. Both exclusion lists gain `cancel_session`.
+- `agents/chief-of-staff/HOPPER-PROMPT.md` (~291, ~330): the kind list is
+  `spend|send|delete|ship_prod|other` and names only `membership_change`/`event_move` as having
+  their own executor. Unnamed, Rachel keeps writing `delete` rows no worker claims —
+  approved-and-unexecuted, the exact state [[D-0028]] forbids.
+
+**7. The dashboard's three couplings to the kind are part of the change, not follow-ups.**
+`action_kind` is plain `text` with no CHECK and no enum (`supabase/migrations/0009_cos_autonomy.sql`),
+so a new kind needs no migration — but three places key off the kind by name:
+- `web/src/lib/loadAutonomy.ts` `AUTO_ACTION_KINDS` (`membership_change,send,spend,delete`) drives
+  the card badge. Retire `delete` and add `cancel_session` without editing that set and the card
+  reads "Greenlight → build" / "Approving queues this for build" for an action that executes in
+  minutes — wrong on the one card Ron reads.
+- `loadRecentExecutions` hard-filters `action_kind='membership_change'`, so a cancel's outcome
+  would never reach the "Recently approved" strip. [[D-0026]] §4 requires the outcome be visible;
+  the filter becomes a set including `cancel_session`.
+- The approval card renders only `scope.on_approve` / `scope.on_deny`, so the typed scope shows
+  nowhere. The proposer writes both strings in Ron's words ([[D-0054]]) — the typed scope is for
+  the executor, never a substitute for the sentence Ron reads.
+
+**8. The lane is `approved`, stated so it cannot be guessed wrong.** A cancel Ron asked for in
+words is [[D-0053]] lane 1: the rows are written **`status='approved'`** with `decided_note` =
+"authorized by Ron's ask <timestamp>", so N occurrences become N rows that execute. N *pending*
+cards for one ask would hit [[D-0053]]'s "a second card for the same ask" prohibition and is
+forbidden. A cancel that crosses a gate ([[D-0039]]/[[D-0052]] hard set) or needs judgement is
+lane 2: ONE card, in Ron's words, and that card is the approval.
+
+**Why.** The rail was half-built in a way that reads as finished: an `action_kind` Rachel was
+told to use, an endpoint named in the approval row, and nothing behind either. `POST /cancel`
+passes `cancel_occurrence(page, req.res_id)` into a `(page, event_id, occurrence_id, date)`
+signature, so **every** call is a `TypeError` — the request model, not the call, is the gap: a
+cancel needs the event, the occurrence and the display date (used to find the Kendo row and to
+name the screenshot). And no worker claims a cancel at all, so even a working endpoint would
+leave the row parked. [[D-0028]] says an approved row must always reach a terminal state; a kind
+with no executor is the exact shape that decision exists to forbid, and `delete` had been in the
+CoS's menu since before any executor existed.
+
+The deeper miss is that the cancel rail was scoped to Court Reserve alone. The club's recurrence
+engine is the scheduler, not CR ([[D-0056]]), so a cancel that only touches CR is undone by the
+next morning's Pass 0. The 10/7 pass looked like a success — 3 of 3, registrants verified — but
+it succeeded because a human knew to retire the pattern as well. That knowledge belongs in the
+rail.
+
+**Forbids.** A cancel executed off a bundled multi-occurrence row. Trusting the proposer's or
+the mirror's registrant count, or reading an unparsable count as zero. Rendering a cancel refusal
+as an Approve button. Marking a cancel `done` without a reload-verify. Auto-retrying a `failed`
+cancel. A new ad-hoc lock file for a Court Reserve write. Retiring a pattern in Postgres only,
+leaving `policy.json` to resurrect it. Writing a Court Reserve recurrence to stop a club session
+repeating. Leaving `delete` in the CoS's kind list with no executor behind it. Letting Rachel's
+generic drain claim a `cancel_session` row. Shipping the kind without the dashboard's
+`AUTO_ACTION_KINDS` and `loadRecentExecutions` edits. N pending cards for one ask.
+
+**Binds.** Reuses [[D-0026]]/[[D-0028]]'s `cos_approvals` rail and `exec_status` columns;
+`event_move_drain`'s claim / host-gate / lock / reload-verify shape verbatim;
+`event_move.read_occurrence` for the live registrant read; migration 0044's `active` column and
+`queries.fixed_events`' active-only filter; `policy.json`'s `retired_events` block and
+`fixed_events_drift`. [[D-0053]] for N-rows-per-ask and the Done/Can't shape of a human
+hand-back. [[D-0002]] for the host fact and lock. [[D-0054]] for what Ron reads on the card.
+
 ### D-0075 — A decision is not done until its artifacts are on main; daemon's own repo is daemon's lane, and dispatch is claimed by a label, not a title
 
 *2026-10-08 · scope: `decisions/**, agents/**, infrastructure/daemon-dispatch/**, infrastructure/builder-dispatch/**, docs/ai-agents.md` · source: daemon#257 (routed from cos_approvals 5436f929) — the owner approved the Builder money hatch 2026-10-05, daemon#195 closed COMPLETED 2026-10-06 carrying the decided text, daemon#233 held the edit, and seven consecutive sweeps re-found the file unedited because nothing owned it*
@@ -558,6 +709,80 @@ caught. It now matches any file under a component directory, at any depth.
 - A guard without a typed, deliberate override — the override is what distinguishes a chosen
   retirement from an accident in the reflog.
 
+### D-0102 — Daemon's exclusive paths are a lane with no drain, and a halted executor does not satisfy a claim
+
+*2026-10-10 · scope: `infrastructure/daemon-dispatch/**, infrastructure/builder-dispatch/**, decisions/**, agents/**` · source: daemon queue drain 2026-10-10 (cos_requests ea75548e) — the HALT of 2026-10-09 exists to drain a 73-PR board; daemon holds 27 of those PRs and nine of them cannot land at all until each renumbers a decision id under D-0100, in `decisions/**`, which no executor but daemon may touch and no dispatcher ever visits*
+
+**Decision.** This record **amends D-0089 rule 3** and adds the condition that rule was
+missing. D-0089 rules 1 and 2 are untouched and remain binding.
+
+1. **An exclusive path group must name its drain, not just its owner.** D-0089 rule 1 reserved
+   four path groups to daemon — `agents/**`, `decisions/**`, `infrastructure/*-dispatch/**`,
+   `docs/ai-agents.md` — for a reason that is still correct: an agent must not rewrite the
+   prompt that governs it. But it named only the *hands that may not*, never the hands that
+   *will*. Every other lane in this fleet is drained by something on a tick:
+   `builder-dispatch` for product repos, `reviewer-dispatch` for verdicts, the mini drains for
+   approved rows. `infrastructure/daemon-dispatch/` holds a prompt and a DESIGN and **no
+   dispatcher** — daemon runs only when `cos-dispatch` hands it a `cos_requests` row. So the
+   one path group that gates the fleet is the one path group nothing is scheduled to empty.
+   **An exclusion that does not name a drain is a queue, and queues fill.**
+
+2. **A halted executor does not satisfy D-0075 rule 1(b).** D-0089 rule 3 says Agent Ready is
+   a claim, satisfied when "a named executor's committed fact file lists that repo." That test
+   reads a *fact file* and never asks whether the executor is *running*.
+   `infrastructure/builder-dispatch/HALT` has been present and non-empty since 2026-10-09 and
+   the Builder's own tick logs `HALTED — starting no new work`. `BUILDER-REPOS` lists
+   `notronwest/daemon`, so eight daemon cards read as claimed and dispatched while nothing
+   will touch them. The claim test therefore gains a liveness clause: **Agent Ready satisfies
+   D-0075 rule 1(b) only when the named executor is both listed and not halted.** While a
+   `HALT` is in force, a card already in Agent Ready stays there and stays honest — but no
+   daemon issue may be *closed* on the strength of it, and no new card may be *moved* there as
+   though dispatch had occurred.
+
+3. **A ruling that contradicts an active record is a defect in the register, not a variance in
+   the code.** Where an issue comment and an active decision record disagree about an
+   artifact, the record is what binds, and the fix is to supersede or amend the record in the
+   same run that notices — never to let the code follow the comment. A comment is not a
+   register entry (D-0016), and "the ruling is in a comment on the issue" is how
+   `courtreserve.play` came to be built against a record that names `court_occupancy`
+   (D-0103).
+
+4. **The second sighting escalates to the lane, not to the item.** D-0075 rule 4 makes a repeat
+   sighting of an unapplied artifact a rail failure. This record names what that escalation
+   *is* when the rail is capacity rather than routing: the drain does not re-rule the parked
+   items one by one — it rules the **reason they are parked, once**, and leaves the items
+   untouched. Eight identical "still correctly blocked" comments are the same waste as seven
+   identical findings.
+
+**Why.** The HALT of 2026-10-09 was Ron's, and its first exit condition is an open-PR count
+flat or falling across two consecutive days with nobody touching it by hand. That condition is
+currently **unreachable by construction**, and not for any reason the halt can fix. Measured
+2026-10-10: 73 open PRs fleet-wide, of which `notronwest/daemon` holds **27** — the largest
+share of any repo, and larger than the two live-site repos combined. **Nine of those 27 cannot
+land at any speed**: #120, #127, #249, #283, #299, #300, #301 and #311 each carry a decision id
+that is already merged on `main`, and #250 drains three ids into gaps that D-0100's **Forbids**
+closes. D-0100's push guard is live and refuses all nine — correctly. Each needs a renumber: a
+new id from `new.sh`, a file rename, a header rewrite and a re-rendered `INDEX.md`. Every one of
+those touches `decisions/**`.
+
+So the arithmetic is closed. The Builder is halted and, even unhalted, its pre-push guard
+refuses `decisions/**` on a Builder branch — by design, under D-0089 rule 2. The reviewer can
+rebase but cannot renumber, because choosing an id is authoring, not mechanics. Daemon may, and
+daemon runs only when summoned. Nine PRs therefore sit permanently unlandable in the one lane
+with no scheduled hands, while the halt that was imposed to drain the board cannot clear its own
+first condition — and `NOW.md` has already recorded condition 1 as unmet once, which under
+D-0075 rule 4 makes this the second sighting and an alarm rather than a note.
+
+The failure is not anyone's diligence; three consecutive drains ruled these items correctly.
+It is that D-0089 fixed *authority* and left *capacity* unstated, and a lane with an owner but
+no tick looks exactly like a lane that is keeping up.
+
+**Forbids.** Reserving a path group to a named owner without naming the scheduled process that
+drains it. Closing a daemon issue `COMPLETED` on an Agent Ready card whose named executor is
+halted. Moving a card to Agent Ready while the executor that claims its repo is halted. Letting
+code follow an issue comment that contradicts an active decision record. Re-ruling items in a
+drain, one comment each, when a single shared cause is what is actually blocking them.
+
 ### D-0115 — Contract time is a public form on the website, one approval card, and a priced restricted event; no new money write path is built
 
 *2026-10-06 · scope: `web/src/components/Form.tsx, supabase/functions/wmpc-submit-form/**, courtreserve_api/contract_time*, courtreserve_api/events_create.py, courtreserve_api/accounts.py` · source: Hopper card "Contract time — members book a standing court slot from a public form" (2026-10-06), sent to daemon because "almost none of the plumbing exists yet". Table compiled per PROCESS.md: club-dashboard NO OBJECTION, wmpc-web CONCERN (deploy ordering), courtreserve-api CONCERN (two untraced CR write surfaces become load-bearing at once). No veto. Both concerns are folded into the decision below. Extends D-0049, D-0053, D-0056, D-0057. AMENDED 2026-10-07, before merge: Ron answered the rate approval (daemon#243 comment) — items 6 and 7 are rewritten to the answered rate and the start-time prime rule, and items 10–13 rule Q5, mid-contract churn, which his answer left open.*
@@ -689,6 +914,103 @@ or adjustment for a member who leaves, or for a week the group skips. Extending 
 make up a skipped week. Unregistering a member, or cancelling an occurrence, from any automatic path. Merging the website page without deploying
 `wmpc-submit-form` in the same breath. Trusting `accounts.create_member` or the member-group write
 unattended before a supervised live run (D-0039).
+
+### D-0117 — The ruling queue drains on decisions made, never on deliveries shipped — daemon's lane stamp and its ruling selector are two labels
+
+*2026-10-11 · scope: `infrastructure/daemon-dispatch/**, decisions/**, docs/ai-agents.md` · source: daemon queue drain 2026-10-11 (`cos_requests` 1492969b) — the drain's selector returned 21 items and **zero** of them owed a ruling; 14 were daemon's own dispatched build issues sitting correctly on the WMPC Roadmap, and 10 of those 14 already carried two or three daemon ruling comments each*
+
+**Decision.** This record **amends D-0075 rule 2**. Rules 1, 3 and 4 are untouched and remain
+binding, and so is rule 2's reason for existing — a title is prose and drifts, so a label is
+the net.
+
+1. **`daemon-dispatch` is a lane stamp and is not a selector.** It keeps exactly the meaning
+   D-0075 rule 3 gave it: *this issue lives in daemon's lane* — `agents/**`, `decisions/**`,
+   `infrastructure/*-dispatch/**`, `docs/ai-agents.md` are daemon's to edit and the Builder
+   opens no PR against them. It still goes on **every** issue daemon opens in
+   `notronwest/daemon`, at creation, exactly as rule 2 requires. What it stops doing is
+   summoning an architect.
+
+2. **A new label, `daemon-ruling`, means an architectural question is open.** The drain
+   enumerates `is:open label:daemon-ruling` **union** `is:open` with a title beginning
+   `architecture`/`Architecture`, oldest first. The title net stays as the legacy backstop,
+   unchanged.
+
+3. **The label is applied by the act that routes a question, and removed by the act that
+   answers it.** Whatever routes an **open question** to daemon — Rachel, the capability-gap
+   sweep (`infrastructure/capability-requests/sweep.sh`), Ron from a Hopper card — applies
+   `daemon-ruling` in the **same run** that files the `cos_requests` row. The drain that writes
+   the ruling removes it in the same run, **whether or not the issue closes.**
+
+   A row that asks for **hands and not a judgement** does not get it: D-0075 rule 4's repair
+   rail and #387's exclusive-paths drain route a *decided-but-unapplied* edit, where the call
+   has already been made and what is missing is a commit. Those carry `daemon-dispatch` and the
+   `cos_requests` row, exactly as they do today, and nothing changes for them. **This is the
+   whole distinction: `daemon-ruling` means a question is open, never that work is owed.**
+
+4. **Open and undecided are different states, and only one of them is a queue.** D-0075 rule 1
+   is right and is not weakened: a daemon issue stays **open** until every artifact its ruling
+   names is on `main` or in Agent Ready under a live lane. But a ruled-but-unshipped issue is
+   **decided** — what it is waiting for is hands, not a judgement. It therefore leaves the
+   ruling queue while staying open on the board. The board tracks delivery; the ruling queue
+   tracks decisions; each signal has exactly one meaning.
+
+5. **The drain's own item count is the signal that this stopped working** (D-0084). Every drain
+   already writes `cos_request_steps`; the queue phase records the count it selected. Two
+   consecutive drains whose count does not fall while rulings were written means the selector
+   is over-collecting again. **Retired in exchange:** the `architecture`/`Architecture` title
+   net stops being a *net* and becomes a backstop only — it is no longer enumerated as a
+   primary source, so a prose title alone can no longer inflate the count. Nothing else is
+   removed, because nothing else was measuring this.
+
+**Why.** D-0102 found that daemon's exclusive paths were a lane with no drain, and #387 gave
+them one. The 22:09 ruling on daemon#386 found the next term: eight renumbered PRs all rewrite
+the generated `decisions/INDEX.md`, so the lane refilled at one PR per merge (D-0116). This is
+the third term, and it is in the measuring instrument rather than the pipe.
+
+Measured 2026-10-11, the D-0075 rule 2 selector returned **21 open issues**:
+
+| what it actually was | count | issues |
+|---|---|---|
+| daemon's own dispatched builds, Agent Ready | 8 | #172, #234, #235, #241, #242, #256, #334, #382 |
+| daemon's own dispatched builds, Backlog | 6 | #117, #211, #251, #313, #331, #332 |
+| architecture calls routed to daemon | 7 | #358, #370, #377, #379, #384, #386, #388 |
+| **architecture calls still owing a ruling** | **0** | — |
+
+All seven routed calls already carried a written ruling; six were ruled on 2026-10-10 and the
+seventh, #377, has every artifact it named on `main`. **The queue was two-thirds noise and
+one-third already answered, and its true depth was zero.**
+
+The cause is that rule 2 made the **stamp** the **selector**, in one sentence. Both halves of
+that sentence are correct on their own: the label must be on every daemon-repo issue, because
+the Builder must not open a PR there; and the drain must read a label, because `daemon#233`'s
+title was correct English and fell through every selector for two days. Put together, the mark
+that says *"this is daemon's repo"* is read as *"this is a question for daemon."* Every build
+daemon dispatches into its own repo therefore enters daemon's ruling queue and does not leave
+until it ships — and under the `HALT` of 2026-10-09 nothing ships. The queue is **monotonically
+non-decreasing by construction**, which is the same shape D-0102 named one layer down.
+
+This has already been paid for, repeatedly. Ten of the fourteen dispatched builds carry **two or
+more** daemon ruling comments; #211 carries three. The 17:13 drain of 2026-10-09 ruled ten of
+them and the 22:00 drain the same day ruled the same ten again. **D-0102 rule 4 exists as a
+mitigation for this defect** — it tells the drain to rule the shared cause once instead of
+leaving N identical "still correctly blocked" comments. That rule is right, and a mitigation
+that depends on the architect noticing the pattern on every run is the same shape as
+*"the sweep caught it seven times"* in D-0075's own **Why**. The gate goes where the instruction
+is (D-0083): the selector stops collecting them.
+
+The cost is not only tokens. A queue that cannot fall cannot be read. `HALT`'s first release
+condition asks for a count that is flat or falling, and a drain reporting "21 items" when the
+honest number is zero is the reason three consecutive drains looked like no progress while each
+one had in fact decided everything in front of it.
+
+**Forbids.** Using one label as both an executor-lane marker and a work-queue selector. A drain
+selector that enumerates a label applied at creation to every issue in the repo it drains.
+Leaving `daemon-ruling` on an issue whose ruling is written, on the grounds that the issue is
+still open. Removing `daemon-ruling` from an issue whose question has not been answered, on the
+grounds that the queue should look shorter. Routing an open question to daemon without applying
+`daemon-ruling` to its issue in the same run that files the `cos_requests` row. Applying
+`daemon-ruling` to an item that needs hands rather than a judgement. Treating "open" as a
+synonym for "undecided" anywhere a count is reported.
 
 ## Proposed (not binding yet)
 
