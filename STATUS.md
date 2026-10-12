@@ -20,6 +20,27 @@ fleet-wide). Detector: `audit-stashes.sh`. Fleet total: 102 entries, 9 repos.
 
 ---
 
+## 2026-10-12 — Reviewer: PR #71 (issue #70) → APPROVE
+
+**Done:** Reviewed [PR #71](https://github.com/notronwest/court-reserve-scheduler/pull/71)
+(`Closes #70` — syncs `.github/workflows/pr-linked-issue.yml` from the stale
+pre-2026-10-08 copy to the canonical `wmpc-meta` template) per `agents/reviewer/PROMPT.md`.
+Confirmed the new file is byte-identical (same git blob `ab656a8`) to
+`templates/pr-linked-issue.yml` as proposed in the still-open `wmpc-meta#44`, and that
+the pre-PR file (`b1ce1a6`) genuinely lacked both fixes #70 names: the `main`→`production`
+promotion exemption, and the live-API body read (vs. the stale event payload that made
+the gate unclearable after a dropped `edited` event). The PR's own `check` run is green,
+proving the live-read path on this exact PR. No UI, no new component (D-0049 n/a).
+`mergeable_state: clean`, not a draft, base is `main`. Posted `VERDICT: APPROVE`,
+added label `reviewed:approve`; noted as a non-blocking caveat that `claude-bootstrap.sh`
+re-syncing from wmpc-meta's still-pre-#44 `main` could revert this file later if
+`wmpc-meta#44` doesn't land first.
+
+**Next:** Per D-0052 the dispatcher merges on this APPROVE and moves the card to Done
+— no Ron click needed. `wmpc-meta#44` (the same fix, upstream) is still open; merging
+it is what keeps a future bootstrap run from reverting this repo's copy.
+
+---
 ## 2026-10-08 (later) — Reviewer: PR #68 (issue #62, D-0056) → APPROVE
 
 **Done:** Reviewed [PR #68](https://github.com/notronwest/court-reserve-scheduler/pull/68)
