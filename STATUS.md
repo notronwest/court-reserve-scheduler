@@ -5,6 +5,265 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-11 — RECOVERED: 7 entries that were written but never committed
+
+Written into this checkout's `STATUS.md` between 2026-10-02 and
+2026-10-08 and never committed. The hourly sync job healed its dirty tree with a
+`git stash push` that nothing ever surfaced, so they sat on no branch while every
+later session read a `STATUS.md` without them. Recovered verbatim from that
+machine's stashes and uncommitted working tree, and appended here under one banner —
+they were never part of this log's history, so they are not interleaved into it as
+though they had been.
+
+Cause and fix: daemon `infrastructure/sync-heal/DESIGN.md` (D-0118 rule 5 applied
+fleet-wide). Detector: `audit-stashes.sh`. Fleet total: 102 entries, 9 repos.
+
+---
+
+## 2026-10-08 (later) — Reviewer: PR #68 (issue #62, D-0056) → APPROVE
+
+**Done:** Reviewed [PR #68](https://github.com/notronwest/court-reserve-scheduler/pull/68)
+(`Closes #62` — the standing pattern off courtreserve-api, the `items`-vs-`events`
+read-bug fix, the `until` retirement cutoff on every source, `preferred_courts`
+going live, `no_court` skips now logged/persisted) per `agents/reviewer/PROMPT.md`/
+`ROLE.md`. Hit the same GraphQL rate-limit flakiness the prior Reviewer session on
+PR #66 noted (`gh pr view`/`gh pr diff`/`gh pr comment` all 429'd; REST via `gh api`
+worked throughout, including posting the verdict and the label — note `-F key=@file`,
+not `-f`, to read a comment body from a file, or it posts the literal `@path` string).
+Verified rather than trusted: checked out the PR branch into an isolated `git worktree`,
+symlinked `ts/node_modules`, ran the full suite myself (**159/159 pass**, `tsc --noEmit`
+clean); confirmed the one call site of the now-extended `saveBookingLog` was updated;
+read `recommender.ts`'s pre-existing `preferred_courts`/`no_court` logic directly to
+confirm the PR's description of it (untouched in this diff) is accurate. Chased down
+what looked like 2 real pre-existing failures on `main` (`catchUp.test.ts` timeouts)
+that would have contradicted the PR's "main was green 142/142" claim — root cause was
+a stray local `.env` in my own checkout making `dotenv/config` pull in real config
+during that job's tests, not a `main` defect; confirmed `main` is green once isolated.
+No UI in this diff, so design-system/phone-gate checks don't apply; no new Ron-facing
+steps (D-0068 n/a — deploy is the already-documented `./setup.sh` on the mini).
+`mergeable_state: clean`, not a draft. Posted `VERDICT: APPROVE` with cited findings,
+added label `reviewed:approve`.
+
+**Next:** Per D-0052 the dispatcher merges on this APPROVE and moves the card to Done
+— no Ron click needed. Per the PR body, two things still block the chain end to end,
+neither in this repo: **(1)** redeploy `courtreserve-api` on the host so `GET
+/fixed-events` actually exists (today it 404s and the scheduler books from the
+`policy.json` seed — safe, loud, but the dashboard's court pins stay cosmetic until
+then), and **(2)** the `preferred_courts int[]` column on `courtreserve.fixed_events`
+(parallel contract work, not this repo).
+
+---
+
+## 2026-10-06 — Builder: read the standing fixed-events pattern from courtreserve-api (issue #62)
+
+**Done:** Opened [PR #63](https://github.com/notronwest/court-reserve-scheduler/pull/63)
+(`Closes #62`, branch `feature/issue-62-fixed-events-api`, built in an isolated
+worktree — `main` untouched) for D-0056's consumer side. Adds
+`CourtReserveClient.fixedEvents()` (`GET /fixed-events`) and a new
+`ts/src/fixedEvents.ts` resolver: live read → cache to
+`state/fixed-events.json` on success; on failure, falls back to that cache
+(alerting Discord with the cache's date) or, with no cache, to `policy.json`'s
+own `fixed_events.events` seed (alerting the same way) — never a silent stale
+fallback. Wired into `runScheduler` (covers the 8 AM auto-book job,
+`--recommend`/`--dry-run`, and catch-up, since all three call it) ahead of
+every recommend/book pass. Added tests for the resolver, the client call, two
+`runScheduler` integration cases (API down with/without a cache), and a
+regression test against the *real* `policy.json` confirming the four
+resurrected "Co-Ed Advanced Structured Play" slots (event 1135589) each book
+on 2 courts without colliding with the generic Advanced Open Play — 128
+tests green, `tsc --noEmit` clean. Docs updated: `DEPLOYMENT.md`, root
+`CLAUDE.md` (State Files), `ts/.env.template` (new optional `CR_STATE_DIR`),
+`.gitignore` (`state/`).
+
+**Infra note (same recurring issue as below, now 5-for-5):** `gh project
+field-list` / `gh project item-list` hit the account's GraphQL secondary rate
+limit mid-session even though the primary quota showed ~4800/5000 remaining —
+cleared on its own after a few minutes of unrelated work (no retry loop
+needed). `git push`/`gh issue view`/`gh pr create` over REST were unaffected
+throughout, so the branch, PR, and board moves all still completed in one
+session once the window passed.
+
+**Next:** `courtreserve-api` does not implement `GET /fixed-events` yet, so
+every live run will hit the fallback path and post the "Fixed events read
+failed" Discord alert daily until that endpoint ships on the
+`courtreserve-api` side (flagged in the PR's reviewer notes). Ron's review +
+merge is the remaining gate; board card is **In Review** (Type = feature).
+
+---
+
+## 2026-10-06 — Reviewer: PR #63 (issue #62) → APPROVE
+
+**Done:** Reviewed [PR #63](https://github.com/notronwest/court-reserve-scheduler/pull/63)
+(`Closes #62`, D-0056: read the standing fixed-events pattern from
+`courtreserve-api GET /fixed-events` with a local cache, `policy.json` as
+fallback seed) against the issue's three acceptance criteria, D-0056's
+build spec in `DECISIONS.md`, and CLAUDE.md conventions — no UI touched,
+so the design/phone gates didn't apply. Checked out the branch in an
+isolated worktree (`.pr63-review`, removed after) and ran the full suite
+independently rather than trusting the PR body: `tsc --noEmit` clean,
+**128/128 tests pass** including the three new files
+(`fixedEvents.test.ts`, the two new `scheduler.test.ts` cases, and
+`structuredPlay.test.ts` against the real `policy.json`). Confirmed the
+live→cache→seed fallback chain always alerts on any non-live path (never
+a silent stale fallback, per D-0056 §3), `deps.policy` is never mutated,
+`resolveFixedEvents` runs at the start of every `runScheduler` entry point
+(8 AM auto-book, `--recommend`/`--dry-run`, catch-up), and the new
+`fixedEvents.test.ts` doesn't duplicate the pre-existing
+`fixed-events.test.ts` (that one tests the recommender's event-collision
+logic from PR #30 — different code, D-0049 clean). Posted `VERDICT:
+APPROVE` with cited findings and the `reviewed:approve` label per
+`agents/reviewer/PROMPT.md`.
+
+**Next:** Per D-0052 the dispatcher merges on this APPROVE and moves the
+board card to Done — nothing further needed here. Once `courtreserve-api`
+implements `GET /fixed-events` (out of scope for #62 — consumer side
+only), every production run until then will hit the fallback path and
+post a "Fixed events read failed" Discord alert daily; that's flagged in
+the PR body as expected-but-possibly-noisy, worth watching once this
+merges.
+
+---
+
+## 2026-10-02 — Builder: issue #50 (silent scheduler failures) → PR #59 opened
+
+**Done:** Single-item Builder run on issue #50 ("Daily scheduler fails
+silently: a dead /schedule fetch or failed bookings leave a hole in the
+14-day horizon with no alert"). Confirmed #50 had no existing sub-issues/PRs
+(not mis-queued), branched `feature/issue-50-silent-scheduler-failures` off
+`origin/main` in an isolated worktree, and shipped all three asks in one PR:
+(1) `runScheduler` now posts a red Discord alert + rethrows (non-zero exit)
+on a dead schedule fetch, and alerts on zero recommendations in auto-book
+mode; (2) `bookAll` retries `503 browser busy` / `aborted` booking errors up
+to 3 attempts with backoff before counting a slot failed; (3) new `catch-up
+[--book]` CLI (`ts/src/jobs/catchUp.ts`) walks today..today+14, flags
+empty/short dates by reusing the existing rule-based `recommend()` engine,
+and `--book` re-runs the normal recommend+book path only on flagged dates
+(an already-full day is never touched). `npm run typecheck` + `npm test`
+both green (117 tests, 8 new). PR
+[#59](https://github.com/notronwest/court-reserve-scheduler/pull/59) opened
+with `Closes #50` as the first body line — confirmed linked via the issue's
+cross-reference timeline. Worktree removed after push; main checkout
+untouched.
+
+**Blocked (infra, not scope) — GraphQL rate limit, now 5-for-5:** Same
+recurring failure as #51/#52/#53/#56 below: the account's GraphQL quota was
+fleet-wide exhausted for the entire run (`gh project field-list`, `gh pr
+create`, `gh issue comment` all refused with `API rate limit already
+exceeded`, even while REST showed quota remaining — a secondary/fleet-shared
+GraphQL limit, not the per-hour REST one). Every GitHub write in this
+session — PR creation, the issue comment — was done via raw `gh api
+repos/.../pulls` / `.../issues/.../comments` REST POSTs instead of the
+GraphQL-backed `gh pr create` / `gh issue comment`. The one GraphQL-only
+operation with no REST fallback, **moving the board card's Status to In
+Review** (`gh project item-edit`, Projects v2 is GraphQL-only), could not be
+done this run — left a comment on #50 flagging this explicitly so the card
+doesn't silently sit in `In Progress`.
+
+**Next:** Ron (or a later run once GraphQL quota resets) should move #50's
+board card to **In Review** manually — the PR is open and ready for review.
+The daemon ticket for the recurring GraphQL rate-limit block is now overdue
+at 5-for-5 across #51/#52/#53/#56/#50 — worth escalating as its own fix
+(e.g. a dedicated token, or a REST-first fallback baked into the Builder/
+Reviewer prompts for every GraphQL-backed `gh` subcommand, not just the ones
+already patched here).
+
+---
+
+## 2026-10-02 (even later) — Reviewer: PR #57 (issue #52) → APPROVE
+
+**Done:** Reviewed [PR #57](https://github.com/notronwest/court-reserve-scheduler/pull/57)
+(`Closes #52`, policy provenance recording + stale-checkout Discord warning)
+against the issue's four acceptance criteria, `DECISIONS.md`, and CLAUDE.md —
+no UI touched (Discord embed text only), so the design/phone gates didn't
+apply. Checked out the PR branch into an isolated worktree (`/tmp/pr57-review`,
+cleaned up after) and actually ran the suite rather than trusting the diff:
+`tsc --noEmit` clean, full `vitest run` green at 109/109 across all 10 test
+files including the two new ones (`policyProvenance.test.ts`,
+`discord.test.ts` additions). Confirmed `scheduler.ts` is the only booking-log
+writer and the only caller of the touched `discord/notify.ts` exports, so
+nothing else could have silently broken. Noted the implementation does a real
+`git fetch origin main` (not the ticket's suggested `--dry-run`) to avoid
+under-reporting drift from a stale cached remote-tracking ref — a deliberate,
+explained, correctness-motivated deviation, not a defect. Posted `VERDICT:
+APPROVE` with cited findings and the `reviewed:approve` label.
+
+**Blocked (infra, not scope) — same recurring issue, now 5-for-5:** `gh pr
+comment` and `gh pr edit --add-label` again hit the account's GraphQL rate
+limit on the very first call of the session (even `gh pr view`/`gh pr diff`
+failed), despite `gh api rate_limit` showing the GraphQL quota mostly
+unused (4892/5000) — so this reads as a secondary/abuse throttle on specific
+mutating or PR-shaped GraphQL calls, not primary quota exhaustion. Worked
+around it the same way as #56: REST calls (`gh api repos/.../pulls/57`,
+`.../issues/57/comments`, `.../issues/57/labels`) instead of the GraphQL-backed
+`gh pr`/`gh api -f labels[]` subcommands.
+
+**Next:** Per D-0052 the dispatcher merges on the APPROVE and moves the board
+card to Done; nothing further needed here unless the dispatcher's own GraphQL
+calls hit the same throttle. The recurring GraphQL rate-limit block
+(#51/#52/#53/#56) is now 5-for-5 at #57 — still overdue for a daemon-side fix
+(or at minimum a documented REST fallback in the reviewer's own runbook) so
+each review session doesn't have to rediscover the workaround.
+
+---
+
+## 2026-10-02 (even later still) — Reviewer: PR #58 (issue #53) → REQUEST CHANGES
+
+**Done:** Reviewed [PR #58](https://github.com/notronwest/court-reserve-scheduler/pull/58)
+(`Closes #53`, headless `redate` command) against the issue's acceptance
+criteria and `DECISIONS.md` — no UI touched, so the design/phone gates didn't
+apply. The happy path, dry-run output, registrant-count guard, and fail-closed
+book→verify→cancel ordering all match the issue; it composes existing
+`book_event.py` primitives rather than adding a duplicate surface (no D-0049
+concern).
+
+Found a real gap against the issue's own "never a third state" requirement:
+`book_event()` can return `occurrence_id: null` on a *successful* booking —
+the PR body itself cites this happening in production
+(`booking_log_09-30-2026.json`) — and when that happens for the **target**
+booking while courts/max assignment is still needed (`run.py:444-449`, true
+for the PR's own documented `--courts 3,4 --max 10` example), or the
+courts/max edit fails (`456-460`), or verification can't find the new
+occurrence (`470-474`), the command bails out leaving a new **incomplete**
+target occurrence live on Court Reserve *and* the source occurrence
+untouched — a third state, not one of the two the acceptance criteria allow.
+Suggested two concrete fixes in the review: resolve `target_occ_id` from the
+target-date grid (the verification step already does that lookup, just needs
+to also capture the matched `Id`), or cancel the stray target occurrence
+before returning on those bail-out paths. Posted `VERDICT: REQUEST CHANGES`
+with cited line numbers and the `reviewed:changes` label — created that label
+on the repo since it didn't exist yet (only `reviewed:approve` did). Per
+D-0052 this re-queues the card to the Builder's rework lane, not Ron.
+
+**Next:** Builder picks up PR #58 on the same branch, fixes the null-
+occurrence-id / rollback gap, pushes, and the reviewer re-reviews on the new
+commit.
+
+---
+
+## 2026-10-02 (latest) — Reviewer: PR #59 (issue #50) → VERDICT: APPROVE
+
+**Done:** Reviewed PR #59 (`feature/issue-50-silent-scheduler-failures`,
+closes #50) per `daemon/agents/reviewer/PROMPT.md`. Checked the diff against
+all three #50 acceptance criteria (failure alert + non-zero exit on a dead
+`/schedule` fetch, bounded retry on `503`/`aborted` booking errors with the
+existing `sendAutoBookSummary` already covering the "N booked, M failed"
+run-summary, and the new `catch-up [--book]` CLI reusing `recommend()` +
+`runScheduler` rather than duplicating booking logic — no D-0049 hit).
+Confirmed the daily launchd job (`ts/ops/run-scheduler.sh`) actually runs the
+patched `cli.ts schedule` path. Did not trust the PR body's claims —
+checked out the PR branch into a scratch worktree (`/tmp/pr59-review`,
+removed after) and ran `npm test` (117/117 green, including the 5 new tests)
+and `npx tsc --noEmit` (clean) myself. No UI in this diff, so the
+design-system/phone gates don't apply. Posted `VERDICT: APPROVE` with cited
+findings, added label `reviewed:approve`
+([comment](https://github.com/notronwest/court-reserve-scheduler/pull/59#issuecomment-5946692913)).
+Per D-0052 this hands off to the dispatcher to merge to `main` and move the
+board card to Done — no further action here.
+
+**Next:** None from this review; watch for the dispatcher's merge of #59.
+
+---
+
 ## 2026-10-08 — D-0056 finished: the standing pattern comes off the feed, and a never-worked read bug
 
 **Context:** D-0056's ticket (#62, "Read the standing pattern from courtreserve-api
