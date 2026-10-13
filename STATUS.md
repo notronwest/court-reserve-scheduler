@@ -5,6 +5,27 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-12 — Reviewer: PR #73 (issue #72) → APPROVE
+
+**Done:** Reviewed [PR #73](https://github.com/notronwest/court-reserve-scheduler/pull/73)
+(`Closes #72` — adds `ppa_calendar.py`, fetching PPA Championship Sundays from the tour's
+own events page instead of carrying a hardcoded list) per `agents/reviewer/PROMPT.md`.
+Confirmed in a scratch clone: the 13-test suite passes, and ran the live fetch
+(`python ppa_calendar.py --refresh`) against `ppatour.com/events/` directly — it correctly
+derived 19 Sundays through May 2027, matching an independent read of the same page. The
+live→cache→seed fail-safe chain and the thin-parse/archive-page plausibility floor both
+work as described, not just in test doubles. Noted one non-blocking gap: the Dec→Jan
+year-wrap parsing (`ppa_calendar.py:60-76`) is untested against real data — no cross-year
+range exists on the live page today — and a note that the new capability lives in the
+repo-root Python tree (not `ts/`) but is read-only with a CLI entry point, which satisfies
+this repo's CoS-surface requirement; wiring it into the command-bar/cadence feature that
+originally needed it is reasonably follow-on work in a different repo. Posted
+`VERDICT: APPROVE`, added label `reviewed:approve`.
+
+**Next:** Per D-0052 the dispatcher merges on this APPROVE and moves the card to Done —
+no Ron click needed.
+
+---
 ## 2026-10-11 — RECOVERED: 7 entries that were written but never committed
 
 Written into this checkout's `STATUS.md` between 2026-10-02 and
