@@ -410,7 +410,6 @@ go back and forth with you the more time and money it costs."
    Checkboxes and dropdowns are stated in words, not boxes.
 <!-- wmpc-block:ron-instructions:v1 END -->
 
-<!-- wmpc:secrets v1 -->
 <!-- wmpc-block:engineering-standard:v5 START -->
 ## Engineering standard
 
@@ -502,11 +501,8 @@ This raises the floor; it does not override this repo's specific conventions
 above (branch/PR discipline, mobile-first, design tokens, docs-in-the-same-change).
 <!-- wmpc-block:engineering-standard:v5 END -->
 
-<!-- wmpc:secrets v1 -->
 
-<!-- wmpc:secrets v1 -->
-
-<!-- wmpc:secrets v1 -->
+<!-- wmpc-block:secrets:v1 START -->
 ## Secrets — never in a tracked file (enforced)
 
 A credential never appears in a tracked file. Not in code, not in a doc, not in a comment, not as a
@@ -530,3 +526,4 @@ every PR; a commit or PR containing a credential is refused, with the value reda
 
 Full reference, including the fleet's leak history: `wmpc-meta/conventions/SECRETS.md`.
 Where every repo ships and what it touches: `wmpc-meta/conventions/FLEET-MAP.md`.
+<!-- wmpc-block:secrets:v1 END -->
