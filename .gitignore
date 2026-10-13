@@ -39,3 +39,5 @@ supabase/.temp/
 
 # Temp files (e.g. bootstrap write-then-move leftovers)
 *.tmp
+
+ppa_calendar_cache.json
