@@ -2565,6 +2565,63 @@ Re-labelling an issue that carries `ruled`. Adding a rail's own artifact to a re
 allowlist instead of excluding it at the writer (D-0144). Installing a rail whose committed enable
 fact says `no`, or re-filing an approval Ron has denied.
 
+### D-0161 — A pause covers one phase, and the phase it covers is named in code
+
+*2026-10-13 · scope: `infrastructure/builder-dispatch/**, **HALT*` · source: Ron, 2026-10-13 — "narrow the halt — no new cards, rework continues", answering the call D-0128 explicitly left to him; found while draining the Blocked + In Review queues (STATUS 2026-10-13)*
+
+**Decision.** The Builder's committed `HALT` pauses **exactly one phase**: a fresh build off an
+Agent Ready card with no open PR (Phase B2). Three things explicitly continue — rework of an
+existing PR (B1), orphan recovery (A), and the whole zero-token board reconcile.
+
+1. **A pause is a mode, not an early exit.** `HALT` set `exit 0` at the top of the dispatcher,
+   before the host lock, the board read and every reconcile. A pause implemented as an exit
+   cannot distinguish the inflow it means to stop from the landing it means to protect, because
+   it runs before anything has been classified. The gate now sets `HALT_NEW_BUILDS` and the
+   decision is applied *after* classification — because "a new card" is a classification
+   outcome, not a board column: an Agent Ready card is rework if an open PR already closes its
+   issue, and a fresh build if not.
+2. **A pause whose file and whose code disagree is the file lying.** `HALT` said *"The Builder
+   finishes nothing it has not already started"* and the code finished nothing **at all**, for
+   four days, invisibly. A pause states which phase it covers and a test proves the others still
+   run, or it is not a pause — it is an outage with a note attached.
+3. **A paused item is named, never silently skipped, and an idle tick caused by a pause says so.**
+   The run summary carries `paused_builds=<n>`, the log names the issue numbers, the heartbeat
+   payload carries `paused_builds` and `halt`, and the idle ping stops claiming "Agent Ready is
+   empty — add cards" when the halt is what emptied it.
+4. **Capping interacts with pausing, and the retained set is what gets capped.** The per-run cap
+   is 5 and is applied before classification on the normal path, unchanged. Under the pause it is
+   applied to the retained set instead — five paused cards ahead of a rework item in board order
+   would otherwise consume every slot and starve the phase the narrowing exists to permit, while
+   the log reported a full tick.
+
+**Why.** D-0128 (2026-10-11) named this deadlock and declined to resolve it: *"This record does
+not narrow the pause of 2026-10-09 — that is Ron's call."* Its rule 2 is the binding half — *a
+release condition whose only possible satisfier is inside the pause is a deadlock, not a
+condition* — and `HALT` condition 1 asked the open-PR count to fall while the pause switched off
+rework, the only non-hand way a `reviewed:changes` PR moves. Ron chose the second of the two
+remedies rule 2 allows: scope the pause to leave the satisfier out. So condition 1 is also
+rewritten here to the **agent-opened** count per D-0128 rule 3, and its unmeasurable *"with no
+one touching it by hand"* clause is retired.
+
+Measured the same day, and recorded so this record is not read as a cure: **all 18 open
+`reviewed:changes` PRs in BUILDER-REPOS are session-opened** — not one carries a
+`feature|db|fn/issue-<N>-` branch and 13 have no linked issue at all, so no card exists to
+trigger the Builder's rework path. Narrowing lets the Builder finish **its own** bounced PRs and
+restores the free reconcile; it moves none of those 18. That is a second, separate gap (a
+session-opened PR has no executor and no card), not this one.
+
+**The signal that says this stopped working** (D-0084). A tick that logs `paused_builds=0` while
+cards sit in Agent Ready with no open PR means the gate is no longer reached — the `exit 0` shape
+has come back. A `HALT` file whose text names phases that `test-halt.sh` does not assert means the
+two have drifted apart again.
+
+**Forbids.** Implementing a pause as an early `exit 0` ahead of classification. Shipping a pause
+whose file names a phase no test asserts. Skipping a paused work item without naming it. Reporting
+an idle tick as a dry queue when a pause emptied it. Applying a per-run cap before a pause filters
+the queue, so paused items consume the slots of the phase still permitted. Reinstating `HALT`
+condition 1's "with no one touching it by hand" clause, or judging the pause on one
+undifferentiated open-PR total (D-0128 rule 3).
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
