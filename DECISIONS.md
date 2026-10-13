@@ -2622,6 +2622,53 @@ the queue, so paused items consume the slots of the phase still permitted. Reins
 condition 1's "with no one touching it by hand" clause, or judging the pause on one
 undifferentiated open-PR total (D-0128 rule 3).
 
+### D-0166 — Creating an event never dead-ends, never reports a success that did not happen, and a 'no' is dated
+
+*2026-10-13 · scope: `web/src/views/events/**, supabase/functions/wmpc-command/**, courtreserve_api/booking.py, courtreserve_api/events_create.py, run.py, ts/src/**` · source: Ron, 2026-10-13, looking at a schedule that showed one structured play as two half-sized events — "we need to be sure that the path for creating events NEVER hits a dead end / Something is either not possible NOW rarely not possible EVER / And we can never leave the person who is creating an event with the feeling that it happened when it didn't or there is no path for them to move it forward"*
+
+**Decision.** Three rules, binding every surface and every executor on the event-creation
+path — the command bar, the Events pages, `wmpc-command`, `courtreserve-api`, the scheduler:
+
+1. **No dead end.** Every terminal state names the next move and offers it. A refusal
+   carries the route (D-0133): the candidates when it blocked on *which*, the field when it
+   blocked on *what*, the ask kept and re-openable when it blocked on anything else. "It
+   couldn't be done" with nothing to press is a defect, not an outcome.
+2. **A 'no' is dated, not permanent.** The honest answer is almost always *not yet*, and it
+   is said that way: what is missing, who can supply it, and what happens when they do.
+   **"Not possible NOW" — rarely "not possible EVER."** A surface may only say *never* when
+   the thing is genuinely impossible or deliberately refused by a rule, and then it names
+   the rule. Anything else is a gap in our system and is reported as one: an issue with the
+   ask attached, named in the reply, so the person sees the work exists rather than being
+   told no twice.
+3. **Never a success that did not happen.** A surface reports done only for what it can
+   prove — read back, re-queried, or verified by the executor. A write that half-landed is a
+   FAILURE with the half named, never a success: two half-sized events instead of one on two
+   courts, one tier published of sixteen, a court assignment that silently did not apply.
+   An executor that cannot do the whole of what was asked fails loudly and leaves state the
+   caller can reason about; a caller never discards the result of a step it depends on.
+
+**Why.** Each half has already cost real money and real trust. On the dead-end side: Ron
+asked three times for a court count the bar refused, and once for a publish that was routed
+down a path whose allowlist could not express it — both capabilities we had, refused by
+routing. On the false-success side, same week: a publish that verified a checkbox with no
+backing field reported failure after succeeding; a `status='publishing'` nothing claimed
+reported success while the row sat for a day; and a structured play booked one court at a
+time read, on the member panel, as two separate half-capacity events — each booking "worked".
+The common shape is a surface whose confidence is not tied to what actually happened. Ron
+sees the schedule, not the logs: when the screen and the club disagree, the screen is wrong
+and the system has lied to him.
+
+**Forbids.** No terminal card without a next move. No "can't be done" that does not either
+name the rule it obeys or file the gap and say so. No success reported from an unverified
+write, and no partial write reported as a whole one. No caller discarding the result of a
+step whose failure changes the outcome. No multi-court booking performed as one booking per
+court — one occurrence carries its courts, or the attempt fails.
+
+**Binds.** Extends D-0133 (a surface never ends at "it can't be done") with the dated-no and
+the false-success halves; extends D-0142 (a *specified* refusal is not a capability gap) by
+requiring that anything else is filed as one. Rests on the reload-verify rule already in
+`events_create.py` and on D-0048/D-0049's one-card contract for where the next move appears.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
