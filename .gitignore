@@ -10,6 +10,10 @@ archive/
 # Cached schedule data (moved to cache/)
 cache/
 
+# Node (the repo root carries its own node_modules on hosts that run the
+# TypeScript from here; ts/.gitignore only ever covered ts/node_modules/)
+node_modules/
+
 # Python
 venv/
 __pycache__/
