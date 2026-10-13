@@ -457,6 +457,103 @@ export function buildCatchUpEmbed(
   }
 }
 
+// ── Standing-session gaps (patternGaps job) ────────────────────────────────────
+//
+// Ron, 2026-10-13, after finding a session missing that every existing check called fine:
+// "Make that gap check a scheduled job that alarms." It alarms on what it could NOT fix —
+// booking what it can is the job's own work and is reported underneath, not alarmed about.
+// Silence is the normal morning: an alert that fires daily is one nobody reads (#399).
+
+export interface PatternGapLine {
+  date: string
+  day_of_week: string
+  start_time: string
+  name: string
+  wants_courts: number
+  has_courts: number
+  status: string
+  courts?: number[]
+  max_people?: number
+  error?: string
+}
+
+const GAP_WHY: Record<string, string> = {
+  no_event: 'no Court Reserve event is attached to this standing slot, so nothing can be booked against it',
+  no_court: 'every court is already taken at that hour',
+  failed: 'the booking was attempted and did not land',
+}
+
+export function buildPatternGapsEmbed(
+  gaps: PatternGapLine[],
+  opts: { daysScanned: number; patternsLive: boolean; patternsAlert?: string },
+): unknown {
+  const fixed = gaps.filter((g) => g.status === 'booked' || g.status === 'widened')
+  const open = gaps.filter((g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed')
+  const color = open.some((g) => g.status === 'failed') || !opts.patternsLive ? 0xe74c3c
+    : open.length ? 0xf39c12 : 0x2ecc71
+
+  const lines: string[] = []
+  if (!opts.patternsLive) {
+    lines.push(`⚠️ **${opts.patternsAlert ?? 'the standing pattern list was not read live'}** — nothing was booked this run.`)
+    lines.push('')
+  }
+  if (open.length) {
+    lines.push(`**${open.length} standing session${open.length === 1 ? '' : 's'} still missing:**`)
+    for (const g of open.slice(0, 20)) {
+      const why = g.error ? g.error.slice(0, 120) : (GAP_WHY[g.status] ?? g.status)
+      lines.push(`• **${g.day_of_week.slice(0, 3)} ${g.date} ${g.start_time}** ${g.name} — ${why}`)
+    }
+    if (open.length > 20) lines.push(`• …and ${open.length - 20} more`)
+  }
+  if (fixed.length) {
+    if (lines.length) lines.push('')
+    lines.push(`**Booked for you (${fixed.length}):**`)
+    for (const g of fixed.slice(0, 15)) {
+      const courts = (g.courts ?? []).map((n) => `#${n}`).join(', ')
+      const cap = g.max_people ? `, max ${g.max_people}` : ''
+      lines.push(`• ${g.day_of_week.slice(0, 3)} ${g.date} ${g.start_time} ${g.name} → ${courts}${cap}`)
+    }
+    if (fixed.length > 15) lines.push(`• …and ${fixed.length - 15} more`)
+  }
+
+  const title = open.length
+    ? `📅 ${open.length} standing session${open.length === 1 ? '' : 's'} missing in the next ${opts.daysScanned} days`
+    : `📅 Standing sessions: ${fixed.length} filled, nothing left open`
+
+  return {
+    embeds: [
+      {
+        title,
+        color,
+        description: lines.join('\n').slice(0, 3900),
+        footer: { text: `White Mountain Pickleball • standing-session check • ${HOSTNAME}` },
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  }
+}
+
+/** Posts only when there is something to say — see the note above. */
+export function sendPatternGapReport(
+  rest: DiscordRest,
+  result: {
+    gaps: PatternGapLine[]
+    daysScanned: number
+    patternsLive: boolean
+    patternsAlert?: string
+  },
+): Promise<string | null> {
+  const worth = result.gaps.some((g) => g.status !== 'ok') || !result.patternsLive
+  if (!worth) return Promise.resolve(null)
+  return rest.postEmbed(
+    buildPatternGapsEmbed(result.gaps, {
+      daysScanned: result.daysScanned,
+      patternsLive: result.patternsLive,
+      patternsAlert: result.patternsAlert,
+    }),
+  )
+}
+
 export function sendCatchUpReport(
   rest: DiscordRest,
   days: CatchUpDayLine[],

@@ -266,6 +266,9 @@ install_plist "com.whitemountain.fetch-history"
 install_plist "com.whitemountain.listener"
 install_plist "com.whitemountain.check-waitlists"
 install_plist "com.whitemountain.checkin"
+# 8:45, last of the three morning jobs: does every STANDING session actually exist?
+# catch-up measures a day's court-hours and cannot see one session missing (#…/2026-10-13).
+install_plist "com.whitemountain.pattern-gaps"
 
 # ── 8. Court Reserve login (first time) ──────────────────────────────────────
 step "8. Court Reserve browser login"

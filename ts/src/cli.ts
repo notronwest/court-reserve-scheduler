@@ -6,6 +6,7 @@ import { loadPolicy } from './policy'
 import { recommend, recommendLlm, toDict } from './recommender'
 import { runScheduler } from './scheduler'
 import { runCatchUp } from './jobs/catchUp'
+import { needsAttention, runPatternGaps } from './jobs/patternGaps'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -146,6 +147,34 @@ async function main(): Promise<void> {
       break
     }
 
+    case 'pattern-gaps': {
+      // Does every standing session actually EXIST on the calendar? catch-up measures a
+      // day's court-hours and cannot see one missing session (jobs/patternGaps.ts).
+      // With --fix it books what it can and alarms about the rest (Ron, 2026-10-13).
+      const rest = new DiscordRest({
+        botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+        channelId: process.env.DISCORD_CHANNEL_ID ?? '',
+        webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
+      })
+      const result = await runPatternGaps(
+        makeCr(),
+        { rest, policy: loadPolicy(), log: (m) => console.log(`${new Date().toISOString()}  ${m}`) },
+        { fix: flags.has('--fix') },
+      )
+      const filled = result.gaps.filter((g) => g.status === 'booked' || g.status === 'widened').length
+      const open = result.gaps.filter(
+        (g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed',
+      ).length
+      console.log(
+        `Done: ${result.daysScanned} days, ${result.gaps.length} gap(s) — ${filled} filled, ${open} still open` +
+          (result.patternsLive ? '' : `  [patterns from ${result.patternsSource}, nothing booked]`),
+      )
+      // Anything a human must deal with exits non-zero: the wrapper withholds the heartbeat
+      // and the fleet watchdog alarms even if Discord is never read.
+      if (needsAttention(result)) process.exit(1)
+      break
+    }
+
     default:
       console.error('commands:')
       console.error('  health                      — is the courtreserve-api service up?')
@@ -153,6 +182,7 @@ async function main(): Promise<void> {
       console.error('  recommend <date> [--llm]    — compute + print recs (no Discord)')
       console.error('  schedule <date> [--dry-run] — generate, post to Discord, save pending approval')
       console.error('  catch-up [--book] [--book-thin] — flag/re-book empty or missed dates in the 14-day horizon')
+      console.error('  pattern-gaps [--fix]        — is every STANDING session on the calendar? (--fix books what it can)')
       process.exit(1)
   }
 }
