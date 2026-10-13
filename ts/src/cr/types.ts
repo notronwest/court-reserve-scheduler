@@ -49,7 +49,18 @@ export interface BookRequest {
   date: string // M/D/YYYY
   start_time: string // e.g. "2:00 PM"
   end_time: string
-  court_id: string
+  /** ONE court. Kept for callers that only ever book one; `/book` reads it as a list of one. */
+  court_id?: string
+  /**
+   * EVERY court the occurrence should hold (courtreserve-api #409). Court Reserve books an
+   * occurrence on one court and assigns the rest by editing it, and a caller that did that
+   * itself — one `/book` per court — produced TWO half-capacity events on the member panel
+   * three times in October. The endpoint owns both steps now; asking for N courts and
+   * getting fewer comes back as a failure, never a partial success (daemon D-0166).
+   */
+  court_ids?: string[]
+  /** The cap for the whole occurrence, applied in the same edit as the courts. */
+  max_people?: number
   dry_run?: boolean
 }
 export interface MoveRequest {

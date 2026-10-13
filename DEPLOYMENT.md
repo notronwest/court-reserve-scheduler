@@ -45,6 +45,16 @@ targets:
     config_scope: same ts/.env; reads logs/booking_log_*.json written by the 8:00 run
     verify: ~/Library/Logs/court_reserve/launchd_catch_up.log — every date lists OK / MISSED / EMPTY / THIN / UNKNOWN with hours vs target
     rollback: launchctl unload the plist
+  - name: pattern-gaps
+    kind: mac-mini-launchd
+    trigger: launchd com.whitemountain.pattern-gaps — daily at 8:45 AM, after the 8:00 booker and the 8:30 catch-up (installed/reloaded by ./setup.sh)
+    source: ts/ops/run-pattern-gaps.sh → ts/src/cli.ts pattern-gaps --fix
+    env: PROD
+    url: n/a — asks per SESSION (not per day) whether every standing pattern in courtreserve.fixed_events has its occurrence in today..today+14; books what it can as ONE occurrence with all its courts, posts a Discord embed only when something is still open, heartbeats daemon job scheduler-pattern-gaps on exit 0
+    host: same machine
+    config_scope: same ts/.env; reads the standing patterns through courtreserve-api GET /fixed-events (live only — a cached or seeded list books nothing)
+    verify: ~/Library/Logs/court_reserve/launchd_pattern_gaps.log — one line per gap with what was done; "Done: 14 days, N gap(s) — X filled, Y still open"
+    rollback: launchctl unload the plist
   - name: check-waitlists
     kind: mac-mini-launchd
     trigger: launchd com.whitemountain.check-waitlists — 9:00, 11:00, 13:00, 15:00, 17:00 daily
@@ -104,6 +114,7 @@ targets:
 |---|---|---|
 | `scheduler` | launchd | daily 8:00 AM |
 | `catch-up` | launchd | daily 8:30 AM — re-books what 8:00 missed |
+| `pattern-gaps` | launchd | daily 8:45 AM — is every STANDING session on the calendar? books what it can, alarms on the rest |
 | `check-waitlists` | launchd | 9:00 · 11:00 · 13:00 · 15:00 · 17:00 daily |
 | `fetch-history` | launchd | Mondays 7:00 AM |
 | `checkin` | launchd | Mondays 6:00 AM |

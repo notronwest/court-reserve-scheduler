@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "TypeScript rewrite of the WMPC Court Reserve scheduler (in progress — see ts/README.md)",
+  "description": "TypeScript rewrite of the WMPC Court Reserve scheduler (in progress \u2014 see ts/README.md)",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -16,7 +16,8 @@
     "fix-imbalance": "tsx src/jobs/fixImbalance.ts",
     "check-waitlists": "tsx src/jobs/checkWaitlists.ts",
     "checkin-past": "tsx src/jobs/checkinPast.ts",
-    "catch-up": "tsx src/jobs/catchUp.ts"
+    "catch-up": "tsx src/jobs/catchUp.ts",
+    "pattern-gaps": "tsx src/cli.ts pattern-gaps"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

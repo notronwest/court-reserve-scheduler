@@ -10,6 +10,7 @@ through the `courtreserve-api` HTTP service — nothing here drives a browser.
 | `com.whitemountain.listener` | `run-listener.sh` → `src/discord/listener.ts` | always-on (RunAtLoad + KeepAlive) |
 | `com.whitemountain.scheduler` | `run-scheduler.sh` → `cli.ts schedule <14d-out>` | daily 8:00 AM |
 | `com.whitemountain.catch-up` | `run-catch-up.sh` → `cli.ts catch-up --book` | daily 8:30 AM |
+| `com.whitemountain.pattern-gaps` | `run-pattern-gaps.sh` → `cli.ts pattern-gaps --fix` | daily 8:45 AM |
 | `com.whitemountain.fetch-history` | `run-fetch-history.sh` → `jobs/fetchHistory.ts` | Mondays 7:00 AM |
 | `com.whitemountain.check-waitlists` | `run-check-waitlists.sh` → `jobs/checkWaitlists.ts` | 9/11/13/15/17 daily |
 | `com.whitemountain.checkin` | `run-checkin.sh` → `jobs/checkinPast.ts --execute --days 8` | Mondays 6:00 AM |
@@ -27,10 +28,27 @@ fill). A **thin** day (under half the policy target but the daily run did finish
 is reported to Discord, never refilled — a day Ron deliberately thinned must not
 grow back every morning. A clean horizon posts nothing; liveness is the heartbeat.
 
-**Heartbeats:** both wrappers call daemon's `infrastructure/heartbeat/heartbeat.sh`
-(jobs `scheduler-daily` and `scheduler-catch-up`) **only on exit 0**. `schedule`
-exits 1 when it booked nothing it meant to book; `catch-up` exits 1 when a date
-could not be read or a re-book threw. The fleet watchdog alarms on 48 h of silence,
+**The gap catch-up cannot see (8:45, `pattern-gaps`):** catch-up asks *is this DAY
+full enough?* — court-hours against a target. A healthy-looking day can still be
+missing ONE standing session, and on 2026-10-13 it was: Monday 10/19 read **OK, 19h
+of 26.4h** while the Co-ed Intermediate Structured Play that runs 5–7pm was not on
+the calendar at all. Sweeping the fortnight by hand found **21 missing sessions and
+5 on fewer courts than their pattern asks for**, every day reported fine. So this
+job asks the other question, per SESSION: for each pattern in
+`courtreserve.fixed_events`, on each date its weekday falls, is the occurrence
+there, on as many courts as the pattern wants? With `--fix` it books what it can —
+one occurrence with ALL its courts — and alarms about what it cannot: no Court
+Reserve event attached to the pattern, every court busy, or a booking that failed.
+A session that lands on fewer courts than it wanted has its cap scaled (Ron: *"we
+can't have 13 people on one court. The max would be 5."*). It books **nothing** if
+the pattern list did not come from a live read, since a stale list could re-book a
+retired slot.
+
+**Heartbeats:** all three wrappers call daemon's `infrastructure/heartbeat/heartbeat.sh`
+(jobs `scheduler-daily`, `scheduler-catch-up` and `scheduler-pattern-gaps`) **only on
+exit 0**. `schedule` exits 1 when it booked nothing it meant to book; `catch-up` exits 1
+when a date could not be read or a re-book threw; `pattern-gaps` exits 1 whenever it
+leaves a session open, so the watchdog's silence alarm is the backstop for Discord. The fleet watchdog alarms on 48 h of silence,
 so a dead morning is noticed even if nobody reads Discord.
 
 Every auto-book run is tracked two ways:
