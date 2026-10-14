@@ -2730,6 +2730,130 @@ itself. Presence records carry the session pid, so a record whose pid is an
 **ancestor** of the hook is self. The env var is still used when present. Both the
 recognition and the fact that ancestry is not a blanket bypass are pinned by cases.
 
+### D-0171 — A dated series is a finite list of occurrences drained by the mini, never a filtered weekly pattern; the club never ingests a third party's calendar
+
+*2026-10-13 · scope: `supabase/functions/wmpc-command/**, courtreserve_api/events_drain.py, web/src/views/events/**, infrastructure/capability-requests/**` · source: daemon#582 (routed from cos_requests 34acb59e) — a capability gap the events command bar captured 2026-10-13. Ron asked for "a specially priced event that coincided with the beginning of doubles play in the PPA Championship Sunday … make it recur every Sunday that has a PPA Championship happening"; the bar refused because "the weekly scheduler can only run a session EVERY week, not on a filtered set of Sundays". Table convened per decisions/PROCESS.md — courtreserve-api CONCERN, wmpc-web CONCERN, court-reserve-scheduler NO OBJECTION, no veto; all three folded in below.*
+
+**Decision.** Five rules. The ask that produced them contained three different things, and
+separating them is most of the ruling: one real capability, one standing refusal, and one
+guard that was working correctly and must not be softened.
+
+1. **A DATED SERIES is a second recurrence kind, beside D-0056 §4's `standing` — never a
+   filter on it.** The payload contract, fixed here so neither side guesses:
+
+   ```
+   recurrence: {"kind":"dates","dates":["YYYY-MM-DD",…],
+                "start":"HH:MM","end":"HH:MM","courts":N}
+   ```
+
+   with `new_event: true|false` and the template to stamp from when new. The dates are a
+   **finite list supplied by a human**, each one a real occurrence.
+
+   It is a separate kind, and not a date filter inside a weekly pattern, for three reasons
+   that each stand alone. `courtreserve.fixed_events` is keyed on `day_of_week` and the
+   daily run books it 14 days out, so a filtered weekly pattern would make the 8 AM run
+   evaluate a predicate every morning over a list that will be exhausted — and D-0056 rule 1
+   made the standing pattern the shape for a thing that runs **forever with no end date**. A
+   finite list is the opposite shape. Second, a dated series must appear on the schedule the
+   day it is created, which is what the one-date write already does, rather than being
+   conjured later by an unattended pass. Third, D-0078's tier-matrix exemption is keyed on
+   `kind === 'standing'` **exactly**; a filtered mode living inside `standing` would silently
+   extend that exemption to a shape the D-0078 table never exempted.
+
+   So: a dated series writes **no `fixed_events` row** and is **not** added to the
+   scheduler's `approved_events` autonomy whitelist. The court-reserve-scheduler voice
+   confirmed this is already structurally true of its code rather than a promise — Pass 0
+   (`ts/src/recommender.ts`) iterates only `policy.fixed_events?.events`, fed from
+   `GET /fixed-events`, and never consults `approved_events` at all; `catchUp.ts` classifies
+   days off the live Court Reserve calendar, so a landed dated occurrence reads as filled and
+   is not re-booked. The whitelist omission costs one cosmetic thing: `!book <name>` resolves
+   at D-0058 rung 2 rather than rung 1.
+
+2. **The club never ingests a third party's calendar, and the dates come from the human.**
+   "Every Sunday that has a PPA Championship" cannot be resolved by us. We do not own that
+   schedule; the only ways to get it are to scrape a tour site or hand-maintain a mirror of
+   it, and both book real courts off data we cannot verify. D-0166 rule 3 lets a surface
+   report done only for what it can **prove**, and a borrowed calendar fails that test at the
+   moment it matters — quietly, a week later, on a Sunday with no tournament. Rule 1 is what
+   makes this refusal cheap rather than a dead end: the person pastes the six dates once.
+   This is a decided **no**, not a deferral, and it is the answer to the next sighting of the
+   same shape. Should the PPA ever publish a stable machine-readable feed, that is a new ask
+   with its own shape key, ruled on its own facts.
+
+3. **The fan-out is one drain-executed unit, and a partial set is a failure with the landed
+   dates named.** The confirm lands ONE `public.wmpc_events` row on the existing rail
+   (D-0056 rule 3); `events_drain` creates the Court Reserve shell once — reusing the
+   `new_event: true` create-and-verify it already has — then books each named date and
+   reload-verifies each. `wmpc-command` does **not** loop its `/book` call N times: an Edge
+   Function running N browser-driven bookings is the two-half-sized-events bug of D-0166
+   rule 3 with a timeout attached, and it leaves K of N booked with nothing tracking the
+   rest. The row is the unit of recovery because the row is what can be parked, retried and
+   read. If any date cannot be booked the row **FAILS with the dates that did book named**,
+   individually attributable. Six dates asked and four booked is never a success.
+
+4. **An unrecognised `recurrence.kind` is refused, not fallen through.** This is the table's
+   finding and it is a defect that exists **today**, before any of this is built. The
+   courtreserve-api voice read `origin/main`: `_drain_standing_pattern` returns `None` for
+   any kind that is not `"standing"`, and the caller then proceeds down the ordinary
+   single-occurrence path. So a `kind:'dates'` row reaching a drain that predates rule 1 does
+   not park — **it books one event and reports success**, which is exactly the false success
+   D-0166 rule 3 forbids, produced by the drain rather than by a caller. The drain therefore
+   gains an explicit refusal for a kind it does not know. That refusal is what makes rule 5's
+   ordering recoverable instead of silent, and it is worth landing on its own merits.
+
+5. **Order: the drain first, the function second.** `wmpc-command` is hand-deployed to PROD
+   with no CI and no TEST split, which the wmpc-web voice named as this change's real cost —
+   the ordering has no gate but a human. It is the same rule D-0078 rule 3 established for
+   the trigger, and rule 4 is the backstop that turns getting it wrong from a mis-booked
+   event into a clean refusal.
+
+**What this record explicitly does NOT grow.** The price and the duration in #582's refusal
+were **not** a capability gap, and treating them as one would have undone two guards:
+
+- The parser is **forbidden** to infer a price (D-0076, carried into D-0078; D-0094 rule 5
+  makes it a predicate rather than prompt text). "The Tournament template prices every tier
+  at $0.00, so tell me the member and non-member amounts" is that guard working. Under
+  D-0142 rule 1 a refusal the refusing system is specified to give is not a gap.
+- The template's missing default duration is a real product defect and it is **already
+  filed** as wmpc-web#254. D-0142 rule 4 keeps one item per shape; a second issue would
+  split the memory.
+
+What IS owed on those two is the **route**, not the capability: D-0133 rule 2 and D-0166
+rule 1 require a field the system can name to be offered **in the card** — a price box, a
+time box — never a prose "send those and I'll put a proposal in front of you", which asks a
+person to re-type an ask the surface already holds. That obligation lands on the dated-create
+card, where both the date list and the missing fields appear together, and it is already
+graded by the design gate (CHECKLIST #15).
+
+A correction the table caught, recorded so it is not re-proposed: the dated path must **not**
+loosen `shapePattern`'s hardcoded `rec.kind = 'standing'` in `pattern.ts`. That hardcode sits
+inside the `add_pattern` branch, whose whole contract is a standing weekly time on an event
+that already exists. A dated series is `create_event`. The two do not meet.
+
+**Why.** This is the second live item the capability-requests rail has filed, and the first
+one where the answer was genuinely "grow the scheduler" (D-0142's was a specified refusal
+closing NOT PLANNED). The thing worth getting right is that the ask was three asks wearing one
+sentence, and the honest ruling answers each differently. Grow for the cadence, because "a
+finite list of dates" is a shape the club will want constantly and has no way to say — six
+named Saturdays of a clinic, a holiday series, a league season — and today the only path is a
+human typing one `add_date` per occurrence, which is how a date gets missed. Refuse the tour
+calendar, because an unverifiable third-party feed driving real court bookings is a false
+success waiting for a quiet week. And leave the price alone, because the guard that made Ron
+answer for the amounts is the one that stops a real price being waved through, and a rail
+whose job is to grow the system will eventually be pointed at a guard and asked to remove it.
+D-0142 rule 1 is the filter for that, and this is its second use.
+
+**Forbids.** A date filter inside a `standing` pattern, or a dated series that writes a
+`fixed_events` row or joins `approved_events`. Ingesting, scraping or hand-mirroring a
+third party's tournament calendar to resolve which dates an event runs. `wmpc-command`
+looping `/book` to fan out a dated set. Reporting a dated series as created when only some
+of its dates booked, or failing without naming the ones that landed. A drain that falls
+through on a `recurrence.kind` it does not recognise. Deploying the `wmpc-command` dated
+shape before the drain understands it. Opening a second issue for the template's default
+duration (wmpc-web#254 holds it). Reading this record as authority for the parser to infer a
+price, a Category or a duration. Closing #582's shape as COMPLETED before the dated capability
+has actually landed.
+
 ### D-0173 — NOW.md is capped, so rewritten-not-appended is a gate
 
 *2026-10-13 · scope: `infrastructure/git-guards/**, NOW.md` · source: Ron, 2026-10-13 — "yes, build the NOW.md growth gate"*
