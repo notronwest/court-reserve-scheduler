@@ -1050,3 +1050,25 @@ Python) remains. Plan: [`docs/TS-REWRITE-PLAN.md`](docs/TS-REWRITE-PLAN.md).
 4. The `courtreserve-api` service must be running (launchd `com.wmpc.courtreserve-api`,
    `:8787`) for anything hitting Court Reserve. Restart it with
    `launchctl kickstart -k gui/$(id -u)/com.wmpc.courtreserve-api`.
+
+## 2026-10-14 — the booking robot is on the fleet's route table, with an honest `gate: none` (D-0178 ship 1, #81)
+
+- Root `capabilities.json`, six entries, all `invoke.kind: command` — this repo exposes **no web
+  address at all**, and the manifest says so rather than inventing one. Three reads
+  (`booking_robot_health`, `booking_recommendation_preview`, `standing_session_gaps`) and three
+  writes (`booking_day_run`, `standing_session_gap_fix`, `booking_catch_up`), every write
+  `whitelist_key: null` so nothing auto-calls them.
+- The read/write split follows the **flag**, which is where it actually lives here: `pattern-gaps`
+  reports and `pattern-gaps --fix` books, so they are two entries, not one. Same for `catch-up`.
+- **`gate: none`, with the reason committed in the manifest.** The record names this repo as the case
+  where that is the correct answer: a check keyed on routes fires never, and one keyed on `ts/src/**`
+  fires on every change — neither can tell whether a capability moved. The manifest is still
+  **validated** in CI (`capability-manifest.yml`), because validation never over-fires and an invalid
+  manifest here would block the whole fleet's table from publishing.
+- `deploy: manual` on all six, which is the truth: a push to `main` deploys nothing and a human runs
+  `./setup.sh` on the club machine. Presence in the table is never evidence the robot is running
+  this code.
+- This repo's voice in the seven-repo table was right that **ship 3 buys it nothing** — its write
+  surface is the point of it, and only `read` is ever cache-eligible. It pays ships 1 and 2 and gets
+  no cache. An honest cost, not an oversight.
+- `.wmpc/capability-registry/` is a byte-for-byte copy of daemon's canonical validator; fix it there.

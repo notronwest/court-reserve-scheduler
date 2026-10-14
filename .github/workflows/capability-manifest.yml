@@ -1,0 +1,39 @@
+name: Capability manifest
+
+# WHY THIS EXISTS. D-0178 rule 3: a change that adds or alters a callable
+# capability and does not alter its manifest entry FAILS. The route table is
+# only worth reading if it cannot fall behind the code, and the only way it
+# cannot is a gate — "remember to update capabilities.json" is not one.
+#
+# THE VALIDATOR IS NOT MAINTAINED HERE. `.wmpc/capability-registry/gate.sh` is
+# a byte-for-byte copy of daemon's `infrastructure/capability-registry/gate.sh`.
+# Fix it THERE; daemon's test suite goes red when a copy drifts. A reusable
+# workflow was not an option: daemon is private, one gated repo is public, and
+# a cross-repo token would be the credential surface D-0093 forbids.
+#
+# WHAT TRIGGERS THE GATE IS DECLARED IN THE MANIFEST, not here — this repo's
+# own `gate` block names its trigger paths and whether it fails open or closed.
+# That is deliberate (club-dashboard #528/#531/#532): a fail-closed heuristic
+# that cannot tell what changed blocks unrelated PRs, which is worse than an
+# honest `gate: none`.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate the manifest, and refuse a capability change that skips it
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: bash .wmpc/capability-registry/gate.sh ci --base "$BASE_SHA"

@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "gate": {
+    "none": "This repo exposes no web address at all: it is scheduled jobs, command-line subcommands and chat commands. A check keyed on routes fires never, and a check keyed on the whole code tree fires on every change — so neither can tell whether a capability moved. An honest none beats a dead or over-firing check, and the manifest is still validated here."
+  },
+  "capabilities": [
+    {
+      "name": "booking_robot_health",
+      "does": "Says whether the booking robot can reach the booking service right now.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts health", "host": "cos_host", "note": "Run from the ts directory of this repo's checkout on the club machine. There is no build step; everything runs through tsx." },
+      "input": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "read",
+      "idempotent": true,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": "read_data",
+      "examples": ["Is the booking robot working?"]
+    },
+    {
+      "name": "booking_recommendation_preview",
+      "does": "Works out what the robot would book on a given day and prints it, booking nothing.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts recommend <date>", "host": "cos_host", "note": "Date is in month/day/year form. Nothing is booked and nothing is posted to chat." },
+      "input": {
+        "type": "object",
+        "properties": { "date": { "type": "string" } },
+        "required": ["date"],
+        "additionalProperties": false
+      },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "read",
+      "idempotent": true,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": "read_data",
+      "examples": ["What would the robot book next Tuesday?"]
+    },
+    {
+      "name": "standing_session_gaps",
+      "does": "Reports which standing weekly sessions are missing from the next two weeks, and changes nothing.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts pattern-gaps", "host": "cos_host", "note": "Without the fix flag this only reports. The flag turns it into a booking action, which is a separate capability." },
+      "input": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "read",
+      "idempotent": true,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": "read_data",
+      "examples": ["Are any of our standing sessions missing from the calendar?"]
+    },
+    {
+      "name": "booking_day_run",
+      "does": "Books the robot's picks for one day on the courts.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts schedule <date>", "host": "cos_host", "note": "This is the only writer of court bookings in the operation. It books silently by default." },
+      "input": {
+        "type": "object",
+        "properties": { "date": { "type": "string" } },
+        "required": ["date"],
+        "additionalProperties": false
+      },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "write",
+      "idempotent": false,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": null,
+      "examples": ["Book next Tuesday now."]
+    },
+    {
+      "name": "standing_session_gap_fix",
+      "does": "Books or widens whatever is missing from the standing weekly sessions in the next two weeks.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts pattern-gaps --fix", "host": "cos_host", "note": "The writing half of the gap report. It raises an alarm for whatever it could not fix." },
+      "input": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "write",
+      "idempotent": false,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": null,
+      "examples": ["Fill in the standing sessions that are missing."]
+    },
+    {
+      "name": "booking_catch_up",
+      "does": "Re-books the days in the next two weeks that an earlier run left empty or missed.",
+      "invoke": { "kind": "command", "command": "npx tsx src/cli.ts catch-up --book", "host": "cos_host", "note": "Without the book flag it only reports. Scheduled daily, so a hand run is for a day the schedule missed." },
+      "input": { "type": "object", "properties": {}, "required": [], "additionalProperties": false },
+      "auth": { "kind": "local", "env": null, "header": null },
+      "effect": "write",
+      "idempotent": false,
+      "reachable_by": ["cos_host"],
+      "deploy": "manual",
+      "whitelist_key": null,
+      "examples": ["Catch up anything the morning run missed."]
+    }
+  ]
+}
