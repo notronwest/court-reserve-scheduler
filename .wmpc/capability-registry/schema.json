@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wmpc capability manifest (D-0178 ship 1)",
+  "description": "The route table's per-repo shape. A repo that exposes a callable capability carries this at its root as capabilities.json. Validated by gate.sh, which supports ONLY the keywords used here and refuses a schema that grows past them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "gate", "capabilities"],
+  "properties": {
+    "version": { "const": 1, "description": "Manifest format version." },
+    "gate": {
+      "description": "How THIS repo detects a capability change (D-0178 rule 3). Exactly one shape: a path trigger, or an honest `none` with a reason.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "triggers": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Glob paths whose change means a capability may have changed.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "granularity": {
+          "type": "string",
+          "description": "What the unit of a capability is in this repo.",
+          "enum": ["route", "intent", "worker", "tool", "job", "command"]
+        },
+        "on_undetectable": {
+          "type": "string",
+          "description": "What the gate does when it cannot tell what changed. Declared per repo, never fleet-wide.",
+          "enum": ["fail_open", "fail_closed"]
+        },
+        "none": {
+          "type": "string",
+          "minLength": 20,
+          "description": "Why this repo has no honest detectable trigger. An honest `none` beats a check that fires never or always."
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "description": "The capabilities the brain may route. NEED NOT BE COMPLETE (D-0178 rule 3); it grows.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "does", "invoke", "input", "auth", "effect", "idempotent", "reachable_by", "deploy", "whitelist_key", "examples"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "minLength": 3,
+            "description": "Stable snake_case, unique across the fleet. A rename is a removal plus an addition."
+          },
+          "does": {
+            "type": "string",
+            "minLength": 12,
+            "description": "One plain sentence, no ids, codes, repo or system names (D-0054)."
+          },
+          "invoke": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["http", "command", "mcp_tool", "executor_kind"] },
+              "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              "url": { "type": "string", "minLength": 4 },
+              "command": { "type": "string", "minLength": 2 },
+              "host": { "type": "string", "minLength": 2 },
+              "tool": { "type": "string", "minLength": 2 },
+              "endpoint": { "type": "string", "minLength": 2 },
+              "executor_kind": { "type": "string", "minLength": 2 },
+              "note": { "type": "string" }
+            }
+          },
+          "input": {
+            "type": "object",
+            "description": "JSON Schema for the arguments. additionalProperties MUST be false. Generated from the code where the code already declares a schema (D-0147)."
+          },
+          "auth": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["api_key", "jwt", "oauth", "none", "local"] },
+              "env": { "type": ["string", "null"], "description": "The NAME of the credential env var, never a value (D-0093)." },
+              "header": { "type": ["string", "null"], "description": "The NAME of the header it travels in." }
+            }
+          },
+          "effect": {
+            "type": "string",
+            "enum": ["read", "write"],
+            "description": "Only `read` is ever cache-eligible. A mislabelled effect is this design's highest-consequence defect and has NO automated defence — it is reviewed by a human on every manifest change."
+          },
+          "idempotent": {
+            "type": "boolean",
+            "description": "True only if calling it twice changes nothing anywhere — including a rotated credential written back."
+          },
+          "reachable_by": {
+            "type": "array",
+            "description": "Which hosts can actually call it. Empty is the honest encoding of 'the brain cannot call this at all'.",
+            "items": { "type": "string", "enum": ["cos_host", "mini", "laptop", "claude_ai"] }
+          },
+          "deploy": {
+            "type": "string",
+            "enum": ["auto", "manual"],
+            "description": "A manifest is a claim about main, not about the running host. A `manual` entry's presence is never evidence it is live."
+          },
+          "whitelist_key": {
+            "type": ["string", "null"],
+            "description": "The cos_whitelist key that authorises an autonomous call, or null for 'nothing may auto-call this'. Never cache-eligible when null."
+          },
+          "examples": {
+            "type": "array",
+            "minItems": 1,
+            "description": "At least one real ask. Few-shot material, not decoration.",
+            "items": { "type": "string", "minLength": 6 }
+          },
+          "costly": {
+            "type": "boolean",
+            "description": "Read-only but slow or contended (a serialized browser behind a lock). Routing may prefer a cheaper path."
+          }
+        }
+      }
+    }
+  }
+}
