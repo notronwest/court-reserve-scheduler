@@ -2903,6 +2903,353 @@ log (`STATUS.md`, `CHANGES.md`), and that rule **explicitly excludes `NOW.md`** 
 `NOW.md` legitimately shrinks. This record is the other half: the one file allowed to
 shrink is the one file that must not grow without bound.
 
+### D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable
+
+*2026-10-14 · scope: `CLAUDE.md, agents/**, **/*PROMPT*.md` · source: Ron 2026-10-14 — "I want all of the responses from any prompt from any repo to be a summary response very short give me what I need to know that happened. Make sure that if there's a question it's very clear what you need and if there's an action for me, it's very clear every single response starting now update every repo do whatever you need to make it happen"*
+
+**Decision.** Every reply, in every repo, from every prompt — interactive sessions, spawned
+agents, the Builder, the Reviewer, scheduled runs — follows three rules.
+
+1. **Default to a short summary: what happened, and what it means.** Lead with the outcome.
+   Not a narration of the steps taken, not a transcript of tool calls, not a restatement of
+   the request. Give the number, id or URL that is the point; do not inventory everything
+   touched on the way.
+2. **If you need something from Ron, the question is unmistakable.** What you need, why, and
+   what you will do with each answer. **One** question — pick the one that unblocks you and
+   decide the rest yourself. It sits at the end, on its own, so it cannot read as
+   commentary. It is also a ledger line in `NOW.md`, never prose (D-0070).
+3. **If there is an action for Ron, it is unmistakable.** What to do, where, and what
+   happens next. Composes with D-0068: offer to do it yourself first; when only he can do
+   it, numbered steps in the reply, paste-safe, one copy box per field.
+
+**This governs the reply, not the work.** Detail is still written down — `STATUS.md`, the PR
+body, the decision record, a component's `DESIGN.md`. Nothing here reduces verification,
+testing or record-keeping. Shortening the reply while skipping the check is the one failure
+mode this decision must not cause; the long version goes somewhere retrievable, and Ron gets
+the summary and the link.
+
+**Why.** Ron's time is the constraint, and the same constraint that produced D-0068 produces
+this: a reply he has to read twice to find the one thing asked of him costs a round trip, and
+a round trip costs time and money. The failure mode was not missing information — it was
+information he had to mine. A fleet of fifteen repos multiplies it: the rule is worthless as
+a per-session habit, so it ships the way this fleet ships conventions (D-0071) — one canonical
+block in `wmpc-meta/conventions/`, injected into every repo's CLAUDE.md by
+`claude-bootstrap.sh`, published to every origin by `convention-sync`.
+
+**Forbids.** A step-by-step narration of what was done as the body of a reply. Restating the
+request before answering it. Several questions stacked for Ron to sort out. A question or an
+action buried mid-paragraph. Padding a short answer to look thorough. And the inverse, which
+is equally a violation: moving detail out of the reply without writing it into STATUS.md, the
+PR body or the record — this decision is not licence to stop recording, or to stop verifying.
+
+### D-0178 — A capability registry is the fleet's route table, and a learned route is cached for routing only — never for permission
+
+*2026-10-14 · scope: `infrastructure/cos-dispatch/**, infrastructure/capability-requests/**, infrastructure/capability-registry/**, capabilities.json, **capabilit*, supabase/functions/wmpc-command/**, courtreserve_api/**, src/index.ts` · source: Ron 2026-10-14 — "I want the dashboard to continue to never say can't and I want to evolve without me such that if some action build a new endpoint or API moving forward the dashboard just call that API directly." He framed it as TCP/IP route discovery: a router asks what the path to a location is when it doesn't know, "but eventually it learns it and doesn't ask." Table per decisions/PROCESS.md, seven voices on origin/main (daemon, club-dashboard, wmpc-web, courtreserve-api, qbo-api, wmpc-mcp, court-reserve-scheduler): seven CONCERNs, no veto. Every one is folded into the rule it touches — rules 1, 3, 6, 7, 8 and 9 exist in this form because a voice said so.*
+
+**Decision.** The analogy is accepted and completed. Today the fleet has the broadcast (a
+`cos_requests` row, the CoS brain reasoning out what to do) and the build-a-route
+(`infrastructure/capability-requests/`, D-0094 rule 7). It has **no route table and no learned
+route**. This record adds both, and draws the one line that keeps them safe. The buildable
+spec is `infrastructure/capability-registry/DESIGN.md`.
+
+1. **Two registries, and they must not be confused.** **D-0127** already rules that a capability
+   is "a service plus a registry row", and *its* registry is `cos_whitelist`: **the authority
+   registry — what an agent may do.** This record adds a second, different thing: **the route
+   table — what exists and how to call it.** The link between them is one field, `whitelist_key`.
+   Neither absorbs the other, and that separation *is* rule 8: the route table may say a path
+   exists without any claim that anyone may walk it. Ship 2 below is **D-0127's unenforced half
+   finally getting a gate** — D-0127 forbids a capability written as prompt prose and nothing
+   refused it; from here something does.
+
+2. **The route table is a committed manifest per repo, not a table in the database.** Every repo
+   that exposes a callable capability carries a root `capabilities.json`; each entry has `name`,
+   `does` (one plain sentence, D-0054), `invoke`, `input` (JSON Schema), `auth` (a credential
+   **name**, never a value — D-0093), `effect: read|write`, `idempotent`, `reachable_by`,
+   `deploy: auto|manual`, `whitelist_key`, and `examples`. `daemon-sync` assembles the union into
+   one rendered table on the CoS host. `capability-requests/DESIGN.md` rejected "a new table" for
+   *its* purposes on three grounds, and here **one applies and two do not**: the RLS objection
+   applies in full (D-0004 bars the Builder from hand-reviewed RLS, and a registry the Builder
+   cannot write is a registry nothing self-registers into), while "a second store to keep in step"
+   and "a third surface" (D-0049) do **not** — nothing in this fleet records what its endpoints
+   are, so there is no first store to duplicate. A committed fact is the shape of every working
+   gate here (`REPOS`, `JOBS`, `COS-HOST`, `events-routing.json`) and costs no credential surface.
+
+3. **"Register themselves" means in the same change, gated per repo — and the unit is the
+   capability, not the route.** A change that adds or alters a callable capability and does not
+   alter its manifest entry **fails**. But "a callable route" has no single meaning across this
+   fleet, and four voices said so: `wmpc-command` is one endpoint with many intents; club-dashboard
+   ships three Workers plus a Pages site; court-reserve-scheduler exposes **no HTTP at all** (launchd
+   jobs, CLI subcommands, Discord commands); wmpc-mcp's eight tools are OAuth-gated `/mcp` calls.
+   So **each manifest declares its own `gate` block** — the trigger paths, the granularity, and
+   whether the gate fails open or closed **in that repo** — and a repo with no honest detectable
+   trigger declares `gate: none — <why>` rather than shipping a dead or over-firing check.
+   club-dashboard's #528/#531/#532 are the precedent: a fail-closed heuristic that cannot tell what
+   changed blocks unrelated PRs, which is worse than an honest `none`. **A manifest need not be
+   complete** — courtreserve-api alone has ~69 routes. It covers the capabilities the brain may
+   route, and grows; the gate applies to what the diff touches.
+
+4. **Runtime read: the brain reads the route table at invocation; routes leave the prompt string.**
+   `cos-dispatch.sh` renders the capability list **from the assembled table** into the preamble,
+   as `events-route.sh` already renders the events destination set from the table that enforces it
+   (D-0057 §6, D-0083 rule 2). **Only the route list is rendered, and the authority prose stays
+   verbatim.** The daemon voice is right that `cos-dispatch.sh:289` interleaves the whitelist keys,
+   the absolute hard set and the executor-kind carve-outs (`membership_change`, `event_move`,
+   `cancel_session`, `donation_post`) into the same sentences as the capability list — so deleting
+   the list could take a safety clause with it. The excision is route text only; anything naming
+   what Rachel may or may not do is out of scope for ship 2 and stays where it is. **This rule
+   alone satisfies Ron's sentence**; everything about the cache is speed.
+
+5. **The cache key is the capability name learned against a machine-computed shape key, and it
+   caches the ROUTE ONLY.** On a model run the brain **emits the capability name it chose**; the
+   dispatcher **computes the key itself** from the ask using the same committed `norm` +
+   `intent|field` shape key as `classify.jq` (D-0142 rule 2 — word-bounded, product name stripped).
+   Neither party can set a route alone: the model names it, the code keys it. Not an embedding (a
+   similarity threshold is a prose test wearing numbers, and nothing can explain a near-miss
+   afterwards); not the raw sentence (it never repeats). **The shape key deliberately discards
+   numbers, names and dates — correct for routing, fatal for execution — so arguments are
+   extracted fresh on every call, hit or miss.** A hit skips *which capability*, never *with what
+   values*.
+
+6. **Cache-eligibility is a closed predicate, and `effect: read` is not enough on its own.**
+   `cache_eligible(entry, live_whitelist)` is committed code, false unless **all six** hold:
+   `effect == "read"`; `idempotent == true`; `whitelist_key` non-null **and** enabled in a **live**
+   read of `cos_whitelist`; `reachable_by` includes the CoS host; `schema_hash` matches what the
+   entry was learned against; and the entry is confirmed, not a candidate. `idempotent` and
+   `reachable_by` exist because two voices found the holes: a qbo-api **read** triggers an OAuth
+   refresh and Intuit **rotates** the refresh token, which the service writes back — a durable
+   side effect whose failure mode is Ron re-consenting, so "a wrong read is recoverable" is false
+   there; and wmpc-mcp's tools are called by claude.ai over OAuth, not by the mini, so `invoke` has
+   **no honest value** for them and they are route-table documentation that is permanently
+   cache-ineligible. The predicate **fails closed to ineligible** on any field it cannot read —
+   including a missing `cos_whitelist` column, which is club-dashboard's migration and not
+   daemon's (0009/0002/0016/0029). That cross-repo dependency is named here because nothing on
+   club-dashboard's side goes red when a rename blinds the cache.
+
+7. **Only `effect: read` is ever shortcut, and registration is never a claim of liveness.** A wrong
+   cached read is a wrong answer — visible, recoverable. A wrong cached write is damage. So
+   `effect: write` entries are registered and model-routed and **never** shortcut. Separately:
+   **a manifest is a claim about `main`, not about the running host.** Four voices established that
+   merged ≠ deployed in their repos — courtreserve-api, court-reserve-scheduler (a human runs
+   `./setup.sh` on the mini), wmpc-web (`supabase functions deploy` by hand) and wmpc-mcp (`npx
+   wrangler deploy` by hand) all ship nothing on a push to `main`. So an entry carries
+   `deploy: auto|manual`, a `manual` entry is **never treated as live by its presence**, and the
+   only evidence a capability is live is a successful call. The spec-repo-drift lesson is the
+   precedent: a `verified` date in a committed file is a claim about the past.
+
+8. **A route is a candidate until confirmed twice, and fails open to the model forever.** One
+   sighting writes a *candidate*; a second independent sighting that agrees promotes it. Any doubt
+   — no entry, a candidate, an ineligible capability, an unreadable table, an argument that does
+   not validate against `input`, a non-2xx — **falls through to the model**, which is today's
+   behaviour, so a broken cache costs latency and never correctness. A first failure demotes to
+   candidate; three failures evict, raise one `wmpc_alert` (D-0084) and file a daemon issue,
+   because a mislearned route is an architecture problem and not noise. Every cache hit writes a
+   `cos_request_steps` row naming the route in plain words, so a run that skipped the model is
+   visible on the surface Ron already watches and an audit can answer "why did it do that".
+
+9. **Aging is by fact first, clock last.** Removal from a manifest at the synced commit drops that
+   capability's cache entries on that sync. A changed `input` or `invoke` changes `schema_hash`,
+   and a mismatch evicts exactly the stale entries — no TTL can catch a schema change and a hash
+   catches it precisely. Where a schema **already exists in code** (wmpc-mcp's zod definitions),
+   `input` is **generated from it, not hand-written** (D-0147: a second statement of the same fact
+   drifts). A deployed-but-down endpoint is rule 8's fall-through and is **an outage, not a
+   capability gap** (D-0176 rule 1) — no capability request is filed for it. A 14-day unused-entry
+   expiry is **hygiene only** and is not claimed as a correctness mechanism. **The cache fails
+   open; the route table fails closed into the model path** — distinct from `events-route.sh`,
+   which fails closed into *not running*, because there the table **is** the authority and here it
+   is not, so "closed" still leaves a complete answer available.
+
+10. **Caching speeds up ROUTING and never widens PERMISSION.** A cache entry stores a shape and a
+    capability name. No approval, no whitelist grant, no ruling. The authority check runs **at the
+    call site on every invocation**, identically on the cached and the model path: the live
+    `cos_whitelist` read, a `cos_approvals` row for anything off it, D-0053's clear-path test, and
+    the hard set (money, external comms, destructive, ship-to-prod) which is absolute. Rachel's
+    autonomy settings take effect the instant Ron flips one, because eligibility is evaluated per
+    call and never at learn time. `whitelist_key: null` is never cache-eligible at all.
+
+11. **The loop is unchanged where it already works.** A cache miss *with no route-table entry* is
+    still a capability request (D-0094 rule 7, D-0133): the route table is a faster path to what
+    exists, never a reason to answer "can't". Court Reserve writes still go only through the
+    scheduling system (D-0094 rule 1); the table lists that path, it does not add another.
+
+**Incremental path.** Three ships, each useful alone, no big bang. **(1) Manifest + gate:** the
+schema, `capabilities.json` in each repo with its own `gate` block, and `daemon-sync` assembling
+the table. Useful alone — the first honest answer to "what can this fleet do?". **(2) Runtime
+read:** `cos-dispatch.sh` renders the preamble from the table and the hand-maintained route prose
+goes, authority prose untouched. Useful alone, and this is "evolve without me". **(3) The cache:**
+read-effect only, candidate→confirmed, host-local state on the CoS host, hash- and
+sync-invalidated. Nothing in ships 1–2 depends on it, and court-reserve-scheduler is right that
+ship 3 buys it nothing — its surface is almost all `effect: write`. Ship 3 is deliberately last
+because it is the only one that can be wrong in a way a person does not see.
+
+**Why.** Ron's analogy is exact about what is missing. A router that re-broadcasts every packet is
+not wrong, it is slow and expensive — and that is today: every repeat ask spends a model turn
+re-deriving a route the system already derived last week, and every *new* endpoint needs Ron
+because the capability list is a paragraph a human maintains. Both costs have one root: **the
+fleet has no machine-readable statement of what it can do.** Writing that statement down once
+makes the prompt derivable, the cache possible, and "what can we do?" answerable.
+
+The analogy also breaks in one place, and the design is built around the break: **a natural
+language ask is not an IP address.** A destination address is exact; a shape key is lossy by
+construction, and D-0142 caught this fleet's own shape key being forged by three accidental prose
+matches on its first live item. So a wrong cached route silently doing the wrong thing is the
+realistic failure of this whole design, and it is answered structurally rather than by care: the
+cache may only shortcut a read that is also idempotent and reachable, it must be confirmed twice,
+it re-extracts arguments every time, it validates them against the registered schema before
+calling, and it falls through to the model on any doubt. **The worst outcome available to a
+mislearned route is a wrong answer that shows in the step trail — not a wrong action.**
+
+Host-local state is chosen for the cache on purpose: it must be **cheap to throw away**. A cache
+in the schema invites someone to read it as a record of truth, needs a migration to evict, and
+makes a wrong route durable. On that host, `rm -rf` restores exactly today's behaviour.
+
+**Forbids.**
+
+- Adding or changing a callable capability without its manifest entry in the same change, in a
+  repo whose manifest declares a `gate`; or shipping a route-detection check in a repo where it
+  cannot honestly detect, instead of declaring `gate: none — <why>`.
+- Maintaining the **route list** as prompt prose once ship 2 lands — and, in the same breath,
+  removing or weakening any **authority** prose from `cos-dispatch.sh` as part of that excision.
+- A cache hit on an entry that is `effect: write`, `idempotent: false`, `whitelist_key: null`,
+  whose whitelist key is disabled in a live read, whose `reachable_by` excludes the CoS host,
+  whose `schema_hash` has moved, or that is still a candidate.
+- Treating a `deploy: manual` entry's presence in the table as evidence the capability is live.
+- Caching, reusing or inferring **arguments**. Only the route is cached.
+- Promoting a route on one sighting; keeping one after three failures.
+- A cache entry carrying an approval, a whitelist grant, a prior ruling, or any authority — or any
+  call path where the authority check sits at the routing site rather than the call site.
+- Keying on an embedding or a similarity score, or on the raw sentence.
+- A cache hit that writes no `cos_request_steps` row naming the route.
+- Hand-writing an `input` schema where the code already declares one.
+- Filing a capability request for an entry that is registered but not answering (D-0176).
+- Answering an unregistered, unroutable ask with a refusal that leaves no capability request
+  behind (D-0094 rule 7, D-0133).
+- A manifest entry holding a credential value rather than a credential name (D-0093).
+- A new Supabase table for either the route table or the cache.
+- Calling `cos_whitelist` and this route table by the same name (rule 1).
+
+**Enforced by.** Ship 1: each manifest's own `gate` block, implemented in that repo, plus
+`assemble.sh` validating every `capabilities.json` against `schema.json` and **refusing to publish
+a malformed table** (a partial table is how a capability silently disappears). Ship 3:
+`cache_eligible()` with a test red on all six eligibility failures and on a forged shape key.
+**Not enforced, and named rather than claimed:** nothing refuses a manifest entry whose `does`
+sentence is wrong, whose `effect` is mislabelled `read` when the endpoint writes, or whose
+`idempotent: true` is untrue. A mislabelled `effect` is the single highest-consequence defect in
+this design — courtreserve-api's voice is right that its own ~69 routes include the billing drain
+that charges member cards — and its only defence today is human review of every manifest change,
+which is why ship 3 is last. Nothing goes red on club-dashboard's side if a `cos_whitelist` /
+`cos_request_steps` column is renamed; rule 6's fail-closed default is the mitigation, not a gate
+in that repo. And three of the four `deploy: manual` repos (qbo-api, wmpc-mcp,
+court-reserve-scheduler) have **no CI at all** today, so their ship-1 gate is net-new
+infrastructure, not a check added to a pipeline.
+
+**Ruled at acceptance (daemon, 2026-10-14, daemon#647).** The record went up with one open call
+for Ron and ship 1 added a second. Daemon rules both. Neither is a business tradeoff only Ron can make,
+and he had already said "don't put it in the queue, make it happen":
+
+- **The review burden on `effect` / `idempotent` sits with the reviewer, not Ron.** That means the
+  D-0052 reviewer pass on every manifest change. A manifest change in a repo with a money path
+  (courtreserve-api's billing drain, qbo-api) is **never auto-merged** (D-0112). **Ship 3 is held:**
+  it is not dispatched until a mechanical check refuses a write path labelled `effect: read`. Ships 1
+  and 2 never shortcut a call, so a mislabel there costs a wrong table line, not a wrong action. Ron is
+  not asked to take this burden on.
+- **How one validator reaches the product repos' CI: a byte-for-byte vendored copy.** It sits at
+  `.wmpc/capability-registry/{gate.sh,schema.json}` in each gated repo. `test.sh` goes red when a
+  sibling copy differs from the canonical one. A reusable workflow cannot read private daemon from
+  public court-reserve-scheduler without a cross-repo PAT, and D-0093 forbids one. The fleet already
+  vendors `pr-linked-issue.yml` and `scripts/scan-*.sh` this way. Automatic re-publication is a later
+  change, not part of ship 1.
+
+**Related records.** D-0127 (a capability is a service plus a registry row — the *authority*
+registry; rule 1 separates the two and ship 2 is its missing gate), D-0094 (the growth loop; rule
+7 is the build-a-route half), D-0133 (no surface ends at "can't"), D-0142 (the shape key is a
+natural key prose must not forge), D-0176 (an outage is not a capability gap), D-0147 (an index is
+never the system of record; a schema stated twice drifts), D-0162 (a skip keys on a destination
+fact), D-0053 (a clear-path ask executes), D-0054 (plain language where a human reads), D-0004 (no
+hand-reviewed RLS from the Builder), D-0049 (no second surface), D-0084 (one alarm rail), D-0093
+(no new credential surface), D-0057 §6 / D-0083 rule 2 (a rule only in prompt prose is not a
+rule), D-0002 (singletons gate on a committed fact).
+
+### D-0179 — A convention change reaches running sessions through a committed reload token
+
+*2026-10-14 · scope: `infrastructure/session-reload/**, CLAUDE.md` · source: Ron, 2026-10-14 — "I feel like we need to HALT all sessions and give me a way to update them all."*
+
+**Decision.**
+
+A convention change is published to sessions that are **already running** by
+bumping a token in a committed file, `infrastructure/session-reload/RELOAD`,
+which carries that token, a one-line plain-language reason, and the files to
+re-read. The token changing is the signal — not the file's existence, because
+unlike `builder-dispatch/HALT` this fires repeatedly over time.
+
+Each session records the last token it acted on, per machine and per session. A
+`SessionStart` hook prints the reason and records the token, so a session opening
+after a change is told what moved and is never blocked. A `Stop` hook, when the
+recorded token differs from the committed one, **records the token and then
+blocks exactly once**, naming the change and the files to re-read. Ron bumps it
+with one command, `bump.sh "<reason>"`, which commits and pushes.
+
+Three properties are part of the decision, not implementation detail:
+
+1. **Block once.** The acknowledgement is written *before* the block. The second
+   stop passes unconditionally, however the session answered.
+2. **Fail-open.** A missing, unreadable or tokenless signal file, a session with
+   no id, an unwritable state directory, or a directory that is not a WMPC repo
+   all let the stop through.
+3. **Not a singleton.** Acknowledgement is per session. Nothing one session does
+   silences another.
+
+`infrastructure/session-reload/RELOAD` is added to the pre-push guard's
+protected-branch allowlist. It is operational data — one token and one sentence,
+rewritten only by `bump.sh`, nothing executable — and the command's value is that
+it reaches running sessions immediately; behind a PR it would reach them after
+they had already stopped.
+
+**Why.**
+
+A session reads its repo's `CLAUDE.md` once, at startup. On 2026-10-14 a new
+response-style rule was published to every repo and verified to have landed, and
+the eight sessions then running were untouched by it: they kept answering the old
+way, and nothing could reach them. Restarting them is the only existing remedy
+and it throws away their context.
+
+The committed-fact shape is taken from `HALT` (D-0161) because it is the shape
+that has already been proven here: a pause that lives on one machine is a pause
+nobody else can see, and the next sync undoes it. Both of HALT's hard-won lessons
+are carried over. Its prose claimed a narrow pause for four days while its code
+stopped everything — so `RELOAD`'s header, the component's `DESIGN.md` and its
+test suite describe one behaviour between them and the suite pins it. And a gate
+must not make its own release condition unreachable — so the acknowledgement is
+recorded before the block, and the session can satisfy the gate in the same turn
+it is told to.
+
+Block-once is what keeps this from being the failure D-0164 was written about. A
+gate that blocks a session repeatedly over a change it has nothing to do with is
+an audience, not an owner: the push gate blocked one session fourteen times over
+another session's work, a turn each. Fleet-wide, most sessions have nothing to do
+with any given convention change, so one turn, once, with the instruction
+attached, is the price — and unbounded blocking would be a self-inflicted outage.
+
+Fail-open is chosen against this repo's usual preference for fail-closed, and
+deliberately. A missed reload costs one turn of stale behaviour in one session. A
+wedge costs every turn in every session on every machine until a human notices.
+The asymmetry is not close.
+
+**Forbids.**
+
+- Reaching running sessions by any other route: no second signal file, no
+  machine-local marker, no "tell the sessions in Discord", no restarting them.
+- Editing `RELOAD`'s token or reason by hand. `bump.sh` owns those three fields,
+  because the reason is the only thing telling a session what to look at, and an
+  empty or stale one turns the gate into a cost with no instruction attached.
+- Blocking a session more than once for the same token, or making the release
+  condition anything a session cannot satisfy in the turn it is told.
+- Making the acknowledgement shared, global or committed. It is per session by
+  nature; a shared one would silence sessions that never saw the reason.
+- Fail-closed behaviour anywhere in this path. An unreadable signal lets every
+  stop through.
+- Widening the pre-push allowlist entry beyond that one file, or putting anything
+  executable in it.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
