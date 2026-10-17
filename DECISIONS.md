@@ -2905,7 +2905,7 @@ shrink is the one file that must not grow without bound.
 
 ### D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable
 
-*2026-10-14 · scope: `CLAUDE.md, agents/**, **/*PROMPT*.md` · source: Ron 2026-10-14 — "I want all of the responses from any prompt from any repo to be a summary response very short give me what I need to know that happened. Make sure that if there's a question it's very clear what you need and if there's an action for me, it's very clear every single response starting now update every repo do whatever you need to make it happen"*
+*2026-10-14 · scope: `CLAUDE.md, agents/**, **/*PROMPT*.md, **reply-gate*` · source: Ron 2026-10-14 — "I want all of the responses from any prompt from any repo to be a summary response very short give me what I need to know that happened. Make sure that if there's a question it's very clear what you need and if there's an action for me, it's very clear every single response starting now update every repo do whatever you need to make it happen"*
 
 **Decision.** Every reply, in every repo, from every prompt — interactive sessions, spawned
 agents, the Builder, the Reviewer, scheduled runs — follows three rules.
