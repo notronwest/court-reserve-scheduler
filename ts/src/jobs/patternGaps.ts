@@ -48,7 +48,7 @@ import { NaiveDateTime } from '../datetime'
 import { resolveFixedEvents } from '../fixedEvents'
 import { COURTS } from '../recommender'
 import { freeCourts, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
-import type { FixedEvent, Policy } from '../policy'
+import { isOnWeek, type FixedEvent, type Policy } from '../policy'
 
 export type GapStatus =
   | 'ok'
@@ -153,7 +153,8 @@ export function scanPatternGaps(
       (i) => i.StartDateTime && NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd,
     )
     for (const p of patterns) {
-      if (p.day_of_week !== dow) continue
+      // An off-week (or an unplaceable two-week row) is never missing — D-0202.
+      if (!isOnWeek(p, date)) continue
       const hit = onThisDate.find(
         (i) =>
           NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
@@ -225,7 +226,7 @@ export async function runPatternGaps(
     const start = NaiveDateTime.fromYMDHM(date.formatYmd(), gap.start_time)
     const end = NaiveDateTime.fromYMDHM(date.formatYmd(), gap.end_time)
     const pattern = resolved.events.find(
-      (p) => p.name === gap.name && p.day_of_week === gap.day_of_week && p.start_time === gap.start_time,
+      (p) => p.name === gap.name && isOnWeek(p, date) && p.start_time === gap.start_time,
     )!
     const free = freeCourts(occupiedOn(date), courtOrder, start, end)
 

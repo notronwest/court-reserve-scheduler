@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-22 — Builder: issue #83 — standing sessions every other week (D-0202)
+
+**Done:** One predicate (`onWeekStatus`/`isOnWeek` in `ts/src/policy.ts`) now answers "is this
+date a session" for Pass 0, the per-day level tally, the pattern-gap scan and its fixer;
+catch-up inherits via `recommend()`. A two-week row with a missing/off-day anchor is skipped
+(`bad_anchor`) and alerted from `resolveFixedEvents`. `ts/ops/rollback.sh` refuses while an
+active row has `every_weeks` other than 1. Agreement test: `ts/tests/everyOtherWeek.test.ts`.
+**Next:** courtreserve-api columns/drain, then the command bar.
+
+---
 ## 2026-10-12 — Reviewer: PR #73 (issue #72) → APPROVE
 
 **Done:** Reviewed [PR #73](https://github.com/notronwest/court-reserve-scheduler/pull/73)

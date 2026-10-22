@@ -7,7 +7,7 @@
  */
 import { NaiveDateTime, overlaps, pyRound } from './datetime'
 import { occupiedSlots, type OccupiedSlot } from './availability'
-import type { Policy } from './policy'
+import { isOnWeek, onWeekStatus, type Policy } from './policy'
 import { loadPopularity, popularityScore, type PopularityScores } from './history'
 // Type-only import — no runtime cycle (ranker.ts imports values from here).
 import type { LlmRankerInput } from './llm/ranker'
@@ -114,8 +114,9 @@ export interface SkippedFixedEvent {
   start_time?: string
   event_id: number
   /** `min_gap` = hard constraint 3b; `max_occurrences` = hard constraint 3;
-   *  `no_court` = every court it could use is already taken at that hour. */
-  reason: 'min_gap' | 'max_occurrences' | 'no_court'
+   *  `no_court` = every court it could use is already taken at that hour;
+   *  `bad_anchor` = a two-week row with no usable anchor date (D-0202). */
+  reason: 'min_gap' | 'max_occurrences' | 'no_court' | 'bad_anchor'
 }
 
 export interface Stats {
@@ -287,7 +288,7 @@ function buildContext(
     }
   }
   for (const fe of policy.fixed_events?.events ?? []) {
-    if (fe.day_of_week === dayName && fe.level && fe.level in levelCounts) {
+    if (isOnWeek(fe, td) && fe.level && fe.level in levelCounts) {
       levelCounts[fe.level] += 1
     }
   }
@@ -457,6 +458,8 @@ function buildContext(
   // ── Pass 0: fixed recurring events ──────────────────────────────────────────
   for (const fe of policy.fixed_events?.events ?? []) {
     if (fe.day_of_week !== dayName) continue
+    const onWeek = onWeekStatus(fe, td)
+    if (onWeek === 'off') continue
 
     const feStart = NaiveDateTime.fromYMDHM(dateStr, fe.start_time)
     const feEnd = NaiveDateTime.fromYMDHM(dateStr, fe.end_time)
@@ -474,6 +477,12 @@ function buildContext(
       skippedFixedEvents.push({
         name: fe.name, day_of_week: fe.day_of_week, start_time: fe.start_time, event_id: eid, reason,
       })
+    }
+
+    // A two-week row with no usable anchor is never booked weekly (D-0202).
+    if (onWeek === 'invalid') {
+      skip('bad_anchor')
+      continue
     }
 
     // Hard constraint 3 (max occurrences) and 3b (min gap between occurrences of
