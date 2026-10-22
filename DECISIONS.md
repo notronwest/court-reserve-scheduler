@@ -3377,6 +3377,89 @@ session standing in the gap.**
 a write without saying so. Substituting for an unbuilt capability without filing the work that
 builds it. Treating "it got done" as the measure when the question was whether the system can do it.
 
+### D-0202 — A standing weekly pattern may run every other week: a cadence and an anchor on the row, one shared on-week predicate, the scheduler reads it first
+
+*2026-10-22 · scope: `courtreserve_api/migrations/**, courtreserve_api/events_drain.py, courtreserve_api/pattern_move.py, courtreserve_api/load.py, ts/src/recommender.ts, ts/src/jobs/patternGaps.ts, ts/src/jobs/catchUp.ts, ts/src/fixedEvents.ts, ts/src/policy.ts, supabase/functions/wmpc-command/**` · source: daemon#791 (routed from cos_requests ab13dbc0) — a capability gap the events command bar captured 2026-10-22. Ron asked: "We are missing Caryn's Dink Divas Every OTHER Wednesday night - 2 courts 9 maximimum players 5 minimum players 5-7PM". The bar matched the existing Court Reserve event, read Wednesday 17:00–19:00, then blocked on the cadence — and showed a refusal asking for the event, day and time it already held. Table convened per decisions/PROCESS.md — courtreserve-api CONCERN, court-reserve-scheduler CONCERN, wmpc-web CONCERN, no veto; all folded in below.*
+
+**Decision.** Seven rules. The ask contained one real capability and one defect that hid it.
+
+1. **Every other week is a CADENCE on a standing pattern, not a new recurrence kind.** It runs
+   forever with no end date, which is exactly D-0056 rule 1's standing shape, so it stays
+   `kind: 'standing'`. `courtreserve.fixed_events` gains `every_weeks smallint not null default 1`
+   (`check every_weeks in (1,2)`) and `anchor_date date null` — the date of one real on-week
+   occurrence, required when `every_weeks = 2` and constrained to fall on the row's `day_of_week`.
+   Existing rows are untouched (1, null). `GET /fixed-events` is `select *` and returns both. The
+   payload carries `every_weeks` at the pattern level and **`anchor_date` per slot**, because a
+   pattern's slots can fall on different weekdays and one anchor cannot sit on two of them (the
+   courtreserve-api voice's finding).
+
+2. **It is not D-0171's forbidden date filter inside `standing`.** D-0171 forbade a standing
+   pattern that evaluates a finite or borrowed list every morning. This is fixed arithmetic on the
+   row itself — nothing external, nothing exhaustible. Because it stays `kind === 'standing'` on an
+   existing Court Reserve event, D-0078's tier-matrix exemption applies to it unchanged, and that is
+   correct: the exemption is about a standing slot on an event that already holds its prices, and
+   cadence does not change what the event charges. 2 is the ceiling; "every third week" is a new
+   ask, ruled on its own facts.
+
+3. **One on-week predicate, used everywhere the scheduler reads a weekday.** A date is an on-week
+   iff it falls on `day_of_week`, is on or after `anchor_date`, and the whole weeks between them
+   are divisible by `every_weeks`. The court-reserve-scheduler voice found every place that reads
+   `day_of_week` would mis-handle a two-week row today: Pass 0 would book every week, catch-up
+   (which calls the recommender per date) would re-book off-weeks, the standing-session gap scan
+   would report every off-week missing and `--fix` would fill it, and the per-day level tally would
+   count it on off-weeks. All of them call the same predicate; none re-derives it. A two-week row
+   with no valid anchor is **skipped and alerted, never booked weekly**.
+
+4. **The drain refuses what it does not understand, on a standing payload as well as on a kind.**
+   `_drain_standing_pattern` inserts a fixed column list, so a payload carrying `every_weeks: 2`
+   reaching today's drain would write a WEEKLY row and report success — the false success D-0166
+   rule 3 forbids. The drain gains a refusal for any unrecognised key on a standing payload, beside
+   D-0171 rule 4's refusal of an unrecognised kind (already dispatched as courtreserve-api#412, not
+   duplicated here).
+
+5. **A move keeps the fortnight.** `pattern_move` changing `day_of_week` on a two-week row shifts
+   `anchor_date` by the same day delta, so the session stays in the same weeks; a move may instead
+   name a new anchor on the new day ("put it on the other week"). It never leaves an anchor off the
+   row's day — the constraint would refuse it, and a silent parity flip is a session on the wrong
+   Wednesday. Cadence is not part of `merge_fixed_events`' natural key; a seed and a stored row that
+   disagree on cadence are **reported as drift**, never merged as the same row.
+
+6. **A refusal names the real reason.** The prompt correctly told the model to block "every other
+   week", and the model did. `shapePattern` then discarded the model's reason and rebuilt `blocked`
+   from payload completeness, so Ron was asked "which event, which day, what time?" about an ask
+   whose card already showed all three. A blocked reason the payload can disprove is a defect on its
+   own and lands first, independent of the cadence. The bar never asks for a field the parse holds.
+
+7. **Order: scheduler first, then the drain, then the bar.** The scheduler can ship first because
+   an absent `every_weeks` reads as 1 — it understands two-week rows before any can exist. Then
+   courtreserve-api adds the columns, the refusals and the move rule, and only then accepts
+   `every_weeks: 2`. `wmpc-command` is hand-deployed to PROD with no CI (its `DEPLOYMENT.md`), so
+   its cadence change deploys last; deployed early, rule 4 turns it into a clean refusal rather than
+   a weekly booking. The Python recommender is the rollback path only — its rollback refuses to
+   proceed while any active row has `every_weeks = 2`, rather than silently booking it weekly.
+
+**Not grown.** A minimum player count. Nothing was refused on it; the parser recorded that the
+scheduler and the event hold only a maximum, and D-0142 rule 1 keeps a specified behaviour out of
+the gap queue.
+
+**Why.** "Every other Wednesday" is ordinary club language — a rotating group, a night shared
+between two programmes — and the only way to say it today is to book each night by hand, which is
+how one gets missed. It belongs on the standing pattern because that is where the club already
+keeps "this runs until we stop it", and every reader of that row is already one place: the
+scheduler's weekday checks. Making them share one predicate is cheaper than any second shape, and it
+is what stops the three readers disagreeing about which Wednesday is the session. The defect in
+rule 6 matters as much as the capability: a refusal that asks for things the person already said
+teaches them the bar does not listen, and it hid the real gap from the person who hit it.
+
+**Forbids.** A new recurrence kind for a cadence; a cadence above 2 without a new ruling. A single
+anchor shared by slots on different weekdays. Any scheduler path deciding a standing date by
+weekday alone once this lands, or a second copy of the on-week arithmetic. Booking a two-week row
+weekly for want of an anchor. A drain that writes a standing row while ignoring a key it does not
+recognise. A `pattern_move` that leaves the anchor off the row's day or silently flips the
+fortnight. Deploying the bar's cadence before the drain accepts it. A blocked reason that asks for
+a field the proposal already holds. Closing daemon#791 as completed before a two-week session can
+actually be created from the bar.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
