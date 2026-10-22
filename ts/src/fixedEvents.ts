@@ -20,7 +20,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { CourtReserveClient } from './cr/client'
-import type { FixedEvent, Policy } from './policy'
+import { invalidCadence, type FixedEvent, type Policy } from './policy'
 
 export interface FixedEventsResult {
   events: FixedEvent[]
@@ -93,7 +93,17 @@ function finish(
         'and courtreserve.fixed_events.'
       : undefined
 
-  const alert = [readAlert, emptyAlert].filter(Boolean).join(' · ') || undefined
+  // A two-week row with no usable anchor (D-0202) books nothing; say so rather than
+  // letting it look like an ordinary quiet week.
+  const unplaceable = kept.filter(invalidCadence)
+  const cadenceAlert =
+    unplaceable.length > 0
+      ? `${unplaceable.length} standing pattern(s) have an unusable every-other-week setup ` +
+        `(every_weeks/anchor_date) and will NOT be booked: ` +
+        unplaceable.map((e) => `${e.name} ${e.day_of_week} ${e.start_time}`).join(', ')
+      : undefined
+
+  const alert = [readAlert, emptyAlert, cadenceAlert].filter(Boolean).join(' · ') || undefined
   return { events: kept, source, expired, alert }
 }
 
