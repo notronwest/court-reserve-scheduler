@@ -4066,6 +4066,7 @@ settings file that could not be rendered whole.
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
+- D-0153 — The CTO stands up with every repo on a schedule, and the fleet map is a committed artifact (2026-10-12)
 - D-0154 — A run is recorded at its start and its end, so a cut-off is visible and liveness is a query (2026-10-12)
 
 ## Superseded (history)
