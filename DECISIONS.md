@@ -2981,6 +2981,127 @@ duration (wmpc-web#254 holds it). Reading this record as authority for the parse
 price, a Category or a duration. Closing #582's shape as COMPLETED before the dated capability
 has actually landed.
 
+### D-0172 — Pattern coverage over the whole live horizon is the recurring schedule's health signal, and one standing fill is one action
+
+*2026-10-13 · scope: `ts/src/jobs/catchUp.ts, ts/src/recommender.ts, courtreserve_api/migrations/**, courtreserve_api/service.py, supabase/functions/wmpc-command/**, infrastructure/capability-requests/**` · source: daemon#581 (routed from cos_requests 97668418) — the capability-requests sweep's second live item. Ron, 2026-10-12, to the events command bar: "Make sure that the recurring events are built out over the next 2 weeks -- starting with tomorrow. I don't see some of them". Measured live 2026-10-13 before ruling: 20 active pattern slots, 40 expected occurrences in 10/14-10/27, 26 booked, **14 MISSING**, plus 4 booked on one court where the pattern asks two. Table compiled per decisions/PROCESS.md: court-reserve-scheduler, courtreserve-api, wmpc-web.*
+
+**Decision.** Five rules. Ron asked the command bar to make sure the recurring events
+were built out over the next two weeks; it refused, and the refusal was right about its own
+limits and wrong about why. The measurement came first: **14 of 40 expected standing-pattern
+occurrences were absent from 10/14–10/27**, with 4 more booked on one court where the pattern
+asks two. Three independent causes, each evidenced from the system's own logs, and no surface
+in the fleet could see any of them.
+
+1. **Pattern coverage over the WHOLE live horizon — not court-hours — is the recurring
+   schedule's health signal.** `catchUp.ts`'s `classify()` reads aggregate
+   `existing_court_hours` against `target_court_hours` plus the booking log. That is the right
+   signal for a thin day and is **structurally blind** to a named session's absence: all nine
+   affected dates classified `ok` while a third of the standing schedule was missing from them.
+   Coverage is therefore computed per **(pattern slot × date)** across the horizon, and
+   `catch-up --book` re-books a `pattern_missing` slot through the same Pass 0 path.
+   Court-hours stays, for `thin`; it is not a coverage test and must stop being read as one.
+   **Precondition, named by the scheduler's voice:** the only per-slot data that exists today,
+   `skippedFixedEvents`, conflates *already covered* with *genuinely blocked* under one
+   `min_gap` reason. Those two must be split before `pattern_missing` can be trusted, or the
+   new status inherits the old ambiguity and re-books what is already there.
+
+2. **A standing pattern is backfilled across the whole live horizon, never from day 14
+   onward.** The daily 8 AM run books exactly ONE date — today+14 — which is correct in steady
+   state and wrong for a pattern born mid-horizon: every date already inside the window is
+   never filled. This is not a hypothetical. `Intermediate Live Ball Clinic` (3 slots) and
+   `Intro to Pickleball` were created 2026-10-13 at 13:32 and 16:28, **after** that day's 12:12
+   run; each appears exactly ONCE in the following fourteen days. Ron adds a recurring session
+   on the dashboard, sees one occurrence, and the next two weeks are empty — which is the
+   sentence that produced this record. The mechanism is rule 1's sweep, **not** a backfill in
+   the pattern-create drain: one mechanism, self-healing, and it also repairs the patterns
+   already stranded, which a create-time backfill cannot reach.
+
+3. **A pattern slot booked on fewer courts than it asks is recorded `short_courts`, never
+   `ok` — and it is still booked.** This narrows how D-0166 rule 3 applies here, deliberately,
+   and the scheduler's voice is why. Pass 0 today falls back to a single free court when no
+   pair is free, commented *"the occurrence is worth more on one court than not at all."*
+   **That comment is right and the fallback stays:** members would rather play on one court
+   than not play, and refusing the booking outright would serve a rule at their expense. What
+   D-0166 rule 3 forbids is not the half-sized booking — it is **reporting it as a whole one**.
+   So the degradation becomes a named, surfaced outcome that the coverage read carries and that
+   catch-up retries when a court frees up. A silent 50% capacity cut is the defect; the
+   fallback is not.
+
+4. **One coverage answer, written by the mini, read everywhere — and the VERDICT is the
+   scheduler's, not a view's.** courtreserve-api's voice priced the obvious shape and found it
+   unsafe: `courtreserve.fixed_events.event_id` is nullable and **non-unique** (four Structured
+   Play slots share one id), so a slot matches an occurrence on `(day_of_week, start_time,
+   end_time)` against `cr_schedule`'s derived date/start/end — which migration 0051 already
+   renders in the club's zone to `"HH:MM"` *expressly* so a session and the pattern it was
+   booked from read the same way. More seriously: whether an absence is really MISSING depends
+   on `until`, `active`, and any closure or holiday exception — and re-deriving that in SQL
+   beside the scheduler's own sweep is the two-definitions risk D-0103 was written to close,
+   on a view instead of a table. Therefore the scheduler **computes** the verdict and publishes
+   it through courtreserve-api, which stores and exposes it as `public.cr_pattern_coverage`
+   plus `GET /fixed-events/coverage`. The view **reports** the verdict; it never recomputes it.
+   This is D-0056 rule 3's existing shape — one authoritative copy, written by the mini, read
+   everywhere — and not a new rail.
+   **Measured, because the concern turned on it:** there is no closure or holiday exception set
+   anywhere today. `policy.json` has no such key and `closure|holiday|blackout|closed` matches
+   nothing in `ts/src`. So the over-reporting the voice feared cannot happen yet — and when
+   closures are built they land in the **database**, where both readers can see them, never in
+   the scheduler's local policy, or the risk becomes real on the day the feature ships.
+
+5. **The unit of a proposal is the action the human asked for, not the number of writes it
+   decomposes into — and the command bar gains the read.** The refusal gave two reasons. The
+   second was true: the bar "can't see the calendar", and `public.cr_schedule` has existed and
+   been used by the dashboard's own calendar all along while `wmpc-command` never loaded it.
+   That is the capability gap, and rule 4 closes it. The first reason — *"I can only propose
+   ONE action and this is a bulk fill of ~32 sessions"* — is a mis-framing, but **not for the
+   reason I first gave, and wmpc-web's voice is right to refuse that grounding.** D-0056 §4
+   settles multiple weekday slots **of one event**; a horizon fill spans ~20 slots across
+   unrelated events, a shape D-0056 never priced. The justification it needs is its own:
+   *"fill the standing schedule's gaps for the next 14 days"* is **one** proposal with one
+   verbatim confirm because the human authored one intent over a set the **system** enumerates.
+   The D-0094 danger is a surface **guessing** which series to write; here nothing is guessed —
+   the set is exactly the slots the coverage read reports absent, every one of them an
+   already-approved standing pattern, with no new event, no new pattern and no price in it.
+   That is categorically unlike "which of these two events did you mean", which stays
+   `blocked`. And per wmpc-web's voice, the bar **proposes and never books**: the fill lands as
+   a `cos_approvals` row the scheduler executes, so the scheduler remains the only thing that
+   writes Court Reserve.
+
+**Why.** Ron's sentence was not a feature request, it was a report that the club's recurring
+schedule was a third empty, and the system's answer was a paragraph explaining why it could not
+look. Every piece needed to answer him already existed — the patterns in `cr_fixed_events`, the
+booked occurrences in `cr_schedule`, deliberately keyed to match, and a 14-day catch-up job
+whose whole purpose is that "a date the daily job missed stays missed forever". They had never
+been joined, so three separate faults ran unobserved for days: a horizon that cannot reach
+backwards to a pattern created inside it, a court contest that drops real sessions with
+`reason: no_court` into a per-date JSON file nobody opens (`Women's Advanced Contract Time`
+booked **zero** times in fourteen days), and a health check measuring the one quantity that
+cannot see either. The capability-requests rail did its job: it caught a refusal with nothing
+behind it and routed it here rather than losing it.
+
+The table changed this record twice, which is the argument for compiling it. courtreserve-api
+found the join key unsafe and the verdict mislocated — rule 4 is its design, not mine.
+wmpc-web refused the decision I cited at it, correctly, and rule 5 now carries a reason that
+survives the objection instead of borrowing one that does not apply. The scheduler's voice
+stopped rule 3 from deleting a fallback that serves members in order to satisfy a rule written
+about something else.
+
+**Forbids.** Reading court-hours as a coverage test, or shipping a recurring-schedule health
+check that cannot name an absent slot. Booking a standing pattern only from the far edge of the
+horizon while dates inside it stay unfilled. Recording a slot booked on fewer courts than it
+asks as `ok` — and equally, refusing that booking outright, which rule 3 narrows D-0166 r3 to
+permit. Deriving `missing` in SQL beside the scheduler's own derivation; a second definition of
+coverage anywhere. Matching a pattern slot to an occurrence on `fixed_events.event_id` alone
+(nullable, non-unique). Putting a closure or holiday exception in the scheduler's local policy
+rather than the database once such a set exists. `wmpc-command` booking occurrences itself
+rather than proposing to the approval rail. Citing D-0056 §4 for a multi-EVENT payload — it
+settles multiple slots of one event and nothing wider.
+
+**Binds.** Extends D-0056 (rules 1 and 3 — the standing-pattern model and one copy written by
+the mini) and D-0166 rule 3, which rule 3 here narrows with a stated reason. Rests on D-0103's
+one-copy principle for rule 4 and D-0094's propose/write split for rule 5. Applies D-0142: this
+refusal was **not** a specified one — the parse failed, the capability was genuinely absent, and
+the gap closes as dispatched work rather than NOT PLANNED.
+
 ### D-0173 — NOW.md is capped, so rewritten-not-appended is a gate
 
 *2026-10-13 · scope: `infrastructure/git-guards/**, NOW.md` · source: Ron, 2026-10-13 — "yes, build the NOW.md growth gate"*
