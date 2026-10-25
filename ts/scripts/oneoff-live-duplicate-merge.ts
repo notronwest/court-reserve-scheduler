@@ -41,6 +41,11 @@
  *   npx tsx scripts/oneoff-live-duplicate-merge.ts            # plan only
  *   npx tsx scripts/oneoff-live-duplicate-merge.ts --confirm   # do it
  *
+ * To clear occurrences a previous run stranded, and nothing else:
+ *
+ *   CRTEST_CANCEL_DATE=12/9/2026 npx tsx scripts/oneoff-live-duplicate-merge.ts \
+ *     --cancel 63119172,63119176
+ *
  * Overrides: CRTEST_EVENT_ID, CRTEST_DAYS_AHEAD, CRTEST_START, CRTEST_END,
  * CRTEST_MEMBER_A, CRTEST_MEMBER_B (names, or numeric org_member_ids to skip the
  * name lookup), CRTEST_COURT_A, CRTEST_COURT_B.
@@ -54,6 +59,17 @@ import { findDuplicateOccurrences, readOccurrences } from '../src/availability'
 import type { ScheduleItem } from '../src/cr/types'
 
 const CONFIRMED = process.argv.includes('--confirm')
+
+/**
+ * `--cancel 63119172,63119176` — remove occurrences this script left behind and
+ * do nothing else. The first live run stranded two, because the cancel request
+ * was missing `event_id` and `date`; this is the way to clear that without
+ * re-running the whole test.
+ */
+const CANCEL_ARG = (() => {
+  const i = process.argv.indexOf('--cancel')
+  return i >= 0 ? (process.argv[i + 1] ?? '') : ''
+})()
 
 /** Co-ed Advanced Open Play by default — a real event, so the duplicate is real. */
 const EVENT_ID = Number(process.env.CRTEST_EVENT_ID ?? 1633147)
@@ -171,6 +187,33 @@ async function occurrencesAtSlot(
 
 async function main(): Promise<void> {
   const cr = new CourtReserveClient(BASE, KEY)
+
+  if (CANCEL_ARG) {
+    const ids = CANCEL_ARG.split(',')
+      .map((x) => Number(x.trim()))
+      .filter((n) => n > 0)
+    if (ids.length === 0) throw new TestFailed('--cancel needs one or more occurrence ids')
+    const when = process.env.CRTEST_CANCEL_DATE
+    if (!when) {
+      throw new TestFailed(
+        'set CRTEST_CANCEL_DATE to the occurrences\' date (M/D/YYYY) — /cancel needs it',
+      )
+    }
+    log(`Cancelling ${ids.length} occurrence(s) of event ${EVENT_ID} on ${when}`)
+    let failed = 0
+    for (const id of ids) {
+      try {
+        await cr.cancel({ res_id: String(id), event_id: String(EVENT_ID), date: when })
+        log(`   ✅ cancelled ${id}`)
+      } catch (e) {
+        failed += 1
+        log(`   ❌ ${id} — ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (failed) throw new TestFailed(`${failed} of ${ids.length} could not be cancelled`)
+    log('\nDone — nothing left behind.')
+    return
+  }
 
   const today = NaiveDateTime.parseDate(new Date().toLocaleDateString('en-US'))
   const target = today.addHours(24 * DAYS_AHEAD)
@@ -347,14 +390,21 @@ async function main(): Promise<void> {
         stuck.push(`${r.name} (#${r.member}) is still on occurrence ${r.res}`)
       }
     }
-    for (const id of [survivor, occA, occB].filter((x): x is number => x != null)) {
+    // Deduped: `survivor` starts out as `occA`, so the raw list named it twice and the
+    // first run's warning listed the same occurrence twice.
+    for (const id of [...new Set([survivor, occA, occB].filter((x): x is number => x != null))]) {
       const live = await occurrencesAtSlot(cr, date, START_HM)
       if (!live.some((o) => o.occurrence_id === id)) continue
       try {
-        await cr.cancel({ res_id: String(id) })
+        await cr.cancel({ res_id: String(id), event_id: String(EVENT_ID), date })
         log(`   cancelled test occurrence ${id}`)
       } catch (e) {
-        stuck.push(`test occurrence ${id} is still on the calendar`)
+        // The first run swallowed this, which is exactly when the reason matters:
+        // the cancel was 422ing because the request was missing event_id and date.
+        stuck.push(
+          `test occurrence ${id} is still on the calendar — ` +
+            `${e instanceof Error ? e.message : String(e)}`,
+        )
       }
     }
     if (stuck.length) {
