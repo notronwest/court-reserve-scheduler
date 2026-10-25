@@ -175,6 +175,7 @@
         "start_time": "09:00",
         "end_time": "11:00",
         "courts": 1,
+        "preferred_courts": [4],
         "level": "Advanced"
       },
       {
@@ -210,12 +211,13 @@
       {
         "name": "Co-Ed Advanced Structured Play",
         "day_of_week": "Sunday",
-        "start_time": "10:00",
-        "end_time": "12:00",
+        "start_time": "16:00",
+        "end_time": "18:00",
         "courts": 2,
+        "preferred_courts": [4],
         "level": "Advanced",
         "event_id": 1135589,
-        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out."
+        "note": "Added 2026-10-06 \u2014 Ron: resurrect Structured Play (Tue 5\u20137 PM, Thu 10\u201312, Sat 3\u20135 PM, Sun 10\u201312). Standing weekly; the daily scheduler books it 14 days out. MOVED 2026-10-25 from Sunday 10:00\u201312:00 to 16:00\u201318:00 and pinned to court 4 \u2014 Ron made that change on the dashboard's Day tab and the executor applied it to courtreserve.fixed_events row 19. This file must follow a dashboard move: the seed merge is insert-missing-only on (name, day_of_week, start_time, end_time), so while this entry still named 10:00\u201312:00 it re-created the vacated slot as a second row within two minutes (occupancy_refresh -> load_bundle -> sync_fixed_events, every 2 min), and the booker booked Structured Play twice every Sunday. That duplicate row (id 28) is retired with until = 2026-10-25."
       }
     ],
     "retired_events_note": "Paused recurring events kept here verbatim (not deleted) so club management can reinstate a slot by copying it back into events, rather than re-deriving its time/courts/event_id. This block IS read, but not by the booking engines: courtreserve-api's seed sync (load.py fixed_events_retired_rows / merge-and-retire, run by fixed_events_sync.py) matches each entry to its courtreserve.fixed_events row and stamps until = retired_on. The scheduler then honours that `until` on every source it reads \u2014 the live GET /fixed-events feed, the state/fixed-events.json cache, and this file's seed \u2014 so a row retired on or before today is never booked (D-0056, ts/src/fixedEvents.ts dropExpired). Neither recommender iterates retired_events directly; they only ever see fixed_events.events (ts/src/recommender.ts, recommender.py).",
