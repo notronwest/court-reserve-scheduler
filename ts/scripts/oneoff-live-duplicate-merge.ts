@@ -71,6 +71,25 @@ const CANCEL_ARG = (() => {
   return i >= 0 ? (process.argv[i + 1] ?? '') : ''
 })()
 
+/**
+ * `--merge-only` — skip booking and sign-up, and run the cleanup over a duplicate
+ * that is ALREADY on the calendar with players already on it.
+ *
+ * This exists because registering somebody needs a price, and the caller should not
+ * be the one asserting it. Ron, 2026-10-25: "You shouldn't have to set this -- it
+ * will automatically be set to the value their membership sets." He is right. The
+ * service reads ONE field off the occurrence's dates-grid row (`MaxDropInPrice`)
+ * and refuses when it cannot read it, rather than register into a charge it cannot
+ * see — the refusal is correct, the shape of the question is not.
+ *
+ * So this mode skips the part that needs it: sign the two members up in Court
+ * Reserve's own UI, where it shows the price and applies the membership rate, then
+ * run this. What is under test is unaffected either way, because the merge reads
+ * what each member actually PAID off the roster row it is moving, rather than
+ * being told.
+ */
+const MERGE_ONLY = process.argv.includes('--merge-only')
+
 /** Co-ed Advanced Open Play by default — a real event, so the duplicate is real. */
 const EVENT_ID = Number(process.env.CRTEST_EVENT_ID ?? 1633147)
 const DAYS_AHEAD = Number(process.env.CRTEST_DAYS_AHEAD ?? 45)
@@ -226,6 +245,10 @@ async function main(): Promise<void> {
   log(`  courts     #${COURT_A} and #${COURT_B}`)
   log(`  members    ${NAME_A}  and  ${NAME_B}`)
   log(`  emails     suppressed on every write (notify: false)`)
+  if (MERGE_ONLY) {
+    log('  mode       MERGE ONLY — books nothing, registers nobody; expects the')
+    log('             duplicate and its players to be on the calendar already')
+  }
 
   if (!CONFIRMED) {
     log('\nPlan only. Re-run with --confirm to write to the live Court Reserve.')
@@ -252,16 +275,42 @@ async function main(): Promise<void> {
     throw new TestFailed('both names resolved to the same member — nothing was touched.')
   }
 
-  step(3, 'Prove the slot is empty')
   const before = await occurrencesAtSlot(cr, date, START_HM)
-  if (before.length > 0) {
-    throw new TestFailed(
-      `${before.length} occurrence(s) of event ${EVENT_ID} already sit at ${date} ` +
-        `${START_HM} — refusing to touch a real session. Move the slot with ` +
-        'CRTEST_DAYS_AHEAD or CRTEST_START.',
-    )
+  if (MERGE_ONLY) {
+    step(3, 'Find the duplicate already on the calendar')
+    if (before.length < 2) {
+      throw new TestFailed(
+        `--merge-only expects the duplicate to be there already, but ${date} ${START_HM} ` +
+          `holds ${before.length} occurrence(s) of event ${EVENT_ID}. Book the two copies and ` +
+          'sign the two members up first, then re-run.',
+      )
+    }
+    for (const o of before) {
+      const roster = await cr.roster(EVENT_ID, o.occurrence_id, date, date)
+      const who = roster.map((r) => r.member_name).join(', ')
+      log(
+        `   ${o.occurrence_id} on Court #${o.court_nums.join(', #')} — ` +
+          `${roster.length} signed up${roster.length ? ` (${who})` : ''}`,
+      )
+    }
+    if (before.filter((o) => (o.members ?? 0) > 0).length < 2) {
+      throw new TestFailed(
+        'the point of this test is two copies that BOTH have players. Court Reserve reports ' +
+          `members as [${before.map((o) => String(o.members)).join(', ')}] — sign somebody up ` +
+          'on each copy first.',
+      )
+    }
+  } else {
+    step(3, 'Prove the slot is empty')
+    if (before.length > 0) {
+      throw new TestFailed(
+        `${before.length} occurrence(s) of event ${EVENT_ID} already sit at ${date} ` +
+          `${START_HM} — refusing to touch a real session. Move the slot with ` +
+          'CRTEST_DAYS_AHEAD or CRTEST_START.',
+      )
+    }
+    log('   empty')
   }
-  log('   empty')
 
   let occA: number | undefined
   let occB: number | undefined
