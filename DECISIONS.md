@@ -4302,6 +4302,46 @@ destination, because this board has no cancelled column and `In Review` is a wor
   than discovered later.
 - Re-writing a card already in `Done` on every tick. Churn on a board Ron reads is its own noise.
 
+### D-0224 — A standing pattern's first date sets which week, not when the series begins
+
+*2026-10-25 · scope: `web/src/lib/standingPattern.ts, web/src/lib/recurrence.ts, web/src/lib/eventValidate.ts, ts/src/policy.ts, courtreserve_api/events_drain.py, supabase/functions/wmpc-command/**` · source: club-dashboard#676 — four consecutive D-0065 design verdicts (aa4f27df, 6218c443, 75415d51, 27d92128) each asked the same unanswered question of the every-other-week card, and the fourth said so explicitly: "this is the fourth verdict asking for the one-sentence rule on whether a slot's first date may precede the event's own start, D-0018". D-0202 created the field and never ruled on it.*
+
+**Decision.** An `anchor_date` answers **which week**, not when the event starts. It may be
+**earlier** than the event's own `starts_at`, and that is not a special case — it is what the
+field is for. The second half binds just as hard: a back-dated anchor sets parity and nothing
+else. It never books a session before the event's own start, and the card states exactly the
+date it is sending.
+
+Two kinds of anchor, and only one of them may be back-dated freely:
+
+1. **One a person gives** — typed into the card's **First** box, or parsed from their words.
+   Accepted whatever its date, provided it falls on that slot's own weekday. A series that has
+   already been meeting can only be described by a Wednesday it really ran on.
+2. **One the system derives** — when a day is added to an existing pattern, or a slot's day is
+   moved (D-0202 rule 5). Floored at the later of today and the pattern's own earliest first
+   session, so adding Monday to a Wednesday-start pattern lands in the next on-week, never in
+   the week before the event began.
+
+**Why.** `onWeekStatus` (court-reserve-scheduler `ts/src/policy.ts`) is pure parity: a date is
+a session iff it falls on `day_of_week`, is on or after the anchor, and the whole weeks between
+divide by the cadence. Every on-week date after the event begins satisfies that whether the
+anchor sits before the start or on it — so forbidding a back-dated anchor would forbid nothing
+the scheduler does and would make a **running** series unexpressible. You could not say which
+Wednesday "Caryn's Dink Divas" is on without inventing a fictitious future date, and inventing
+one is a coin flip between two different series: one week of drift flips which Wednesdays run.
+That is the same wrong-week failure D-0202 rule 5 refuses to risk on a move.
+
+A derived anchor is the opposite case, because nobody chose it. Shifting a sibling's anchor onto
+an earlier weekday keeps the parity but lands inside the week before — a card reading "Mon 9–11
+AM from Oct 26" above an event starting Oct 28. Correct arithmetic, a date nobody can start from,
+and no human decision behind it. So the floor applies where the system is guessing and not where
+a person has spoken.
+
+**Forbids.** Refusing or silently moving a back-dated anchor a person supplied. Deriving one that
+falls before the pattern's own earliest first session or before today. Guessing a parity when none
+was given — a cadence-2 slot with no first date is refused in plain words with the control named,
+never defaulted to this week. Booking any session before the event's own start.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
