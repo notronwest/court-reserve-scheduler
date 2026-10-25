@@ -342,64 +342,84 @@ async function main(): Promise<void> {
   const registered: Array<{ res: number; member: number; name: string }> = []
 
   try {
-    step(4, 'Book the duplicate — same event, same hour, two courts')
-    for (const court of [COURT_A, COURT_B]) {
-      const res = (await cr.book({
-        event_id: String(EVENT_ID),
-        date,
-        start_time: ampm(START_HM),
-        end_time: ampm(END_HM),
-        court_ids: [String(COURTS[court].id)],
-      })) as { success?: boolean; occurrence_id?: number; error?: string }
-      if (res?.success === false) {
-        throw new TestFailed(`booking court #${court} failed: ${res.error ?? 'no reason given'}`)
+    if (MERGE_ONLY) {
+      // Steps 4-6 are the SETUP, and in this mode a person has already done it by
+      // hand in Court Reserve. The first --merge-only run only skipped step 3's
+      // emptiness check and then booked and registered anyway, which is the
+      // opposite of what the mode is for and what its banner claims.
+      const ordered = [...before].sort((a, b) => a.occurrence_id - b.occurrence_id)
+      occA = ordered[0].occurrence_id
+      occB = ordered[1].occurrence_id
+      survivor = occA
+      log(`\n── 4-6. Skipped — the duplicate and its players are already there`)
+      log(`   keeping ${occA}, merging ${ordered.slice(1).map((o) => o.occurrence_id).join(', ')}`)
+      // Teardown must withdraw whoever is actually on these, not whoever this run
+      // registered — it registered nobody. Read them off the live rosters instead.
+      for (const o of ordered) {
+        for (const r of await cr.roster(EVENT_ID, o.occurrence_id, date, date)) {
+          registered.push({ res: o.occurrence_id, member: r.org_member_id, name: r.member_name })
+        }
       }
-      log(`   booked court #${court} → occurrence ${res?.occurrence_id ?? '(id not returned)'}`)
-    }
+    } else {
+      step(4, 'Book the duplicate — same event, same hour, two courts')
+      for (const court of [COURT_A, COURT_B]) {
+        const res = (await cr.book({
+          event_id: String(EVENT_ID),
+          date,
+          start_time: ampm(START_HM),
+          end_time: ampm(END_HM),
+          court_ids: [String(COURTS[court].id)],
+        })) as { success?: boolean; occurrence_id?: number; error?: string }
+        if (res?.success === false) {
+          throw new TestFailed(`booking court #${court} failed: ${res.error ?? 'no reason given'}`)
+        }
+        log(`   booked court #${court} → occurrence ${res?.occurrence_id ?? '(id not returned)'}`)
+      }
 
-    const pair = await occurrencesAtSlot(cr, date, START_HM)
-    if (pair.length !== 2) {
-      throw new TestFailed(
-        `expected exactly 2 occurrences at the slot, the live calendar shows ${pair.length}`,
-      )
-    }
-    // Lowest occurrence id is the one rankForKeeping will keep when both copies
-    // hold one player on one court — so the survivor is predictable, and asserted.
-    const ordered = [...pair].sort((a, b) => a.occurrence_id - b.occurrence_id)
-    occA = ordered[0].occurrence_id
-    occB = ordered[1].occurrence_id
-    survivor = occA
-    log(`   duplicate confirmed: ${occA} and ${occB}`)
-
-    step(5, `Register ${memberA.name} on ${occA} and ${memberB.name} on ${occB}`)
-    for (const [res, member] of [
-      [occA, memberA],
-      [occB, memberB],
-    ] as const) {
-      await api('POST', '/events/registrations/register', {
-        event_id: EVENT_ID,
-        res_id: res,
-        org_member_ids: [member.id],
-        notify: false,
-      })
-      registered.push({ res, member: member.id, name: member.name })
-      log(`   ${member.name} → ${res}`)
-    }
-
-    step(6, 'Prove one player on each copy')
-    for (const [res, member] of [
-      [occA, memberA],
-      [occB, memberB],
-    ] as const) {
-      const roster = await cr.roster(EVENT_ID, res, date, date)
-      const ids = roster.map((r) => r.org_member_id)
-      if (!ids.includes(member.id) || ids.length !== 1) {
+      const pair = await occurrencesAtSlot(cr, date, START_HM)
+      if (pair.length !== 2) {
         throw new TestFailed(
-          `occurrence ${res} should hold exactly ${member.name} (#${member.id}); roster is ` +
-            `[${ids.join(', ')}]`,
+          `expected exactly 2 occurrences at the slot, the live calendar shows ${pair.length}`,
         )
       }
-      log(`   ${res}: ${member.name} only`)
+      // Lowest occurrence id is the one rankForKeeping will keep when both copies
+      // hold one player on one court — so the survivor is predictable, and asserted.
+      const ordered = [...pair].sort((a, b) => a.occurrence_id - b.occurrence_id)
+      occA = ordered[0].occurrence_id
+      occB = ordered[1].occurrence_id
+      survivor = occA
+      log(`   duplicate confirmed: ${occA} and ${occB}`)
+
+      step(5, `Register ${memberA.name} on ${occA} and ${memberB.name} on ${occB}`)
+      for (const [res, member] of [
+        [occA, memberA],
+        [occB, memberB],
+      ] as const) {
+        await api('POST', '/events/registrations/register', {
+          event_id: EVENT_ID,
+          res_id: res,
+          org_member_ids: [member.id],
+          notify: false,
+        })
+        registered.push({ res, member: member.id, name: member.name })
+        log(`   ${member.name} → ${res}`)
+      }
+
+      step(6, 'Prove one player on each copy')
+      for (const [res, member] of [
+        [occA, memberA],
+        [occB, memberB],
+      ] as const) {
+        const roster = await cr.roster(EVENT_ID, res, date, date)
+        const ids = roster.map((r) => r.org_member_id)
+        if (!ids.includes(member.id) || ids.length !== 1) {
+          throw new TestFailed(
+            `occurrence ${res} should hold exactly ${member.name} (#${member.id}); roster is ` +
+              `[${ids.join(', ')}]`,
+          )
+        }
+        log(`   ${res}: ${member.name} only`)
+      }
     }
 
     step(7, 'Run the real cleanup (what the 9/11/13/15/17 job runs)')
@@ -432,20 +452,28 @@ async function main(): Promise<void> {
     }
     const finalRoster = await cr.roster(EVENT_ID, survivor, date, date)
     const finalIds = finalRoster.map((r) => r.org_member_id).sort((a, b) => a - b)
-    const wanted = [memberA.id, memberB.id].sort((a, b) => a - b)
+    // Who SHOULD be on the keeper: in the booking path, the two members this run
+    // registered; in --merge-only, whoever was on the copies beforehand, since a
+    // person set that up by hand and it is not this script's place to assume who.
+    const wanted = [
+      ...new Set(
+        MERGE_ONLY ? registered.map((r) => r.member) : [memberA.id, memberB.id],
+      ),
+    ].sort((a, b) => a - b)
     if (JSON.stringify(finalIds) !== JSON.stringify(wanted)) {
       throw new TestFailed(
-        `the surviving copy should hold BOTH members [${wanted.join(', ')}]; roster is ` +
-          `[${finalIds.join(', ')}]`,
+        `the surviving copy should hold everyone who was on either copy ` +
+          `[${wanted.join(', ')}]; roster is [${finalIds.join(', ')}]`,
       )
     }
-    // Both are now on the survivor, so teardown withdraws them from there.
+    // Everyone is on the survivor now, so teardown withdraws them from there
+    // rather than from the copy they started on.
+    const names = new Map(registered.map((r) => [r.member, r.name]))
     registered.length = 0
-    registered.push(
-      { res: survivor, member: memberA.id, name: memberA.name },
-      { res: survivor, member: memberB.id, name: memberB.name },
-    )
-    log(`   one copy left (${survivor}) holding ${memberA.name} and ${memberB.name}`)
+    for (const id of wanted) {
+      registered.push({ res: survivor, member: id, name: names.get(id) ?? `member ${id}` })
+    }
+    log(`   one copy left (${survivor}) holding ${finalRoster.map((r) => r.member_name).join(', ')}`)
     log('\n✅ PASS — the duplicate was removed and both players ended up on the copy kept.')
   } finally {
     step(9, 'Clean up after the test')
