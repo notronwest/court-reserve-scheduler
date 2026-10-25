@@ -111,8 +111,27 @@ export interface MoveRequest {
   event_name?: string
   edit_series?: boolean    // same-day only: apply to the whole series forward
 }
+/**
+ * Cancel ONE occurrence (courtreserve-api `POST /cancel`).
+ *
+ * THREE facts, not one. The parent event selects the occurrences grid, the
+ * occurrence id picks the row in it, and the date names the screenshot the
+ * service keeps as evidence. This interface used to carry only `res_id`, so
+ * every cancel this repo ever sent came back `422` — the service's own
+ * `CancelReq` docstring says it keeps `res_id` as an accepted spelling
+ * "so the existing TypeScript client does not break — it now gets a clear 422
+ * asking for the two missing fields instead of a 500". We were the client it
+ * was talking about: the duplicate cleanup could not remove anything, and
+ * `jobs/fixImbalance.ts` had never once cancelled an extra session.
+ */
 export interface CancelRequest {
+  /** The reservation/occurrence being cancelled. */
   res_id: string
+  /** The parent event — without it the service cannot open the occurrences grid. */
+  event_id: string
+  /** `M/D/YYYY`, the occurrence's own date. */
+  date: string
+  dry_run?: boolean
 }
 export interface SetCourtsRequest {
   res_id: string

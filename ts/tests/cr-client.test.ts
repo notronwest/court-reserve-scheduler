@@ -23,6 +23,26 @@ describe('CourtReserveClient', () => {
     expect((opts.headers as Record<string, string>)['X-API-Key']).toBe('secret')
   })
 
+  // Every cancel this repo sent used to carry only `res_id`, and the service
+  // answered 422 on all of them: `POST /cancel` needs the parent event (to open
+  // the occurrences grid) and the date (to name its screenshot) as well. Nothing
+  // caught it because the job-level test doubles accepted whatever was passed. So
+  // the contract is asserted here, at the boundary, against the request actually
+  // put on the wire.
+  it('cancel() POSTs the occurrence, the parent event AND the date to /cancel', async () => {
+    const f = mockFetch(200, { success: true })
+    vi.stubGlobal('fetch', f)
+    const cr = new CourtReserveClient('http://svc', 'k')
+    await cr.cancel({ res_id: '63119172', event_id: '1633147', date: '12/9/2026' })
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit]
+    expect(String(url)).toContain('/cancel')
+    expect(opts.method).toBe('POST')
+    const body = JSON.parse(opts.body as string) as Record<string, unknown>
+    expect(body.res_id).toBe('63119172')
+    expect(body.event_id).toBe('1633147')
+    expect(body.date).toBe('12/9/2026')
+  })
+
   it('book() POSTs JSON to /book', async () => {
     const f = mockFetch(200, { ok: true })
     vi.stubGlobal('fetch', f)

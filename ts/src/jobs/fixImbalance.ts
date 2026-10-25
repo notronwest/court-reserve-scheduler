@@ -297,7 +297,11 @@ export async function executeChanges(
   for (const c of changes.filter((c): c is Extract<Change, { action: 'cancel' }> => c.action === 'cancel')) {
     log(`Cancelling ${c.description} (occ=${c.occurrence_id})`)
     try {
-      await cr.cancel({ res_id: String(c.occurrence_id) })
+      await cr.cancel({
+        res_id: String(c.occurrence_id),
+        event_id: String(c.event_id),
+        date: c.date_str,
+      })
       log(`  ✅ ${c.description}`)
     } catch (e) {
       log(`  ❌ FAILED: ${e instanceof Error ? e.message : String(e)}  ${c.description}`)
