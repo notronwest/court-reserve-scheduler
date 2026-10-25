@@ -5,6 +5,13 @@
  * then for each checks (via `/schedule`) whether a free court is available to
  * expand into. Posts a Discord alert per proposal and records it in
  * `logs/pending_waitlist.json` so the listener's ✅ / `!expand` can execute it.
+ *
+ * It also cleans up duplicate sessions (Ron, 2026-10-24 — `jobs/duplicateEvents.ts`).
+ * That runs FIRST and on its own schedule read, because `/waitlists` returns only
+ * occurrences that are full AND have a waitlist, which a duplicated slot usually
+ * is not — so the duplicate check cannot hang off this job's feed, only its clock.
+ * Unlike the expansion half it does not propose: it removes an empty duplicate
+ * itself and reports the rest. `--dry-run` covers both halves.
  */
 import 'dotenv/config'
 import { resolve } from 'node:path'
@@ -14,6 +21,7 @@ import { loadPolicy, type Policy } from '../policy'
 import { NaiveDateTime } from '../datetime'
 import { DiscordRest } from '../discord/rest'
 import { loadPendingWaitlist, savePendingWaitlist, type WaitlistProposal } from '../discord/state'
+import { runDuplicateCleanup } from './duplicateEvents'
 
 interface CourtsCfg {
   [id: string]: { number: number; label?: string }
@@ -181,13 +189,39 @@ export function buildAlertEmbed(
 export async function runCheckWaitlists(
   cr: CourtReserveClient,
   rest: DiscordRest,
-  opts: { days?: number; dryRun?: boolean; policy?: Policy; pendingPath: string; log?: (m: string) => void },
+  opts: {
+    days?: number
+    dryRun?: boolean
+    policy?: Policy
+    pendingPath: string
+    log?: (m: string) => void
+    /** Skip the duplicate-session cleanup half (default: run it). */
+    skipDuplicates?: boolean
+  },
 ): Promise<Array<{ occ: WaitlistOccurrence; proposal: Proposal }>> {
   const log = opts.log ?? (() => {})
   const policy = opts.policy ?? loadPolicy()
   const ctx = buildWaitlistCtx(policy)
   const days = opts.days ?? ctx.scanDays
   const eventIds = Object.keys(ctx.approved).map(Number)
+
+  // Duplicates first: expanding a slot onto another court while the same session
+  // sits on it twice would widen the wrong copy, and the court this frees may be
+  // the one an expansion below then wants.
+  if (!opts.skipDuplicates) {
+    const knownCourts = new Set(Object.values(ctx.courts).map((c) => c.number))
+    try {
+      await runDuplicateCleanup(cr, rest, knownCourts, {
+        days,
+        dryRun: opts.dryRun,
+        log,
+      })
+    } catch (e) {
+      // A failed cleanup must not cost the club its court expansions, which are
+      // time-sensitive and the reason this job runs five times a day.
+      log(`Duplicate cleanup failed — continuing with waitlists: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
 
   log(`Scanning waitlists for ${eventIds.length} events, ${days} days ahead…`)
   const occurrences = await cr.waitlists(eventIds, days)
@@ -246,6 +280,7 @@ if (isMain) {
   await runCheckWaitlists(cr, rest, {
     days: daysIdx >= 0 ? Number(argv[daysIdx + 1]) : undefined,
     dryRun: argv.includes('--dry-run'),
+    skipDuplicates: argv.includes('--no-dedupe'),
     pendingPath: resolve(logsDir, 'pending_waitlist.json'),
     log: (m) => console.log(m),
   })
