@@ -471,6 +471,7 @@ export interface PatternGapLine {
   name: string
   wants_courts: number
   has_courts: number
+  instances?: number
   status: string
   courts?: number[]
   max_people?: number
@@ -481,6 +482,7 @@ const GAP_WHY: Record<string, string> = {
   no_event: 'no Court Reserve event is attached to this standing slot, so nothing can be booked against it',
   no_court: 'every court is already taken at that hour',
   failed: 'the booking was attempted and did not land',
+  duplicate: 'booked TWICE at this hour — one copy needs cancelling, which is a human call',
 }
 
 export function buildPatternGapsEmbed(
@@ -489,12 +491,32 @@ export function buildPatternGapsEmbed(
 ): unknown {
   const fixed = gaps.filter((g) => g.status === 'booked' || g.status === 'widened')
   const open = gaps.filter((g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed')
-  const color = open.some((g) => g.status === 'failed') || !opts.patternsLive ? 0xe74c3c
-    : open.length ? 0xf39c12 : 0x2ecc71
+  // A duplicate is the opposite of missing, so it gets its own line rather than being
+  // counted into "still missing" — a title saying a session is missing when it is in
+  // fact there twice sends whoever reads it looking for the wrong thing.
+  const dupes = gaps.filter((g) => g.status === 'duplicate')
+  const color =
+    open.some((g) => g.status === 'failed') || dupes.length || !opts.patternsLive
+      ? 0xe74c3c
+      : open.length
+        ? 0xf39c12
+        : 0x2ecc71
 
   const lines: string[] = []
   if (!opts.patternsLive) {
     lines.push(`⚠️ **${opts.patternsAlert ?? 'the standing pattern list was not read live'}** — nothing was booked this run.`)
+    lines.push('')
+  }
+  if (dupes.length) {
+    lines.push(`**${dupes.length} standing session${dupes.length === 1 ? '' : 's'} booked more than once at one hour:**`)
+    for (const g of dupes.slice(0, 20)) {
+      lines.push(
+        `• **${g.day_of_week.slice(0, 3)} ${g.date} ${g.start_time}** ${g.name} — ` +
+          `${g.instances ?? 2} copies holding ${g.has_courts} court(s). Not touched: ` +
+          'removing one is a cancel, and that is yours to approve.',
+      )
+    }
+    if (dupes.length > 20) lines.push(`• …and ${dupes.length - 20} more`)
     lines.push('')
   }
   if (open.length) {
@@ -516,9 +538,12 @@ export function buildPatternGapsEmbed(
     if (fixed.length > 15) lines.push(`• …and ${fixed.length - 15} more`)
   }
 
-  const title = open.length
-    ? `📅 ${open.length} standing session${open.length === 1 ? '' : 's'} missing in the next ${opts.daysScanned} days`
-    : `📅 Standing sessions: ${fixed.length} filled, nothing left open`
+  const title = dupes.length
+    ? `📅 ${dupes.length} standing session${dupes.length === 1 ? '' : 's'} booked twice at one hour` +
+      (open.length ? `, ${open.length} missing` : '')
+    : open.length
+      ? `📅 ${open.length} standing session${open.length === 1 ? '' : 's'} missing in the next ${opts.daysScanned} days`
+      : `📅 Standing sessions: ${fixed.length} filled, nothing left open`
 
   return {
     embeds: [

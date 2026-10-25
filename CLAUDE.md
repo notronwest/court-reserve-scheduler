@@ -135,6 +135,15 @@ re-book, while the cancelled instance's court goes back to being usable. Cancell
 **only** instance of a standing slot does not retire it — the gap-filler books it again
 the next morning, by design. A standing slot is retired by stamping its `until`.
 
+**A session booked twice at one hour is reported, never repaired.** The gap-filler counts
+every occurrence at a slot, not the first one Court Reserve happens to list — taking the
+first made the outcome depend on feed order, and matching a one-court duplicate ahead of
+the healthy two-court instance read as a court shortage, so the fixer widened the
+*duplicate* onto a third court. A slot with more than one occurrence now resolves as
+`duplicate`: logged, named in the Discord report as booked twice rather than missing,
+counted by `needsAttention` so the run exits non-zero. Removing a copy is a Court Reserve
+cancel and Ron's call, so nothing books or widens against that slot until it is one again.
+
 Skill levels: Beginner · Advanced Beginner · Intermediate · Advanced Intermediate · Advanced
 
 ## Common Operations
