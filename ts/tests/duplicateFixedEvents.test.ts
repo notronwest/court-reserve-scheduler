@@ -4,7 +4,10 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadPolicy, type FixedEvent, type Policy } from '../src/policy'
 import { recommend, type ScheduleItem } from '../src/recommender'
+import { isCancelled, occupiedSlots } from '../src/availability'
+import { NaiveDateTime } from '../src/datetime'
 import { dedupeRecommendations } from '../src/discord/execute'
+import { scanPatternGaps } from '../src/jobs/patternGaps'
 import { resolveFixedEvents } from '../src/fixedEvents'
 import { runScheduler } from '../src/scheduler'
 
@@ -90,6 +93,55 @@ describe('a standing session already on the live calendar is never booked twice'
       recommendations.some((r) => r.event_id === ADVANCED_OPEN_PLAY && r.start.formatHm() === '10:00'),
     ).toBe(true)
     expect(stats.skipped_fixed_events.some((s) => s.reason === 'max_occurrences')).toBe(false)
+  })
+})
+
+describe('cancelling one duplicate holds, and frees only that court', () => {
+  // The cleanup that follows this fix: two instances of one session at one hour,
+  // the extra one cancelled. The next morning's run must leave the survivor
+  // alone, must not re-book the slot, and must stop treating the cancelled
+  // instance's court as taken.
+  const TUESDAY = '10/13/2026'
+  const survivor = occurrence(
+    STRUCTURED_PLAY, 'Co-Ed Advanced Structured Play', '2026-10-13', '17:00', '19:00', [4, 3],
+  )
+  const cancelled: ScheduleItem = {
+    ...occurrence(STRUCTURED_PLAY, 'Co-Ed Advanced Structured Play', '2026-10-13', '17:00', '19:00', [2]),
+    Id: 900999,
+    EventName: 'Co-Ed Advanced Structured Play (Cancelled)',
+  }
+
+  it('does not re-book the slot the survivor still covers', () => {
+    const { recommendations } = recommend([survivor, cancelled], TUESDAY, loadPolicy(), {
+      popularity: noPop,
+    })
+    expect(
+      recommendations.filter((r) => r.event_id === STRUCTURED_PLAY && r.start.formatHm() === '17:00'),
+    ).toHaveLength(0)
+  })
+
+  it('counts the cancelled instance as holding nothing, so its court is usable again', () => {
+    const occupied = occupiedSlots([survivor, cancelled], '2026-10-13', new Set([1, 2, 3, 4]))
+    expect(occupied.map((o) => o.court_num).sort()).toEqual([3, 4])
+    expect(isCancelled(cancelled)).toBe(true)
+    expect(isCancelled(survivor)).toBe(false)
+  })
+
+  it('pattern-gaps reads a slot whose ONLY instance was cancelled as missing, not present', () => {
+    const pattern: FixedEvent[] = [
+      {
+        name: 'Co-Ed Advanced Structured Play',
+        event_id: STRUCTURED_PLAY,
+        day_of_week: 'Tuesday',
+        start_time: '17:00',
+        end_time: '19:00',
+        courts: 2,
+        level: 'Advanced',
+      },
+    ]
+    const gaps = scanPatternGaps(pattern, [cancelled], [NaiveDateTime.parseDate(TUESDAY)])
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0].has_courts).toBe(0)
   })
 })
 

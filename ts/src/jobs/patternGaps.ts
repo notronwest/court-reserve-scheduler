@@ -47,7 +47,7 @@ import { sendPatternGapReport } from '../discord/notify'
 import { NaiveDateTime } from '../datetime'
 import { resolveFixedEvents } from '../fixedEvents'
 import { COURTS } from '../recommender'
-import { freeCourts, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
+import { freeCourts, isCancelled, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
 import { isOnWeek, type FixedEvent, type Policy } from '../policy'
 
 export type GapStatus =
@@ -149,8 +149,13 @@ export function scanPatternGaps(
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
+    // A cancelled reservation is not the session being present — it is the
+    // session being gone, which is exactly what this job exists to notice.
     const onThisDate = items.filter(
-      (i) => i.StartDateTime && NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd,
+      (i) =>
+        i.StartDateTime &&
+        NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd &&
+        !isCancelled(i),
     )
     for (const p of patterns) {
       // An off-week (or an unplaceable two-week row) is never missing — D-0202.
@@ -271,7 +276,8 @@ export async function runPatternGaps(
             i.StartDateTime &&
             NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === date.formatYmd() &&
             NaiveDateTime.fromISO(i.StartDateTime).formatHm() === gap.start_time &&
-            matchesPattern(i.EventName, gap.name),
+            matchesPattern(i.EventName, gap.name) &&
+            !isCancelled(i),
         )
         if (!existing?.Id) {
           gap.status = 'failed'
