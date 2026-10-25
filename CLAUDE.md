@@ -153,8 +153,13 @@ if both have registrants keep one and move the registrants over to the one that 
   while this sees any event booked twice.
 - **Keeper:** registrants first, then more courts, then the lowest occurrence id so two
   runs over one calendar never disagree (`rankForKeeping` in `availability.ts`).
-- **Removed:** every OTHER copy at that slot whose registrant count is zero, via
-  `POST /cancel`. Never the keeper, never the last one standing, never a past slot
+- **Removed:** every OTHER copy at that slot whose registrant count Court Reserve
+  **reported** as zero, via `POST /cancel`. A count the feed did not give is **not** zero:
+  `MembersCount` is reached through a cast and this read has never been exercised live for
+  it, so absent, null, empty and non-numeric all read as *unknown*, are never cancelled,
+  rank with the occupied copies for keeping, and are named in the Discord report
+  (`readMemberCount` / `mayHavePeople` in `availability.ts`). Folding unknown into empty is
+  how a cleanup like this deletes a session with people on it, silently. Never the keeper, never the last one standing, never a past slot
   (attendance is read off those), never a cancelled row. This is the same judgement
   `jobs/fixImbalance.ts` has always made about an extra session — "never one with
   registered members".

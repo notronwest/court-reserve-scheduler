@@ -45,9 +45,24 @@ people's bookings. That half needs a new endpoint in `courtreserve-api` first.
 
 **Also unverified and worth knowing:** `POST /cancel` has never been exercised against live
 Court Reserve, and whether a cancel emails the occurrence's registrants is unestablished.
-The empty-copy path cancels only occurrences with zero registrants, so there is nobody to
-email on that path — which is why the risk sits almost entirely on the half that is not
-built.
+The empty-copy path cancels only occurrences with a REPORTED count of zero, so there is
+nobody to email on that path — which is why the risk sits almost entirely on the half that
+is not built. **The first run after deploy should be `--dry-run` by hand on the mini**,
+before the 9/11/13/15/17 clock fires it; `DEPLOYMENT.md`'s verify line for that target says
+so, alongside the `--no-dedupe` switch.
+
+**Review fix (reviewer REQUEST CHANGES on the PR, both blocking, both correct).** An
+unknown registrant count read as zero, and a reported zero is the ONLY thing authorising a
+cancel — so an absent, null, empty or non-numeric `MembersCount` would have made that
+occurrence removable and deleted a session with people on it, silently and unrecoverably.
+`EventOccurrence.members` is now `number | null`; `readMemberCount` returns null for
+anything unusable; `resolveDuplicate` grew an `unknown` bucket that is never cancelled,
+`rankForKeeping` treats unknown as occupied, and the report names it. 13 of the new tests
+fail without that change, including all three "cancels NOTHING" cases. Also: ids are now
+required to be `> 0`, because `Number('')` is 0 and finite, so an empty `EventId` would
+have become "event 0" and two such rows would have read as duplicates of each other. And
+the stray `ts/package-lock.json` churn from running `npm install` in the worktree is
+reverted — it altered optional-dependency resolution and had nothing to do with the work.
 
 Tests: `ts/tests/duplicateEvents.test.ts`, 19 cases — the whole truth table, weighted to the
 cases that must NOT cancel (both-have-registrants, past slot, cancelled row, missing id, dry

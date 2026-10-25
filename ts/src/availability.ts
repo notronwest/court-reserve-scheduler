@@ -133,8 +133,21 @@ export interface EventOccurrence {
   start: NaiveDateTime
   end: NaiveDateTime
   court_nums: number[]
-  /** Registrants Court Reserve reports for this occurrence. */
-  members: number
+  /**
+   * Registrants Court Reserve reports, or **null when it did not report any
+   * usable number** — an absent, null or non-numeric `MembersCount`.
+   *
+   * The distinction is load-bearing: a zero here is the ONLY thing that
+   * authorises cancelling an occurrence, so folding "unknown" into "nobody
+   * signed up" would silently delete a session with people on it. Unknown is
+   * never removable, and ranks with the occupied ones for keeping.
+   */
+  members: number | null
+}
+
+/** Does this occurrence have people on it, or might it? Unknown counts as yes. */
+export function mayHavePeople(o: EventOccurrence): boolean {
+  return o.members === null || o.members > 0
 }
 
 /** Several occurrences of ONE event at ONE start time: the duplicate. */
@@ -157,20 +170,35 @@ export interface DuplicateGroup {
  * over the same calendar never disagree about which one to keep.
  */
 export function rankForKeeping(a: EventOccurrence, b: EventOccurrence): number {
-  if ((b.members > 0 ? 1 : 0) !== (a.members > 0 ? 1 : 0)) {
-    return (b.members > 0 ? 1 : 0) - (a.members > 0 ? 1 : 0)
-  }
+  const aPeople = mayHavePeople(a) ? 1 : 0
+  const bPeople = mayHavePeople(b) ? 1 : 0
+  if (aPeople !== bPeople) return bPeople - aPeople
   return (
     b.court_nums.length - a.court_nums.length ||
-    b.members - a.members ||
+    (b.members ?? 0) - (a.members ?? 0) ||
     a.occurrence_id - b.occurrence_id
   )
 }
 
 /**
+ * The registrant count for one row, or null when the feed did not give a usable
+ * one. `MembersCount` is not on `ScheduleItem` — it is reached through a cast,
+ * and this range read has never been exercised against live Court Reserve for
+ * it — so absent, null, and non-numeric are all "unknown", never zero.
+ */
+export function readMemberCount(item: ScheduleItem): number | null {
+  const raw = (item as { MembersCount?: number | string | null }).MembersCount
+  if (raw === undefined || raw === null || raw === '') return null
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+/**
  * Read the feed into one entry per occurrence. Cancelled rows are not
- * occurrences (`isCancelled`), and a row with no id cannot be addressed, so
- * neither can take part in a duplicate decision.
+ * occurrences (`isCancelled`), and a row whose occurrence or event id is not a
+ * positive number cannot be addressed or grouped — `Number('')` is 0, which is
+ * finite, so an empty id would otherwise become "event 0" and two such rows
+ * would read as duplicates of each other.
  */
 export function readOccurrences(
   items: readonly ScheduleItem[],
@@ -182,7 +210,7 @@ export function readOccurrences(
     if (isCancelled(item)) continue
     const occurrenceId = Number(item.Id ?? NaN)
     const eventId = Number(item.EventId ?? NaN)
-    if (!Number.isFinite(occurrenceId) || !Number.isFinite(eventId)) continue
+    if (!(occurrenceId > 0) || !(eventId > 0)) continue
     out.push({
       occurrence_id: occurrenceId,
       event_id: eventId,
@@ -190,7 +218,7 @@ export function readOccurrences(
       start: NaiveDateTime.fromISO(item.StartDateTime),
       end: NaiveDateTime.fromISO(item.EndDateTime as string),
       court_nums: parseCourtNums(item.Courts ?? '').filter((c) => knownCourts.has(c)),
-      members: Number((item as { MembersCount?: number | string | null }).MembersCount ?? 0) || 0,
+      members: readMemberCount(item),
     })
   }
   return out

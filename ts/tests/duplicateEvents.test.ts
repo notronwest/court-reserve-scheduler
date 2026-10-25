@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ScheduleItem } from '../src/cr/types'
 import { NaiveDateTime } from '../src/datetime'
-import { findDuplicateOccurrences, readOccurrences } from '../src/availability'
+import { findDuplicateOccurrences, readMemberCount, readOccurrences } from '../src/availability'
 import {
   buildDuplicateEmbed,
   localNow,
@@ -111,6 +111,98 @@ describe('finding duplicates', () => {
   })
 })
 
+describe('an unknown registrant count is never permission to cancel', () => {
+  // The ONLY thing authorising a cancel is a reported count of zero.
+  // `MembersCount` is reached through a cast and this range read has never been
+  // exercised live for it, so absent / null / non-numeric must all read as
+  // unknown. Folding any of them into zero deletes a session with people on it.
+  const keeper = () => occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4, 3], 8)
+
+  it.each([
+    ['absent', {}],
+    ['null', { MembersCount: null }],
+    ['an empty string', { MembersCount: '' }],
+    ['a non-numeric string', { MembersCount: 'n/a' }],
+    ['negative', { MembersCount: -1 }],
+  ])('reads a %s count as unknown, not zero', (_label, extra) => {
+    const row = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: undefined,
+      ...extra,
+    })
+    expect(readMemberCount(row)).toBeNull()
+    expect(readOccurrences([row], COURTS)[0].members).toBeNull()
+  })
+
+  it('still reads a real zero as zero, and a numeric string as a number', () => {
+    const zero = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0)
+    expect(readMemberCount(zero)).toBe(0)
+    const asString = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: '6',
+    })
+    expect(readMemberCount(asString)).toBe(6)
+  })
+
+  it.each([
+    ['absent', {}],
+    ['null', { MembersCount: null }],
+    ['a non-numeric string', { MembersCount: 'n/a' }],
+  ])('cancels NOTHING when the extra copy has %s count', async (_label, extra) => {
+    const mystery = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: undefined,
+      ...extra,
+    })
+    const { cr, cancelled } = fakeCr([keeper(), mystery])
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(cancelled).toEqual([])
+    expect(out[0].removable).toHaveLength(0)
+    expect(out[0].unknown).toHaveLength(1)
+    expect(out[0].cancelled).toBeUndefined()
+  })
+
+  it('an unknown count outranks a known-empty one for keeping, and the empty one still goes', async () => {
+    const mystery = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: null,
+    })
+    const knownEmpty = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [1], 0)
+    const { cr, cancelled } = fakeCr([knownEmpty, mystery])
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(out[0].keep.occurrence_id).toBe(mystery.Id)
+    expect(cancelled).toEqual([String(knownEmpty.Id)])
+  })
+
+  it('names the unknown case in the report rather than going quiet', async () => {
+    const posted: unknown[] = []
+    const rest = { postEmbed: async (p: unknown) => { posted.push(p); return 'm1' } } as never
+    const mystery = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: null,
+    })
+    const { cr } = fakeCr([keeper(), mystery])
+    await runDuplicateCleanup(cr, rest, COURTS, { days: 7, now: NOW })
+    const embed = posted[0] as { embeds: { title: string; description: string }[] }
+    expect(embed.embeds[0].title).toContain('need you')
+    expect(embed.embeds[0].description).toContain('did not say how many are signed up')
+  })
+})
+
+describe('ids that cannot be grouped or addressed', () => {
+  it('ignores a row whose event id is an empty string — Number("") is 0, which is finite', () => {
+    const items = [
+      { ...occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4]), EventId: '' as never },
+      { ...occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2]), EventId: '' as never },
+    ]
+    expect(readOccurrences(items, COURTS)).toHaveLength(0)
+    expect(findDuplicateOccurrences(items, COURTS)).toHaveLength(0)
+  })
+
+  it('ignores a row whose occurrence id is zero or empty', () => {
+    const items = [
+      { ...occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4]), Id: 0 },
+      { ...occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2]), Id: '' as never },
+    ]
+    expect(readOccurrences(items, COURTS)).toHaveLength(0)
+  })
+})
+
 describe('choosing what to keep', () => {
   it('keeps the copy with registrants and offers the empty one for removal', () => {
     const [a, b] = [
@@ -151,6 +243,7 @@ describe('choosing what to keep', () => {
     expect(r.removable).toHaveLength(0)
     expect(r.blocked).toHaveLength(1)
     expect(r.blocked[0].members).toBe(3)
+    expect(r.unknown).toHaveLength(0)
   })
 
   it('with three copies, keeps one and removes only the empty ones', () => {

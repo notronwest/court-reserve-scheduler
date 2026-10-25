@@ -30,7 +30,12 @@
  *
  * - Only an occurrence that shares BOTH its `EventId` and its exact start time
  *   with another surviving occurrence of the same event can be cancelled.
- * - Only when its registrant count is zero.
+ * - Only when Court Reserve reported its registrant count AND that count is zero.
+ *   A count the feed did not give is NOT zero: `MembersCount` is reached through
+ *   a cast and this range read has never been exercised live for it, so absent,
+ *   null and non-numeric all read as unknown and are never cancelled. Folding
+ *   unknown into empty is how a cleanup like this deletes a session with people
+ *   on it, silently and unrecoverably.
  * - Never the keeper, and never the last occurrence standing.
  * - Only future slots: a past occurrence is history and attendance is read off
  *   it (`jobs/checkinPast.ts`, `history.ts`).
@@ -65,10 +70,16 @@ export function localNow(now: Date = new Date()): NaiveDateTime {
 export interface DuplicateResolution {
   group: DuplicateGroup
   keep: EventOccurrence
-  /** Empty duplicates this run may cancel. */
+  /** Duplicates known to have NOBODY on them — the only ones this run may cancel. */
   removable: EventOccurrence[]
-  /** Copies with registrants that are NOT the keeper — these need a human. */
+  /** Copies known to have registrants that are NOT the keeper — these need a human. */
   blocked: EventOccurrence[]
+  /**
+   * Copies whose registrant count Court Reserve did not report. Never cancelled:
+   * an unknown count is not permission to delete a session, and treating it as
+   * zero is how an automated cleanup deletes a session with people on it.
+   */
+  unknown: EventOccurrence[]
   /** Set per removable occurrence once the run has tried it. */
   cancelled?: number[]
   failed?: Array<{ occurrence_id: number; error: string }>
@@ -84,7 +95,8 @@ export function resolveDuplicate(group: DuplicateGroup): DuplicateResolution {
     group,
     keep,
     removable: rest.filter((o) => o.members === 0),
-    blocked: rest.filter((o) => o.members > 0),
+    blocked: rest.filter((o) => o.members !== null && o.members > 0),
+    unknown: rest.filter((o) => o.members === null),
   }
 }
 
@@ -110,6 +122,7 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
   const removed = resolutions.flatMap((r) => r.cancelled ?? [])
   const failed = resolutions.flatMap((r) => r.failed ?? [])
   const blocked = resolutions.filter((r) => r.blocked.length > 0)
+  const unknown = resolutions.filter((r) => r.unknown.length > 0)
 
   const lines: string[] = []
   if (removed.length) {
@@ -125,7 +138,7 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
         `• ${r.group.date} ${r.group.start.formatTime()} **${r.group.name}** — ` +
           `removed the empty copy on ${courts}, kept the one on ` +
           `${r.keep.court_nums.length ? 'Court #' + r.keep.court_nums.join(', #') : 'no court'}` +
-          `${r.keep.members > 0 ? ` with ${r.keep.members} registered` : ''}.`,
+          `${r.keep.members ? ` with ${r.keep.members} registered` : ''}.`,
       )
     }
   }
@@ -136,9 +149,23 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
       const others = r.blocked.map((o) => `${o.members} on Court #${o.court_nums.join(', #')}`).join(', ')
       lines.push(
         `• ${r.group.date} ${r.group.start.formatTime()} **${r.group.name}** — ` +
-          `${r.keep.members} registered on the copy to keep (Court #${r.keep.court_nums.join(', #')}), ` +
+          `${r.keep.members ?? 'an unknown number'} registered on the copy to keep ` +
+          `(Court #${r.keep.court_nums.join(', #')}), ` +
           `and ${others}. Left alone: moving a registration between events is not something ` +
           'Court Reserve lets this system do, so somebody has to move them by hand first.',
+      )
+    }
+  }
+  if (unknown.length) {
+    if (lines.length) lines.push('')
+    lines.push(
+      `**${unknown.length} left alone — Court Reserve did not say how many are signed up:**`,
+    )
+    for (const r of unknown) {
+      lines.push(
+        `• ${r.group.date} ${r.group.start.formatTime()} **${r.group.name}** — ` +
+          `${r.unknown.length} extra cop${r.unknown.length === 1 ? 'y' : 'ies'} with no sign-up count. ` +
+          'Not removed: an unknown count is not the same as nobody, so this needs a look.',
       )
     }
   }
@@ -148,9 +175,10 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
     for (const f of failed) lines.push(`• \`${f.occurrence_id}\` — ${f.error.slice(0, 160)}`)
   }
 
-  const color = failed.length ? 0xe74c3c : blocked.length ? 0xf39c12 : 0x2ecc71
-  const title = blocked.length
-    ? `🧹 Duplicate sessions: ${removed.length} removed, ${blocked.length} need you`
+  const needsYou = blocked.length + unknown.length
+  const color = failed.length ? 0xe74c3c : needsYou ? 0xf39c12 : 0x2ecc71
+  const title = needsYou
+    ? `🧹 Duplicate sessions: ${removed.length} removed, ${needsYou} need you`
     : `🧹 Duplicate sessions: ${removed.length} removed`
   return {
     embeds: [
@@ -205,8 +233,14 @@ export async function runDuplicateCleanup(
     const where = `${r.group.date} ${r.group.start.formatTime()} ${r.group.name}`
     for (const b of r.blocked) {
       log(
-        `  ${where}: NOT touched — ${r.keep.members} registered on the copy to keep and ` +
+        `  ${where}: NOT touched — ${r.keep.members ?? '?'} registered on the copy to keep and ` +
           `${b.members} on occurrence ${b.occurrence_id}; moving a registration is not supported`,
+      )
+    }
+    for (const u of r.unknown) {
+      log(
+        `  ${where}: NOT touched — occurrence ${u.occurrence_id} has no registrant count ` +
+          'from Court Reserve; an unknown count is not permission to cancel',
       )
     }
     for (const o of r.removable) {
@@ -227,7 +261,11 @@ export async function runDuplicateCleanup(
   }
 
   const worthSaying = resolutions.some(
-    (r) => (r.cancelled?.length ?? 0) > 0 || (r.failed?.length ?? 0) > 0 || r.blocked.length > 0,
+    (r) =>
+      (r.cancelled?.length ?? 0) > 0 ||
+      (r.failed?.length ?? 0) > 0 ||
+      r.blocked.length > 0 ||
+      r.unknown.length > 0,
   )
   if (rest && !opts.dryRun && worthSaying) {
     try {
