@@ -266,11 +266,30 @@ function buildContext(
     eventCounts.set(e.id, 0)
     eventSessions.set(e.id, [])
   }
+  // EVERY event already on the live calendar counts, not just the five approved
+  // Open Play ids. The old `eventCounts.has(...)` gate here dropped every other
+  // id on the floor, so for a fixed event with its own CR `event_id` (a Level
+  // Play / Structured Play slot) constraints 3 and 3b were measured against an
+  // empty history: Pass 0 could not see the occurrence it had booked a day
+  // earlier, found the pinned court busy, took the next free one, and the slot
+  // ran as TWO instances of one session at one hour on different courts. That
+  // is what the 8:30 catch-up re-booked across the horizon after the mini's
+  // Court Reserve link came back on 2026-10-17. Both constraints say
+  // "existing + recommended combined" in policy.json; now the code does too.
+  //
+  // `existing` carries one row per COURT, so a two-court occurrence appears
+  // twice — counted raw it would spend the whole 2/day allowance on its own.
+  // Collapse to one entry per (event, start, end): an occurrence, not a court.
+  const seenOccurrences = new Set<string>()
   for (const e of existing) {
-    if (e.event_id !== undefined && eventCounts.has(e.event_id)) {
-      eventCounts.set(e.event_id, (eventCounts.get(e.event_id) ?? 0) + 1)
-      eventSessions.get(e.event_id)!.push([e.start, e.end])
-    }
+    if (e.event_id === undefined) continue
+    const key = `${e.event_id}|${e.start.ms}|${e.end.ms}`
+    if (seenOccurrences.has(key)) continue
+    seenOccurrences.add(key)
+    eventCounts.set(e.event_id, (eventCounts.get(e.event_id) ?? 0) + 1)
+    const sess = eventSessions.get(e.event_id)
+    if (sess) sess.push([e.start, e.end])
+    else eventSessions.set(e.event_id, [[e.start, e.end]])
   }
 
   // ── Existing level saturation ───────────────────────────────────────────────

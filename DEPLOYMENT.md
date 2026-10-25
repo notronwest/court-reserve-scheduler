@@ -32,7 +32,7 @@ targets:
     env: PROD
     url: n/a — books directly (auto-book), then posts a confirmation embed to Discord
     host: the machine ./setup.sh was run on (single install; not fleet-replicated)
-    config_scope: ts/.env on that machine (CRAPI_URL/KEY, Discord webhook + bot token, Anthropic API key) + policy.json + courts.json
+    config_scope: ts/.env on that machine (CRAPI_URL/KEY, Discord webhook + bot token, Anthropic API key) + policy.json + courts.json; reads the standing patterns through courtreserve-api GET /fixed-events (live only when booking — a cached or seeded list books no standing slot and alerts; --dry-run still shows it)
     verify: ./check.sh, and the logs under ~/Library/Logs/court_reserve/
     rollback: git checkout an earlier commit and re-run ./setup.sh
   - name: catch-up

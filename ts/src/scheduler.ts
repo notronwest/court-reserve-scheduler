@@ -126,14 +126,41 @@ export async function runScheduler(
     `Standing pattern: ${fixedResult.events.length} active slot(s) from ${fixedResult.source}` +
       (fixedResult.expired.length > 0 ? `, ${fixedResult.expired.length} retired (until passed)` : ''),
   )
+
+  // A run that BOOKS will not book a standing pattern it could not verify.
+  // `resolveFixedEvents` falls back to the last-good cache and then to
+  // policy.json's seed so a transient read failure does not blank the pattern —
+  // right for reading, wrong for writing: a cache written before a slot was
+  // moved or retired books the slot where it no longer runs, and the club has
+  // moved one (Tuesday → Monday) and retired six inside a fortnight. `until` is
+  // re-applied on every source, but nothing in a cache can show a MOVE. So the
+  // pattern is dropped for this run, loudly; the 8:45 pattern-gaps job books the
+  // standing sessions from a live read, and alarms when it has none, which is
+  // the rule that job has always followed (`jobs/patternGaps.ts` "Fail-closed").
+  // Previewing (--dry-run) and the --recommend path still show the fallback
+  // pattern: nothing is written, and seeing it is the point.
+  const bookingRun = !!opts.autoBook && !opts.dryRun
+  const patternUnverified = bookingRun && fixedResult.source !== 'live'
+  const patternEvents = patternUnverified ? [] : fixedResult.events
+
   const policy: Policy = {
     ...deps.policy,
-    fixed_events: { ...deps.policy.fixed_events, events: fixedResult.events },
+    fixed_events: { ...deps.policy.fixed_events, events: patternEvents },
   }
-  if (fixedResult.alert) {
-    log(fixedResult.alert)
+
+  const unverifiedAlert = patternUnverified
+    ? `standing pattern came from ${fixedResult.source}, not a live read — ` +
+      `its ${fixedResult.events.length} slot(s) were NOT booked on this run. ` +
+      'The 8:45 pattern-gaps job books standing sessions from a live read; ' +
+      'check courtreserve-api GET /fixed-events.'
+    : undefined
+  if (unverifiedAlert) log(unverifiedAlert)
+
+  const fixedAlert = [fixedResult.alert, unverifiedAlert].filter(Boolean).join(' · ') || undefined
+  if (fixedAlert) {
+    if (fixedResult.alert) log(fixedResult.alert)
     try {
-      await sendFailureAlert(deps.rest, targetDate, 'Fixed events read failed', fixedResult.alert)
+      await sendFailureAlert(deps.rest, targetDate, 'Fixed events read failed', fixedAlert)
     } catch (alertErr) {
       log(`Alert could not be posted: ${alertErr instanceof Error ? alertErr.message : String(alertErr)}`)
     }

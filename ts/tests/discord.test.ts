@@ -475,11 +475,17 @@ describe('processMessage routing', () => {
 // ── executeBookings / executeMove ──────────────────────────────────────────────
 
 describe('executeBookings', () => {
-  it('multi-court booking sets extra courts via setCourts', async () => {
+  // A two-court session is ONE /book call naming both courts, never a book plus
+  // a second widening call whose result nobody reads (courtreserve-api #409).
+  it('books a multi-court session as one occurrence holding every court', async () => {
     const posted: Posted = { embeds: [], messages: [] }
+    const bookCalls: unknown[] = []
     const setCourtsCalls: unknown[] = []
     const cr = {
-      book: async () => ({ success: true, occurrence_id: 555 }),
+      book: async (r: unknown) => {
+        bookCalls.push(r)
+        return { success: true, occurrence_id: 555 }
+      },
       setCourts: async (r: unknown) => {
         setCourtsCalls.push(r)
         return { success: true }
@@ -504,10 +510,41 @@ describe('executeBookings', () => {
       { target_date: '7/22/2026', recommendations: [multi] },
       [0],
     )
-    expect(setCourtsCalls).toHaveLength(1)
-    expect((setCourtsCalls[0] as { court_ids: string[] }).court_ids).toEqual(['52351', '52352'])
-    // event_id must be forwarded — the service needs it to open the right grid.
-    expect((setCourtsCalls[0] as { event_id: string }).event_id).toBe('1931656')
+    expect(bookCalls).toHaveLength(1)
+    const req = bookCalls[0] as { court_ids: string[]; max_people: number; event_id: string }
+    expect(req.court_ids).toEqual(['52351', '52352'])
+    expect(req.max_people).toBe(8)
+    expect(req.event_id).toBe('1931656')
+    // No follow-up widening call to half-apply and then swallow.
+    expect(setCourtsCalls).toHaveLength(0)
+  })
+
+  it('books a single-court session with a one-element court list and no cap', async () => {
+    const posted: Posted = { embeds: [], messages: [] }
+    const bookCalls: unknown[] = []
+    const cr = {
+      book: async (r: unknown) => {
+        bookCalls.push(r)
+        return { success: true, occurrence_id: 556 }
+      },
+    }
+    const ctx = makeCtx({ rest: makeRest(posted), cr })
+    const deps = {
+      rest: ctx.rest,
+      cr: ctx.cr,
+      state: ctx.state,
+      saveState: () => {},
+      clearPending: () => {},
+    }
+    await executeBookings(
+      deps as never,
+      { target_date: '7/22/2026', recommendations: [{ ...REC_DICT, max_participants: 0 }] },
+      [0],
+    )
+    expect(bookCalls).toHaveLength(1)
+    const req = bookCalls[0] as { court_ids: string[]; max_people?: number }
+    expect(req.court_ids).toEqual(['52351'])
+    expect(req.max_people).toBeUndefined()
   })
 })
 
