@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fetchHistory, pruneOld } from '../src/jobs/fetchHistory'
-import { buildCtx, analyseDay, planChanges, findFreeCourt } from '../src/jobs/fixImbalance'
+import { buildCtx, analyseDay, planChanges, findFreeCourt, executeChanges } from '../src/jobs/fixImbalance'
 import { buildWaitlistCtx, buildProposal, buildAlertEmbed } from '../src/jobs/checkWaitlists'
 import { runCheckinPast } from '../src/jobs/checkinPast'
 import { NaiveDateTime } from '../src/datetime'
@@ -198,5 +198,43 @@ describe('runCheckinPast', () => {
     const s = await runCheckinPast(cr, { policy, execute: true })
     expect(s.occurrences_processed).toBe(2)
     expect(s.members_checked_in).toBe(6) // 3 per occurrence × 2
+  })
+})
+
+// `executeChanges` had no test at all, which is how its cancel went years without
+// ever working: it sent only `res_id`, and `POST /cancel` needs the parent event
+// and the date too, so every attempt came back 422. One test at the boundary.
+describe('fixImbalance executeChanges', () => {
+  it('cancels with the occurrence, the parent event AND the date', async () => {
+    const sent: Array<Record<string, unknown>> = []
+    const cr = {
+      cancel: async (req: Record<string, unknown>) => {
+        if (!req.event_id || !req.date) {
+          throw new Error(`POST /cancel -> 422: event_id and date are required`)
+        }
+        sent.push(req)
+        return { success: true }
+      },
+      book: async () => ({ success: true, occurrence_id: 1 }),
+    } as never
+
+    await executeChanges(
+      cr,
+      [
+        {
+          action: 'cancel',
+          date_str: '12/9/2026',
+          dow: 'Wednesday',
+          event_id: 1672774,
+          occurrence_id: 63119172,
+          description: 'Cancel extra AI at 5:00 PM (Court #1)',
+        },
+      ] as never,
+    )
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0].res_id).toBe('63119172')
+    expect(sent[0].event_id).toBe('1672774')
+    expect(sent[0].date).toBe('12/9/2026')
   })
 })

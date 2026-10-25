@@ -5,6 +5,52 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-25 — EVERY cancel this repo sent was a 422. Found by the first live run.
+
+The first live run of the duplicate-merge one-off (`ts/scripts/oneoff-live-duplicate-merge.ts`,
+on the mini) booked its two test occurrences, failed at registration on the money gate, and
+then **could not clean up** — both occurrences stayed on the live calendar. That second
+failure is the real find.
+
+**`POST /cancel` needs three facts, not one:** the occurrence id, the parent `event_id` (to
+open the occurrences grid) and the `date` (to name the service's screenshot). This repo's
+`CancelRequest` carried only `res_id`. The service's own `CancelReq` docstring names us
+exactly: *"`res_id` is kept as an accepted spelling of `occurrence_id` so the existing
+TypeScript client (`CancelRequest { res_id }`) does not break — it now gets a clear 422
+asking for the two missing fields instead of a 500."* So:
+
+- the duplicate cleanup merged earlier today **could not remove anything** — removable copies
+  and merged-and-emptied copies alike would have 422'd on every run;
+- `jobs/fixImbalance.ts` has **never once cancelled** an extra Advanced Intermediate session,
+  for as long as that job has existed.
+
+**Why 249 tests missed it.** The job-level doubles accepted `{ res_id }` — they were shaped
+like the assumption under test, not like the endpoint. A double that mirrors the code's belief
+cannot falsify it. Fixed at three levels:
+
+1. `cr/types.ts` — `CancelRequest` now carries `res_id`, `event_id`, `date`, optional
+   `dry_run`, with the history in the doc comment.
+2. All three call sites pass them: both cancels in `jobs/duplicateEvents.ts` (the removable
+   path and the merge's emptied-copy path) and `jobs/fixImbalance.ts`.
+3. The contract is asserted where it can't drift: a new `cr-client.test.ts` case reads the
+   body actually put on the wire for `/cancel`; the `duplicateEvents` double now **throws 422**
+   when `event_id` or `date` is missing (reverting the source fix makes 4 tests fail —
+   verified); and `executeChanges` in the imbalance job, which had **no test at all**, now has
+   one. 251 pass.
+
+**Still open from that run, and not this fix:** registration refused with *"what this would
+charge cannot be read — say what this member pays, or raise max_cost deliberately to allow a
+charge"*. The service could not read the event's dearest drop-in at all, so it would not
+register anybody blind. That gate is correct and is NOT being worked around: asserting a price
+nobody can read, on a real member's account, is the money rule. The merge path itself does not
+have this problem — `move_registrant` reads what the member actually paid off the source roster
+row and passes it as `known_cost`. So the test's SETUP needs the price question answered;
+the behaviour under test does not.
+
+Two test occurrences of Co-ed Advanced Open Play (63119172, 63119176) were left on 12/9/2026
+20:00 on courts 1 and 2 and need removing — which the fixed cancel can now do.
+
+---
 ## 2026-10-25 — Duplicate sessions with players on both copies are now MERGED
 
 Ron corrected the surface reading: *"There IS a way to reschedule players from one session

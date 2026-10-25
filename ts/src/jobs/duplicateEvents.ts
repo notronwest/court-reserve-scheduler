@@ -240,7 +240,11 @@ export async function mergeDuplicate(
   }
 
   try {
-    await cr.cancel({ res_id: String(source.occurrence_id) })
+    await cr.cancel({
+      res_id: String(source.occurrence_id),
+      event_id: String(r.group.event_id),
+      date,
+    })
     r.merged = [...(r.merged ?? []), { occurrence_id: source.occurrence_id, moved }]
     r.cancelled = [...(r.cancelled ?? []), source.occurrence_id]
     log(
@@ -425,7 +429,11 @@ export async function runDuplicateCleanup(
         continue
       }
       try {
-        await cr.cancel({ res_id: String(o.occurrence_id) })
+        await cr.cancel({
+          res_id: String(o.occurrence_id),
+          event_id: String(r.group.event_id),
+          date: r.group.date,
+        })
         r.cancelled = [...(r.cancelled ?? []), o.occurrence_id]
         log(`  ${where}: ✅ cancelled empty occurrence ${o.occurrence_id}`)
       } catch (e) {
