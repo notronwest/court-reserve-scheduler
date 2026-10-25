@@ -1326,3 +1326,18 @@ Python) remains. Plan: [`docs/TS-REWRITE-PLAN.md`](docs/TS-REWRITE-PLAN.md).
   surface is the point of it, and only `read` is ever cache-eligible. It pays ships 1 and 2 and gets
   no cache. An honest cost, not an oversight.
 - `.wmpc/capability-registry/` is a byte-for-byte copy of daemon's canonical validator; fix it there.
+
+## 2026-10-25 — A back-dated anchor is a correct row, and now a tested one (D-0224)
+
+D-0202 created `anchor_date` and never said whether it may fall before the event's own start.
+Four consecutive design verdicts on club-dashboard#676 asked for that sentence; it is now
+D-0224, and this repo holds the half that proves the arithmetic.
+
+`onWeekStatus` is pure parity — same weekday, on or after the anchor, whole weeks divisible by
+the cadence — so a series that has been meeting for months is described by naming a Wednesday
+it really ran on, and that Wednesday is in the past. The new case in
+`ts/tests/everyOtherWeek.test.ts` pins three things: an anchor back-dated four weeks books
+**exactly the same** Wednesdays as the current one across the whole window; an anchor
+back-dated by one week books the OTHER Wednesdays, which is why a parity is never guessed at;
+and nothing is added before the pattern's own window. No source change — the predicate was
+already right. What was missing was the statement that it is, where a session can find it.
