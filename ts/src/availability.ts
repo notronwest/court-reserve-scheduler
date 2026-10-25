@@ -112,3 +112,118 @@ export function describeConflict(o: OccupiedSlot): string {
   const label = o.name || 'an existing booking'
   return `Court #${o.court_num} ${o.start.formatTime()} – ${o.end.formatTime()} ${label}`
 }
+
+// ── Duplicate occurrences of one event at one hour ────────────────────────────
+//
+// Ron, 2026-10-24: "There are a lot of double booked courts and same sessions
+// booked at the same time (e.g Advanced Open Play on 2 courts but two different
+// instances)." The recommender no longer creates these, but the ones already on
+// the calendar need finding, and the standing-pattern scan can only see the
+// slots that are IN the pattern — keyed on the club's name for the slot, which
+// is a different question from "is any event on the calendar booked twice".
+// This keys on what Court Reserve itself reports: the same `EventId` at the same
+// `StartDateTime`.
+
+/** One occurrence of an event, as the schedule feed reports it. */
+export interface EventOccurrence {
+  /** The reservation/occurrence id — what a cancel is addressed to. */
+  occurrence_id: number
+  event_id: number
+  name: string
+  start: NaiveDateTime
+  end: NaiveDateTime
+  court_nums: number[]
+  /** Registrants Court Reserve reports for this occurrence. */
+  members: number
+}
+
+/** Several occurrences of ONE event at ONE start time: the duplicate. */
+export interface DuplicateGroup {
+  event_id: number
+  name: string
+  /** `M/D/YYYY`, for messages and for addressing a day. */
+  date: string
+  start: NaiveDateTime
+  /** Every occurrence at this slot, the one to keep FIRST. */
+  occurrences: EventOccurrence[]
+}
+
+/**
+ * Which occurrence survives, given the rest are candidates to remove.
+ *
+ * An occurrence with registrants outranks an empty one, because removing it
+ * means moving people. Among equals, the one holding more courts is the
+ * healthier booking, and the lowest occurrence id breaks the tie so two runs
+ * over the same calendar never disagree about which one to keep.
+ */
+export function rankForKeeping(a: EventOccurrence, b: EventOccurrence): number {
+  if ((b.members > 0 ? 1 : 0) !== (a.members > 0 ? 1 : 0)) {
+    return (b.members > 0 ? 1 : 0) - (a.members > 0 ? 1 : 0)
+  }
+  return (
+    b.court_nums.length - a.court_nums.length ||
+    b.members - a.members ||
+    a.occurrence_id - b.occurrence_id
+  )
+}
+
+/**
+ * Read the feed into one entry per occurrence. Cancelled rows are not
+ * occurrences (`isCancelled`), and a row with no id cannot be addressed, so
+ * neither can take part in a duplicate decision.
+ */
+export function readOccurrences(
+  items: readonly ScheduleItem[],
+  knownCourts: ReadonlySet<number>,
+): EventOccurrence[] {
+  const out: EventOccurrence[] = []
+  for (const item of items) {
+    if (!item.StartDateTime || !item.EndDateTime) continue
+    if (isCancelled(item)) continue
+    const occurrenceId = Number(item.Id ?? NaN)
+    const eventId = Number(item.EventId ?? NaN)
+    if (!Number.isFinite(occurrenceId) || !Number.isFinite(eventId)) continue
+    out.push({
+      occurrence_id: occurrenceId,
+      event_id: eventId,
+      name: (item.EventName ?? '').trim(),
+      start: NaiveDateTime.fromISO(item.StartDateTime),
+      end: NaiveDateTime.fromISO(item.EndDateTime as string),
+      court_nums: parseCourtNums(item.Courts ?? '').filter((c) => knownCourts.has(c)),
+      members: Number((item as { MembersCount?: number | string | null }).MembersCount ?? 0) || 0,
+    })
+  }
+  return out
+}
+
+/**
+ * Every slot where one event has more than one occurrence, each group ordered
+ * with the keeper first. Groups are returned in calendar order so a report and
+ * a cleanup walk the days the same way.
+ */
+export function findDuplicateOccurrences(
+  items: readonly ScheduleItem[],
+  knownCourts: ReadonlySet<number>,
+): DuplicateGroup[] {
+  const groups = new Map<string, EventOccurrence[]>()
+  for (const occ of readOccurrences(items, knownCourts)) {
+    const key = `${occ.event_id}|${occ.start.ms}`
+    const arr = groups.get(key)
+    if (arr) arr.push(occ)
+    else groups.set(key, [occ])
+  }
+
+  const out: DuplicateGroup[] = []
+  for (const occurrences of groups.values()) {
+    if (occurrences.length < 2) continue
+    const ordered = [...occurrences].sort(rankForKeeping)
+    out.push({
+      event_id: ordered[0].event_id,
+      name: ordered[0].name,
+      date: ordered[0].start.formatDate(),
+      start: ordered[0].start,
+      occurrences: ordered,
+    })
+  }
+  return out.sort((a, b) => a.start.ms - b.start.ms)
+}

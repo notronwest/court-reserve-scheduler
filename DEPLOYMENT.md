@@ -60,11 +60,11 @@ targets:
     trigger: launchd com.whitemountain.check-waitlists — 9:00, 11:00, 13:00, 15:00, 17:00 daily
     source: ts/ops/run-check-waitlists.sh → ts/src/jobs/checkWaitlists.ts
     env: PROD
-    url: n/a
+    url: n/a — TWO halves. (1) court expansion: PROPOSES to Discord, a human taps ✅, the listener executes. (2) duplicate-session cleanup (ts/src/jobs/duplicateEvents.ts): CANCELS a duplicate occurrence with zero registrants itself, unattended, and posts what it did; a slot where more than one copy has registrants is reported and left alone. This is the only unattended Court Reserve DELETE in the repo — `--dry-run` covers both halves, `--no-dedupe` disables the cleanup without touching expansion
     host: same machine
     config_scope: same .env
-    verify: the job's log under ~/Library/Logs/court_reserve/
-    rollback: launchctl unload the plist
+    verify: the job's log under ~/Library/Logs/court_reserve/ — the cleanup logs one line per duplicated slot and names every occurrence id it cancelled
+    rollback: launchctl unload the plist; to keep expansion but stop the cleanup, add --no-dedupe to ts/ops/run-check-waitlists.sh
   - name: fetch-history
     kind: mac-mini-launchd
     trigger: launchd com.whitemountain.fetch-history — weekly, Monday 7:00 AM

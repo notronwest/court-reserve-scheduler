@@ -5,6 +5,59 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-25 — Duplicate sessions are now REMOVED, not just reported (Ron's direction)
+
+Ron, 2026-10-24: *"add a check in that for any duplicate events running at the same time on
+the same day and delete one of them if they don't have any registrants -- if both have
+registrants keep one and move the registrants over to the one that is kept"*. His directive
+is the approval for the stop-list rows a cancel engages (D-0198, D-0204, D-0207 rows 1 and
+4); not re-asked.
+
+**Done — the removal half.** `ts/src/jobs/duplicateEvents.ts`, wired into
+`runCheckWaitlists` so it rides the 9/11/13/15/17 clock. Keyed on the same `EventId` at the
+same `StartDateTime` (Court Reserve's own report), which is deliberately NOT the
+gap-filler's key — that one matches the club's name for a standing slot against the CR
+event title, so it sees only pattern slots, while this sees any event booked twice. Keeper
+chosen by `rankForKeeping` (registrants, then courts, then lowest occurrence id, so two runs
+never disagree); every other copy at that slot with `MembersCount === 0` is cancelled via
+`POST /cancel`. Guards: never the keeper, never the last one standing, never a past slot
+(attendance is read off those), never a cancelled row, and a failed schedule read THROWS
+rather than reading an unreadable calendar as duplicate-free. The registrant-count signal
+and the "never one with registered members" rule are both reused from
+`jobs/fixImbalance.ts`, which has made the same judgement about an extra Advanced
+Intermediate since it was written. Runs first in the job, because expanding a slot onto
+another court while the same session sits on it twice would widen the wrong copy, and the
+court a removal frees may be the one an expansion then wants. A cleanup failure is caught
+and logged rather than costing the club its time-sensitive court expansions.
+
+Shared primitive in `ts/src/availability.ts`: `readOccurrences`, `findDuplicateOccurrences`,
+`rankForKeeping`. `patternGaps`'s own duplicate detection was left alone — different key,
+and it is merged reviewed code.
+
+**NOT done — the registrant-move half, because nothing can do it.** The Court Reserve
+service exposes no register, unregister or transfer call: the whole client surface is
+schedule / fixed-events / waitlists / checkin-scan / checkin / book / move / cancel /
+courts / fix-court (`ts/src/cr/client.ts`). A future occurrence's registrant *names* are not
+readable either — the schedule feed carries a count (`MembersCount`), and `/checkin/scan`
+covers past occurrences only. So a slot where more than one copy has registrants is
+detected, named in Discord, and left exactly as it is; cancelling it would drop those
+people's bookings. That half needs a new endpoint in `courtreserve-api` first.
+
+**Also unverified and worth knowing:** `POST /cancel` has never been exercised against live
+Court Reserve, and whether a cancel emails the occurrence's registrants is unestablished.
+The empty-copy path cancels only occurrences with zero registrants, so there is nobody to
+email on that path — which is why the risk sits almost entirely on the half that is not
+built.
+
+Tests: `ts/tests/duplicateEvents.test.ts`, 19 cases — the whole truth table, weighted to the
+cases that must NOT cancel (both-have-registrants, past slot, cancelled row, missing id, dry
+run, failed cancel recorded as failed, unreadable calendar throws). Full suite 224 pass,
+`tsc --noEmit` clean. Nothing in the session touched live Court Reserve.
+
+`CLAUDE.md` and `DEPLOYMENT.md` updated in the same change — the waitlist target is now the
+only unattended Court Reserve delete in the repo, and says so.
+
+---
 ## 2026-10-24 — Duplicate standing sessions: one session booked twice at one hour
 
 **Symptom (Ron, evening of 10/24):** "There are a lot of double booked courts and same

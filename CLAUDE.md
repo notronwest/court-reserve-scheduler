@@ -24,7 +24,7 @@ path (`ts/ops/rollback.sh`), kept working but not what runs.
 | `com.whitemountain.scheduler` | Daily 8:00 AM | LLM recommendations → **books directly** (auto-book) → Discord confirmation + `logs/booking_log_<date>.json` |
 | `com.whitemountain.listener` | Always-on | Polls Discord every 3s — handles `!book`/`!move`/`!schedule`/`!help` and waitlist expansions |
 | `com.whitemountain.fetch-history` | Mondays 7:00 AM | Fetches 3 months of attendance history |
-| `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | Alerts on waitlists that can be expanded to another court |
+| `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | Alerts on waitlists that can be expanded to another court **and removes duplicate sessions** (see below) |
 | `com.whitemountain.checkin` | Mondays 6:00 AM | Checks in players on past events so history stays accurate |
 
 The daily job **no longer waits for Discord approval**. `pending_approval.json`
@@ -135,14 +135,40 @@ re-book, while the cancelled instance's court goes back to being usable. Cancell
 **only** instance of a standing slot does not retire it — the gap-filler books it again
 the next morning, by design. A standing slot is retired by stamping its `until`.
 
-**A session booked twice at one hour is reported, never repaired.** The gap-filler counts
-every occurrence at a slot, not the first one Court Reserve happens to list — taking the
-first made the outcome depend on feed order, and matching a one-court duplicate ahead of
-the healthy two-court instance read as a court shortage, so the fixer widened the
-*duplicate* onto a third court. A slot with more than one occurrence now resolves as
-`duplicate`: logged, named in the Discord report as booked twice rather than missing,
-counted by `needsAttention` so the run exits non-zero. Removing a copy is a Court Reserve
-cancel and Ron's call, so nothing books or widens against that slot until it is one again.
+**A session booked twice at one hour is never widened, and an EMPTY copy is removed.**
+The 8:45 gap-filler counts every occurrence at a slot, not the first one Court Reserve
+happens to list — taking the first made the outcome depend on feed order, and matching a
+one-court duplicate ahead of the healthy two-court instance read as a court shortage, so
+the fixer widened the *duplicate* onto a third court. A slot with more than one occurrence
+resolves there as `duplicate`: logged, named in the Discord report as booked twice rather
+than missing, counted by `needsAttention`, and never booked or widened against.
+
+The **removal** is the waitlist job's, five times a day (`ts/src/jobs/duplicateEvents.ts`),
+on Ron's direction, 2026-10-24: *"delete one of them if they don't have any registrants --
+if both have registrants keep one and move the registrants over to the one that is kept"*.
+
+- **Keyed on Court Reserve's own report:** the same `EventId` at the same `StartDateTime`.
+  That is a different question from the gap-filler's, which matches the *club's* name for a
+  standing slot against Court Reserve's event title — so it can only see pattern slots,
+  while this sees any event booked twice.
+- **Keeper:** registrants first, then more courts, then the lowest occurrence id so two
+  runs over one calendar never disagree (`rankForKeeping` in `availability.ts`).
+- **Removed:** every OTHER copy at that slot whose registrant count is zero, via
+  `POST /cancel`. Never the keeper, never the last one standing, never a past slot
+  (attendance is read off those), never a cancelled row. This is the same judgement
+  `jobs/fixImbalance.ts` has always made about an extra session — "never one with
+  registered members".
+- **NOT removed, and reported instead:** a slot where more than one copy has registrants.
+  **Moving a registration between events is not something this system can do** — the Court
+  Reserve service exposes no register, unregister or transfer call, and a future
+  occurrence's registrant *names* are not readable either (the schedule feed carries only a
+  count; `/checkin/scan` covers past occurrences only). So the second half of that
+  direction needs a new capability in `courtreserve-api` before it can exist. Until then
+  those slots are named in Discord and left exactly as they are, because cancelling one
+  would drop those people's bookings.
+- **A cancel is destructive and not undoable by the same path**, so every removal is logged
+  with its occurrence id and posted to Discord. `--dry-run` reports without cancelling;
+  `--no-dedupe` turns the cleanup off and leaves court expansion running.
 
 Skill levels: Beginner · Advanced Beginner · Intermediate · Advanced Intermediate · Advanced
 
