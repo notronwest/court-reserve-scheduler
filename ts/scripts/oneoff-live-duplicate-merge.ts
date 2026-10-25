@@ -68,7 +68,7 @@ import type { ScheduleItem } from '../src/cr/types'
  * occurrences created by a typo's worth of version skew. A script that writes to
  * Court Reserve does not get to guess what it was asked to do.
  */
-const KNOWN_FLAGS = new Set(['--confirm', '--merge-only', '--cancel'])
+const KNOWN_FLAGS = new Set(['--confirm', '--merge-only', '--setup-only', '--cancel'])
 {
   const unknown = process.argv
     .slice(2)
@@ -115,6 +115,18 @@ const CANCEL_ARG = (() => {
  */
 const MERGE_ONLY = process.argv.includes('--merge-only')
 
+/**
+ * `--setup-only` — book the two copies and stop, leaving only the sign-ups to do
+ * by hand.
+ *
+ * Booking works (it has, four times); it is only the SIGN-UP that the service
+ * refuses, because it wants the caller to declare a price and the caller is not
+ * in a position to know one. So this does the half that works and prints the two
+ * occurrence ids plus the exact next command, which turns the manual part from
+ * "create two occurrences and sign two people up" into "sign two people up".
+ */
+const SETUP_ONLY = process.argv.includes('--setup-only')
+
 /** Co-ed Advanced Open Play by default — a real event, so the duplicate is real. */
 const EVENT_ID = Number(process.env.CRTEST_EVENT_ID ?? 1633147)
 const DAYS_AHEAD = Number(process.env.CRTEST_DAYS_AHEAD ?? 45)
@@ -155,7 +167,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
  * the output was indistinguishable from the fix not working. The banner now says
  * which revision actually ran, so one pasted output settles it instead of a guess.
  */
-const SCRIPT_REVISION = 'r5 — every path says which revision it is'
+const SCRIPT_REVISION = 'r6 — --setup-only books the two copies and stops'
 
 /** The commit this file is being run from, for the same reason. Best effort. */
 function gitDescribe(): string {
@@ -305,6 +317,13 @@ async function main(): Promise<void> {
     log('  mode       MERGE ONLY — books nothing, registers nobody; expects the')
     log('             duplicate and its players to be on the calendar already')
   }
+  if (SETUP_ONLY) {
+    log('  mode       SETUP ONLY — books the two copies and stops, so the sign-ups')
+    log('             can be done by hand where the membership rate applies')
+  }
+  if (MERGE_ONLY && SETUP_ONLY) {
+    throw new TestFailed('--merge-only and --setup-only are opposites; pass one')
+  }
 
   if (!CONFIRMED) {
     log('\nPlan only. Re-run with --confirm to write to the live Court Reserve.')
@@ -422,6 +441,28 @@ async function main(): Promise<void> {
       survivor = occA
       log(`   duplicate confirmed: ${occA} and ${occB}`)
 
+      if (SETUP_ONLY) {
+        log('\n── 5-9. Stopping here, as asked. The two copies are on the calendar.')
+        log('')
+        log(`   Sign ${memberA.name} up on occurrence ${occA} (Court #${COURT_A})`)
+        log(`   Sign ${memberB.name} up on occurrence ${occB} (Court #${COURT_B})`)
+        log('   in Court Reserve, where it shows the price and applies the membership rate.')
+        log('')
+        log('   Then run the merge:')
+        log('     npx tsx scripts/oneoff-live-duplicate-merge.ts --merge-only --confirm')
+        log('')
+        log('   Or, to undo this setup and walk away:')
+        log(
+          `     CRTEST_CANCEL_DATE=${date} npx tsx scripts/oneoff-live-duplicate-merge.ts ` +
+            `--cancel ${occA},${occB}`,
+        )
+        // Nothing to tear down: leaving the two copies in place IS the point.
+        occA = undefined
+        occB = undefined
+        survivor = undefined
+        return
+      }
+
       step(5, `Register ${memberA.name} on ${occA} and ${memberB.name} on ${occB}`)
       for (const [res, member] of [
         [occA, memberA],
@@ -508,6 +549,12 @@ async function main(): Promise<void> {
     log(`   one copy left (${survivor}) holding ${finalRoster.map((r) => r.member_name).join(', ')}`)
     log('\n✅ PASS — the duplicate was removed and both players ended up on the copy kept.')
   } finally {
+    // In --setup-only there is deliberately nothing to undo, and printing a
+    // teardown banner right under "the two copies are on the calendar" read as
+    // though it had just removed them.
+    if (SETUP_ONLY && registered.length === 0 && survivor == null && occA == null && occB == null) {
+      return
+    }
     step(9, 'Clean up after the test')
     const stuck: string[] = []
     for (const r of registered) {
