@@ -58,6 +58,30 @@ import { runDuplicateCleanup } from '../src/jobs/duplicateEvents'
 import { findDuplicateOccurrences, readOccurrences } from '../src/availability'
 import type { ScheduleItem } from '../src/cr/types'
 
+/**
+ * Reject a flag this copy does not understand, BEFORE doing anything.
+ *
+ * The 2026-10-25 run passed `--merge-only` to a checkout that predated it. An
+ * unrecognised flag was simply ignored, so instead of the read-mostly path the
+ * operator asked for, the script silently took the one that BOOKS — two live
+ * occurrences created by a typo's worth of version skew. A script that writes to
+ * Court Reserve does not get to guess what it was asked to do.
+ */
+const KNOWN_FLAGS = new Set(['--confirm', '--merge-only', '--cancel'])
+{
+  const unknown = process.argv
+    .slice(2)
+    .filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a))
+  if (unknown.length) {
+    console.error(
+      `❌ FAIL — this copy of the script does not understand ${unknown.join(', ')}. ` +
+        `It knows ${[...KNOWN_FLAGS].join(', ')}. Nothing was touched.\n` +
+        '   You are probably on an older commit — pull the branch and re-run.',
+    )
+    process.exit(1)
+  }
+}
+
 const CONFIRMED = process.argv.includes('--confirm')
 
 /**
