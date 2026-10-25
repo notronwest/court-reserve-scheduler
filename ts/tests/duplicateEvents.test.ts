@@ -100,11 +100,19 @@ function fakeCr(items: ScheduleItem[], opts: FakeOpts = {}) {
         rosters[req.to_res_id] = [...(rosters[req.to_res_id] ?? []), req.org_member_id]
         return { ok: true }
       },
-      cancel: async ({ res_id }: { res_id: string }) => {
-        if (opts.failCancel?.includes(Number(res_id))) {
+      // Shaped like the REAL endpoint, which needs the parent event and the date
+      // as well as the occurrence. The earlier double took `{ res_id }` alone, so
+      // 44 tests passed while every live cancel came back 422.
+      cancel: async (req: { res_id: string; event_id?: string; date?: string }) => {
+        if (!req.event_id || !req.date) {
+          throw new Error(
+            `POST /cancel -> 422: event_id and date are required; got ${JSON.stringify(req)}`,
+          )
+        }
+        if (opts.failCancel?.includes(Number(req.res_id))) {
           throw new Error('503 Court Reserve browser busy')
         }
-        cancelled.push(res_id)
+        cancelled.push(req.res_id)
         return { success: true }
       },
     } as never,
