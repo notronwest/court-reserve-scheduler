@@ -1052,6 +1052,21 @@ rail and the execution guarantee); [[D-0075]] (a ruling belongs in the register)
 (the sibling store-write ruling, same drain-shaped answer). Reuses `event_move_drain`'s host
 gate, lock class and claim statements by import, not by copy ([[D-0049]]).
 
+---
+
+**Narrowed by D-0221 (2026-10-25) — read the two together.** Two sentences above do **not** hold
+for a move of the DAY or the TIME: rule 1's *"no browser, no Court Reserve write"* and rule 3's
+*"a pattern edit moves **no** booked occurrence"*. After the pattern row verifies, the drain now
+opens a browser once and retires what the scheduler already booked on the slot the pattern left —
+because on 2026-10-25 "each is moved on its own" turned out to mean nobody moved them, and one
+Wednesday carried the same clinic twice.
+
+Everything else here stands unchanged: both sentences still hold for a **retirement** and for a
+**courts- or capacity-only** change, and rule 2 — `recurrence` stays out of `events_create`'s
+`EDITABLE_FIELDS` — is untouched and still the live forbid. That is why this record is `active`
+and not `superseded`: filing it as history would file that forbid as history too. The decision
+text above is unedited, as the register requires.
+
 ### D-0112 — Money-path code has a named author and a named gate, never a bar; an owner ruling is recorded in code beside the rule it changes
 
 *2026-10-09 · scope: `agents/builder/PROMPT.md, agents/reviewer/ROLE.md, agents/reviewer/PROMPT.md, qbo_api/payout_split.py, qbo_api/migrations/**` · source: daemon#306 / cos_approvals fcf9a68a — the payout catch-up (`b3d7f4b0`) sat at `exec_status='failed'` reading "needs a payout_split rules change (money-path code, barred by the Builder rule)", and the question came to daemon as "who may change the payout_split rules". There is no such bar; the path was already written, and the change had already shipped.*
