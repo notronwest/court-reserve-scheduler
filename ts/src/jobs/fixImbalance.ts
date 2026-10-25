@@ -12,6 +12,7 @@ import { CourtReserveClient } from '../cr/client'
 import type { ScheduleItem } from '../cr/types'
 import { loadPolicy, type Policy } from '../policy'
 import { NaiveDateTime } from '../datetime'
+import { isCancelled } from '../availability'
 
 const INT_TARGET = 2
 const INT_TIMES = [9, 11, 13, 15]
@@ -120,9 +121,7 @@ export function analyseDay(ctx: Ctx, dateStr: string, items: ScheduleItem[]): Da
     if (!item.StartDateTime) continue
     const start = NaiveDateTime.fromISO(item.StartDateTime)
     if (start.formatYmd() !== ymd) continue
-    const name = String(item.EventName ?? '').toLowerCase()
-    const resType = String((item as { ReservationType?: string }).ReservationType ?? '').toLowerCase()
-    if (name.includes('cancel') || resType.includes('cancel')) continue
+    if (isCancelled(item)) continue
     const rec: DayEvent = {
       event_name: String(item.EventName ?? ''),
       start,

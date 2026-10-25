@@ -25,6 +25,7 @@
  * | missing, event known, court free | **booked** — one occurrence with ALL its courts |
  * | missing, pattern has no Court Reserve event | alarm — nothing can be booked against it |
  * | missing, every court busy | alarm — the club is full, a human decides what gives |
+ * | present TWICE at one hour (the duplicate bug) | alarm — reported, never widened or booked |
  * | present but short of courts, one free | **widened** to the full court count |
  * | present but short, nothing free | the cap is scaled instead, and it is reported |
  * | present, right courts | silent |
@@ -47,7 +48,7 @@ import { sendPatternGapReport } from '../discord/notify'
 import { NaiveDateTime } from '../datetime'
 import { resolveFixedEvents } from '../fixedEvents'
 import { COURTS } from '../recommender'
-import { freeCourts, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
+import { freeCourts, isCancelled, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
 import { isOnWeek, type FixedEvent, type Policy } from '../policy'
 
 export type GapStatus =
@@ -58,6 +59,8 @@ export type GapStatus =
   | 'no_event'
   | 'no_court'
   | 'failed'
+  /** More than one occurrence of this session at this hour — reported, never acted on. */
+  | 'duplicate'
 
 export interface PatternGap {
   date: string // M/D/YYYY
@@ -68,6 +71,8 @@ export interface PatternGap {
   event_id?: number
   wants_courts: number
   has_courts: number
+  /** Occurrences of this session found at this hour. >1 is the duplicate bug. */
+  instances?: number
   status: GapStatus
   /** Court numbers booked or added, when something was done. */
   courts?: number[]
@@ -149,20 +154,36 @@ export function scanPatternGaps(
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
+    // A cancelled reservation is not the session being present — it is the
+    // session being gone, which is exactly what this job exists to notice.
     const onThisDate = items.filter(
-      (i) => i.StartDateTime && NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd,
+      (i) =>
+        i.StartDateTime &&
+        NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd &&
+        !isCancelled(i),
     )
     for (const p of patterns) {
       // An off-week (or an unplaceable two-week row) is never missing — D-0202.
       if (!isOnWeek(p, date)) continue
-      const hit = onThisDate.find(
+      // EVERY occurrence at this hour, not the first one the feed happens to list.
+      // Taking only the first made the outcome depend on CR's ordering: with a
+      // healthy two-court instance AND a one-court duplicate at one hour, matching
+      // the duplicate first read as "short of courts" and the fixer below widened
+      // the DUPLICATE onto a third court — spending more of the club on the bug.
+      const hits = onThisDate.filter(
         (i) =>
           NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
           matchesPattern(i.EventName, p.name),
       )
       const wants = p.courts ?? 1
-      const has = hit ? parseCourtNums(hit.Courts ?? '').filter((c) => knownCourts.has(c)).length : 0
-      if (hit && has >= wants) continue
+      // Courts held across all of them, counted once each.
+      const heldCourts = new Set<number>()
+      for (const h of hits) {
+        for (const c of parseCourtNums(h.Courts ?? '')) if (knownCourts.has(c)) heldCourts.add(c)
+      }
+      const has = heldCourts.size
+      // One occurrence holding its courts is the healthy case and stays silent.
+      if (hits.length === 1 && has >= wants) continue
       out.push({
         date: date.formatDate(),
         day_of_week: dow,
@@ -172,8 +193,10 @@ export function scanPatternGaps(
         event_id: p.event_id,
         wants_courts: wants,
         has_courts: has,
-        // Resolved by the acting half below; this is the shape of the problem, not its fate.
-        status: p.event_id ? 'no_court' : 'no_event',
+        instances: hits.length,
+        // Resolved by the acting half below; this is the shape of the problem, not its
+        // fate — except a duplicate, which is decided here because nothing may act on it.
+        status: hits.length > 1 ? 'duplicate' : p.event_id ? 'no_court' : 'no_event',
       })
     }
   }
@@ -231,6 +254,16 @@ export async function runPatternGaps(
     const free = freeCourts(occupiedOn(date), courtOrder, start, end)
 
     if (!gap.event_id) continue // no_event — nothing to book against, and that is the alarm
+    // A session booked twice at one hour is not a court shortage, and widening one of
+    // the copies would make it worse. Removing the extra copy is a Court Reserve
+    // cancel and a human's call, so this is reported and alarmed, never acted on.
+    if (gap.status === 'duplicate') {
+      log(
+        `DUPLICATE ${gap.date} ${gap.start_time} ${gap.name} — ${gap.instances} occurrences ` +
+          `at one hour on ${gap.has_courts} court(s); not touched`,
+      )
+      continue
+    }
     if (!opts.fix || !patternsLive) {
       if (free.length) gap.status = 'no_court' // reported, not acted on
       continue
@@ -271,7 +304,8 @@ export async function runPatternGaps(
             i.StartDateTime &&
             NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === date.formatYmd() &&
             NaiveDateTime.fromISO(i.StartDateTime).formatHm() === gap.start_time &&
-            matchesPattern(i.EventName, gap.name),
+            matchesPattern(i.EventName, gap.name) &&
+            !isCancelled(i),
         )
         if (!existing?.Id) {
           gap.status = 'failed'
@@ -319,5 +353,11 @@ export async function runPatternGaps(
 /** Did this run leave anything a human has to deal with? Drives the exit code. */
 export function needsAttention(result: PatternGapsResult): boolean {
   if (!result.patternsLive) return true
-  return result.gaps.some((g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed')
+  return result.gaps.some(
+    (g) =>
+      g.status === 'no_event' ||
+      g.status === 'no_court' ||
+      g.status === 'failed' ||
+      g.status === 'duplicate',
+  )
 }

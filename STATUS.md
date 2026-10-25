@@ -49,6 +49,27 @@ rather than double-books and already fails closed on a non-live pattern.
 - Regression: `ts/tests/duplicateFixedEvents.test.ts` (10 tests; 5 fail on `main`).
   Full suite 197 pass, `tsc --noEmit` clean.
 
+- A cancelled reservation now holds no court and does not read as the session being
+  present. `isCancelled` (`ts/src/availability.ts`) is one predicate used by every reader
+  of the schedule feed; `jobs/fixImbalance.ts` had the only copy of that test, and it was
+  the only reader applying it. Without this the fix above would have made a cleanup hold
+  too well: a cancelled occurrence left in the tally reads as the session still being
+  there, so cancelling one of two duplicates would have stopped the survivor from ever
+  being re-booked and left the cancelled instance's court blocked for everything else.
+  Cancelling the ONLY instance of a standing slot still does not retire it — the 8:45
+  gap-filler re-books it next morning, which is the documented way the system behaves;
+  retiring a slot means stamping its `until`.
+
+- The 8:45 gap-filler no longer widens one copy of a duplicated slot. `scanPatternGaps`
+  took the FIRST occurrence the feed listed, so the outcome depended on Court Reserve's
+  ordering: match the one-court duplicate ahead of the healthy two-court instance and the
+  slot read as short of courts, and the fixer added a third court to the duplicate. It now
+  counts every occurrence at the slot and resolves >1 as `duplicate` — logged, reported in
+  the Discord embed as booked twice rather than missing, counted by `needsAttention` so the
+  run exits non-zero, and never booked or widened against. Proven by probe before the fix:
+  with the healthy copy first the old scan was silent; with the duplicate first it produced
+  a `has_courts: 1` gap the fixer would have widened.
+
 **Not done / known:** the duplicates already sitting on the upcoming calendar are not
 touched by this. They are enumerable from `logs/booking_log_<date>.json` on the mini
 (each `results` row carries `event_id`, `start_time`, `court_num` and the
