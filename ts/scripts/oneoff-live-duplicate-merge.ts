@@ -167,7 +167,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
  * the output was indistinguishable from the fix not working. The banner now says
  * which revision actually ran, so one pasted output settles it instead of a guess.
  */
-const SCRIPT_REVISION = 'r6 — --setup-only books the two copies and stops'
+const SCRIPT_REVISION = 'r7 — sends no cost; prints what Court Reserve charged'
 
 /** The commit this file is being run from, for the same reason. Best effort. */
 function gitDescribe(): string {
@@ -468,14 +468,33 @@ async function main(): Promise<void> {
         [occA, memberA],
         [occB, memberB],
       ] as const) {
-        await api('POST', '/events/registrations/register', {
+        // No cost of any kind is sent. Court Reserve applies this member's own
+        // membership rate — Ron, 2026-10-25: "the dialog does not need to set the price
+        // -- it will default to whatever the membership charges them."
+        const out = (await api('POST', '/events/registrations/register', {
           event_id: EVENT_ID,
           res_id: res,
           org_member_ids: [member.id],
           notify: false,
-        })
+        })) as { charge?: { total?: number; charged?: string[]; unreadable?: string[] } }
         registered.push({ res, member: member.id, name: member.name })
-        log(`   ${member.name} → ${res}`)
+
+        // The question this run exists to answer, printed rather than assumed: what did
+        // Court Reserve actually charge when nothing told it a price? `$0.00` means the
+        // field was defaulted or the rate really is nothing; a figure means the rate
+        // applied and the member owes it.
+        const c = out.charge
+        const money =
+          c === undefined
+            ? 'charge NOT REPORTED by the service (is it running the merged build?)'
+            : c.unreadable?.length
+              ? 'charge UNREADABLE on the roster — check this member by hand'
+              : `charged $${(c.total ?? 0).toFixed(2)}`
+        log(`   ${member.name} → ${res}   ${money}`)
+        if (c?.charged?.length) {
+          log(`   ⚠️  ${member.name} WAS CHARGED. That is the membership rate applying;`)
+          log('       it is real money on their account and nothing here can undo it.')
+        }
       }
 
       step(6, 'Prove one player on each copy')
