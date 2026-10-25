@@ -2,12 +2,14 @@ import type {
   ScheduleItem,
   BookRequest,
   MoveRequest,
+  MoveRegistrantRequest,
   CancelRequest,
   SetCourtsRequest,
   FixCourtRequest,
   WaitlistOccurrence,
   CheckinCandidate,
   CheckinResult,
+  RosterEntry,
 } from './types'
 import type { FixedEvent } from '../policy'
 
@@ -76,6 +78,46 @@ export class CourtReserveClient {
       event_id: String(eventId),
       res_id: String(resId),
     })
+  }
+
+  /**
+   * Who is registered on one occurrence. `start`/`end` are M/D/YYYY and must
+   * bracket the occurrence's own date — the service resolves the roster through
+   * the same report read `courtreserve.play` is built from, and answers 400 if
+   * the occurrence turns out to belong to a different event.
+   *
+   * This read names people and carries their emails, so it stays on the service
+   * side of the line: nothing here logs a roster, and only the member ids are
+   * used (to move them). Never cached, never indexed — a roster is live state.
+   */
+  async roster(
+    eventId: number,
+    occurrenceId: number,
+    start: string,
+    end: string,
+  ): Promise<RosterEntry[]> {
+    const q = new URLSearchParams({
+      occurrence_id: String(occurrenceId),
+      start,
+      end,
+    })
+    const data = await this.request<{ items?: RosterEntry[] }>(
+      'GET',
+      `/events/${eventId}/roster?${q}`,
+    )
+    const items = data?.items
+    if (!Array.isArray(items)) {
+      throw new Error(
+        `courtreserve-api GET /events/${eventId}/roster -> no \`items\` array: ` +
+          `${JSON.stringify(data ?? null).slice(0, 200)}`,
+      )
+    }
+    return items
+  }
+
+  /** Move one member between two occurrences of one event. See MoveRegistrantRequest. */
+  moveRegistrant(req: MoveRegistrantRequest): Promise<unknown> {
+    return this.request('POST', '/events/registrations/move', req)
   }
 
   book(req: BookRequest): Promise<unknown> {

@@ -43,6 +43,43 @@ export interface CheckinResult {
   error: string | null
 }
 
+/** One registered participant on an occurrence, from GET /events/{id}/roster. */
+export interface RosterEntry {
+  org_member_id: number
+  member_name: string
+  email: string | null
+  has_email: boolean
+}
+
+/**
+ * Move ONE member between two occurrences of the SAME event
+ * (courtreserve-api `POST /events/registrations/move`).
+ *
+ * The service registers the destination and verifies it BEFORE withdrawing the
+ * source, so a half-finished move leaves the member on both rosters — visible,
+ * one click to undo — rather than on neither, and answers 409 naming which half
+ * landed. It also reads what the member paid off the source row rather than
+ * assuming the move is free.
+ */
+export interface MoveRegistrantRequest {
+  event_id: number
+  from_res_id: number
+  to_res_id: number
+  org_member_id: number
+  /**
+   * Court Reserve's own confirmation email. The service defaults this to TRUE
+   * (Ron, 2026-10-14: registration emails go via CR), but a duplicate cleanup
+   * passes FALSE — Ron, 2026-10-25: "I am ok with them getting an email because
+   * I don't think there is a way to prevent that -- but if there is one -- then
+   * use it". There is one, so a member is not emailed about a tidy-up they did
+   * not ask for.
+   */
+  notify?: boolean
+  reason?: string
+  allow_waitlist_promotion?: boolean
+  max_cost?: number
+}
+
 /** Request bodies mirror courtreserve-api's endpoints (service.py). */
 export interface BookRequest {
   event_id: string

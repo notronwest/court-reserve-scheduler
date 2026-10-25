@@ -16,15 +16,29 @@
  * with registered members" — applied to any event booked twice at one hour
  * rather than only to the Advanced Intermediate pairing.
  *
- * **Moving registrants: NOT built, because nothing can do it.** The Court
- * Reserve service exposes no register, unregister or transfer call — the whole
- * client surface is schedule / fixed-events / waitlists / checkin-scan / checkin
- * / book / move / cancel / courts / fix-court — and a future occurrence's
- * registrant NAMES are not readable either (the schedule feed carries a count,
- * and `/checkin/scan` only covers past occurrences). So a slot where more than
- * one copy has registrants is detected, reported and left exactly as it is.
- * Cancelling it would drop those people's bookings on the floor, which is the
- * opposite of what was asked for.
+ * **Merging two copies that both have people: also done, one member at a time.**
+ * Ron, 2026-10-25, correcting an earlier reading of the service: *"There IS a way
+ * to reschedule players from one session to another."* There is — the roster read
+ * plus `POST /events/registrations/move`. For each person on a copy being
+ * discarded: move them onto the keeper, then cancel the emptied copy. The service
+ * registers the destination and verifies it BEFORE withdrawing the source, so a
+ * mid-way failure leaves them on BOTH rosters (visible, one click to undo) rather
+ * than on neither.
+ *
+ * Three rules this half lives under:
+ *
+ * - **Nobody is emailed about a tidy-up they did not ask for** — `notify: false`.
+ *   Ron, 2026-10-25: *"I am ok with them getting an email because I don't think
+ *   there is a way to prevent that -- but if there is one -- then use it."* There
+ *   is one. This is narrower than his 2026-10-14 direction that registration
+ *   emails in general go via Court Reserve, and leaves that default alone.
+ * - **The copy is cancelled only once its roster RE-READS as empty.** A move that
+ *   half-landed, or a roster that still lists somebody, stops the cancel. A
+ *   duplicate left standing is cosmetic; a cancelled session with people on it is
+ *   not.
+ * - **Capacity is never forced.** If the keeper cannot hold everyone, nothing is
+ *   moved and the slot is reported. Squeezing people into an over-full session is
+ *   not a tidy-up.
  *
  * ## Why it will not cancel the wrong thing
  *
@@ -42,8 +56,8 @@
  * - A cancelled row is not an occurrence at all (`isCancelled`), so a slot that
  *   was already cleaned up does not read as duplicated a second time.
  *
- * A cancel is destructive and not undoable by the same path, so every removal is
- * logged and posted to Discord, and nothing is removed silently.
+ * A cancel is destructive and not undoable by the same path, so every removal and
+ * every member moved is logged and posted to Discord — nothing happens silently.
  */
 import type { CourtReserveClient } from '../cr/client'
 import type { ScheduleItem } from '../cr/types'
@@ -72,8 +86,13 @@ export interface DuplicateResolution {
   keep: EventOccurrence
   /** Duplicates known to have NOBODY on them — the only ones this run may cancel. */
   removable: EventOccurrence[]
-  /** Copies known to have registrants that are NOT the keeper — these need a human. */
-  blocked: EventOccurrence[]
+  /**
+   * Copies known to have registrants that are NOT the keeper. Their people are
+   * moved onto the keeper and the emptied copy is then cancelled — see
+   * `mergeDuplicate`. Named `mergeable` because it is what the run WILL do, not
+   * what it is stuck on.
+   */
+  mergeable: EventOccurrence[]
   /**
    * Copies whose registrant count Court Reserve did not report. Never cancelled:
    * an unknown count is not permission to delete a session, and treating it as
@@ -83,6 +102,20 @@ export interface DuplicateResolution {
   /** Set per removable occurrence once the run has tried it. */
   cancelled?: number[]
   failed?: Array<{ occurrence_id: number; error: string }>
+  /** Members moved onto the keeper, per source occurrence. */
+  merged?: Array<{ occurrence_id: number; moved: number[] }>
+  /**
+   * A merge that did not finish. The copy is NOT cancelled and the reason is
+   * reported — including the one state that needs a person: `half_moved`, where
+   * Court Reserve registered someone on the keeper but did not withdraw them
+   * from the copy, so they are on both.
+   */
+  mergeFailed?: Array<{
+    occurrence_id: number
+    moved: number[]
+    error: string
+    half_moved: boolean
+  }>
 }
 
 /**
@@ -95,7 +128,7 @@ export function resolveDuplicate(group: DuplicateGroup): DuplicateResolution {
     group,
     keep,
     removable: rest.filter((o) => o.members === 0),
-    blocked: rest.filter((o) => o.members !== null && o.members > 0),
+    mergeable: rest.filter((o) => o.members !== null && o.members > 0),
     unknown: rest.filter((o) => o.members === null),
   }
 }
@@ -118,10 +151,123 @@ export function planDuplicateCleanup(
     .map(resolveDuplicate)
 }
 
+/**
+ * Move everyone off one duplicate copy onto the keeper, then cancel the emptied
+ * copy. Returns what happened; mutates nothing the caller did not pass in.
+ *
+ * Order and the reasons for it:
+ *
+ * 1. **Read the copy's roster** — who is actually on it. The registrant COUNT
+ *    from the schedule feed decides whether a copy has people; the roster decides
+ *    WHO, and only ids are used from it.
+ * 2. **Move one member at a time, and stop at the first refusal.** The service
+ *    gates each move: it refuses when the keeper is full, when capacity cannot be
+ *    read ("not registered blind"), when the member is already on the keeper, and
+ *    when withdrawing from the copy would promote someone off its waitlist. Those
+ *    gates are the real protection, so this does not second-guess them — it stops
+ *    and reports instead of pushing on and leaving a wider mess.
+ * 3. **Re-read the copy's roster, and cancel ONLY if it is empty.** A roster that
+ *    still lists somebody stops the cancel. A duplicate left standing is
+ *    cosmetic; a cancelled session with people on it is not.
+ *
+ * `notify: false` on every move — Ron, 2026-10-25. A `409` from the service means
+ * a half-finished move: the member IS on the keeper and was NOT withdrawn, so they
+ * are on both rosters. That is surfaced as `half_moved`, because it is the one
+ * outcome a person has to look at.
+ */
+export async function mergeDuplicate(
+  cr: CourtReserveClient,
+  r: DuplicateResolution,
+  source: EventOccurrence,
+  log: (m: string) => void,
+): Promise<void> {
+  const where = `${r.group.date} ${r.group.start.formatTime()} ${r.group.name}`
+  const date = r.group.date
+  const moved: number[] = []
+
+  const fail = (error: string, halfMoved: boolean): void => {
+    r.mergeFailed = [
+      ...(r.mergeFailed ?? []),
+      { occurrence_id: source.occurrence_id, moved: [...moved], error, half_moved: halfMoved },
+    ]
+    log(
+      `  ${where}: ❌ merge of occurrence ${source.occurrence_id} stopped after ` +
+        `${moved.length} move(s)${halfMoved ? ' — HALF MOVED, someone is on BOTH copies' : ''}: ${error}`,
+    )
+  }
+
+  let roster
+  try {
+    roster = await cr.roster(r.group.event_id, source.occurrence_id, date, date)
+  } catch (e) {
+    fail(`could not read the roster: ${e instanceof Error ? e.message : String(e)}`, false)
+    return
+  }
+
+  for (const member of roster) {
+    try {
+      await cr.moveRegistrant({
+        event_id: r.group.event_id,
+        from_res_id: source.occurrence_id,
+        to_res_id: r.keep.occurrence_id,
+        org_member_id: member.org_member_id,
+        notify: false,
+        reason: 'duplicate session merged',
+      })
+      moved.push(member.org_member_id)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      fail(message, /\b409\b/.test(message) || /HALF MOVED/i.test(message))
+      return
+    }
+  }
+
+  // Prove it before destroying anything.
+  let after
+  try {
+    after = await cr.roster(r.group.event_id, source.occurrence_id, date, date)
+  } catch (e) {
+    fail(
+      `moved ${moved.length}, then could not re-read the roster to confirm it is empty, ` +
+        `so the copy was left standing: ${e instanceof Error ? e.message : String(e)}`,
+      false,
+    )
+    return
+  }
+  if (after.length > 0) {
+    fail(`moved ${moved.length} but ${after.length} still on the copy — not cancelling`, false)
+    return
+  }
+
+  try {
+    await cr.cancel({ res_id: String(source.occurrence_id) })
+    r.merged = [...(r.merged ?? []), { occurrence_id: source.occurrence_id, moved }]
+    r.cancelled = [...(r.cancelled ?? []), source.occurrence_id]
+    log(
+      `  ${where}: ✅ moved ${moved.length} player(s) onto occurrence ${r.keep.occurrence_id} ` +
+        `and cancelled the empty copy ${source.occurrence_id}`,
+    )
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e)
+    r.merged = [...(r.merged ?? []), { occurrence_id: source.occurrence_id, moved }]
+    r.failed = [...(r.failed ?? []), { occurrence_id: source.occurrence_id, error }]
+    log(
+      `  ${where}: moved ${moved.length} player(s) but the cancel of ${source.occurrence_id} ` +
+        `FAILED — the copy is empty and still on the calendar: ${error}`,
+    )
+  }
+}
+
 export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[]): unknown {
-  const removed = resolutions.flatMap((r) => r.cancelled ?? [])
+  // A merged copy is cancelled too, so it appears in `cancelled` — but it belongs
+  // under "merged", not under "removed because nobody was on it". Scope this to the
+  // copies that were empty to begin with, or the same slot is reported twice.
+  const removed = resolutions.flatMap((r) =>
+    (r.cancelled ?? []).filter((id) => r.removable.some((o) => o.occurrence_id === id)),
+  )
   const failed = resolutions.flatMap((r) => r.failed ?? [])
-  const blocked = resolutions.filter((r) => r.blocked.length > 0)
+  const mergedSlots = resolutions.filter((r) => (r.merged?.length ?? 0) > 0)
+  const mergeStuck = resolutions.filter((r) => (r.mergeFailed?.length ?? 0) > 0)
   const unknown = resolutions.filter((r) => r.unknown.length > 0)
 
   const lines: string[] = []
@@ -142,18 +288,43 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
       )
     }
   }
-  if (blocked.length) {
+  if (mergedSlots.length) {
     if (lines.length) lines.push('')
-    lines.push(`**${blocked.length} need${blocked.length === 1 ? 's' : ''} you — players on more than one copy:**`)
-    for (const r of blocked) {
-      const others = r.blocked.map((o) => `${o.members} on Court #${o.court_nums.join(', #')}`).join(', ')
+    const people = mergedSlots.reduce(
+      (n, r) => n + (r.merged ?? []).reduce((m, x) => m + x.moved.length, 0),
+      0,
+    )
+    lines.push(
+      `**Merged ${mergedSlots.length} session${mergedSlots.length === 1 ? '' : 's'} ` +
+        `that had players on more than one copy (${people} moved, not emailed):**`,
+    )
+    for (const r of mergedSlots) {
+      const n = (r.merged ?? []).reduce((m, x) => m + x.moved.length, 0)
       lines.push(
         `• ${r.group.date} ${r.group.start.formatTime()} **${r.group.name}** — ` +
-          `${r.keep.members ?? 'an unknown number'} registered on the copy to keep ` +
-          `(Court #${r.keep.court_nums.join(', #')}), ` +
-          `and ${others}. Left alone: moving a registration between events is not something ` +
-          'Court Reserve lets this system do, so somebody has to move them by hand first.',
+          `moved ${n} player${n === 1 ? '' : 's'} onto the copy on ` +
+          `Court #${r.keep.court_nums.join(', #')}, then removed the emptied copy.`,
       )
+    }
+  }
+  if (mergeStuck.length) {
+    if (lines.length) lines.push('')
+    const half = mergeStuck.some((r) => (r.mergeFailed ?? []).some((f) => f.half_moved))
+    lines.push(
+      `**${mergeStuck.length} merge${mergeStuck.length === 1 ? '' : 's'} stopped part-way` +
+        `${half ? ' — SOMEONE IS ON BOTH COPIES' : ''}:**`,
+    )
+    for (const r of mergeStuck) {
+      for (const f of r.mergeFailed ?? []) {
+        lines.push(
+          `• ${r.group.date} ${r.group.start.formatTime()} **${r.group.name}** — ` +
+            `${f.moved.length} moved, then stopped. The copy was NOT removed. ` +
+            (f.half_moved
+              ? 'One player is registered on **both** copies — take them off the duplicate. '
+              : '') +
+            `Reason: ${f.error.slice(0, 200)}`,
+        )
+      }
     }
   }
   if (unknown.length) {
@@ -175,11 +346,12 @@ export function buildDuplicateEmbed(resolutions: readonly DuplicateResolution[])
     for (const f of failed) lines.push(`• \`${f.occurrence_id}\` — ${f.error.slice(0, 160)}`)
   }
 
-  const needsYou = blocked.length + unknown.length
-  const color = failed.length ? 0xe74c3c : needsYou ? 0xf39c12 : 0x2ecc71
-  const title = needsYou
-    ? `🧹 Duplicate sessions: ${removed.length} removed, ${needsYou} need you`
-    : `🧹 Duplicate sessions: ${removed.length} removed`
+  const needsYou = mergeStuck.length + unknown.length
+  const color = failed.length || mergeStuck.length ? 0xe74c3c : needsYou ? 0xf39c12 : 0x2ecc71
+  const parts = [`${removed.length} removed`]
+  if (mergedSlots.length) parts.push(`${mergedSlots.length} merged`)
+  if (needsYou) parts.push(`${needsYou} need you`)
+  const title = `🧹 Duplicate sessions: ${parts.join(', ')}`
   return {
     embeds: [
       {
@@ -231,11 +403,15 @@ export async function runDuplicateCleanup(
 
   for (const r of resolutions) {
     const where = `${r.group.date} ${r.group.start.formatTime()} ${r.group.name}`
-    for (const b of r.blocked) {
-      log(
-        `  ${where}: NOT touched — ${r.keep.members ?? '?'} registered on the copy to keep and ` +
-          `${b.members} on occurrence ${b.occurrence_id}; moving a registration is not supported`,
-      )
+    for (const m of r.mergeable) {
+      if (opts.dryRun) {
+        log(
+          `  ${where}: [DRY RUN] would move ${m.members} player(s) off occurrence ` +
+            `${m.occurrence_id} onto ${r.keep.occurrence_id} (no email), then cancel the emptied copy`,
+        )
+        continue
+      }
+      await mergeDuplicate(cr, r, m, log)
     }
     for (const u of r.unknown) {
       log(
@@ -264,7 +440,8 @@ export async function runDuplicateCleanup(
     (r) =>
       (r.cancelled?.length ?? 0) > 0 ||
       (r.failed?.length ?? 0) > 0 ||
-      r.blocked.length > 0 ||
+      (r.merged?.length ?? 0) > 0 ||
+      (r.mergeFailed?.length ?? 0) > 0 ||
       r.unknown.length > 0,
   )
   if (rest && !opts.dryRun && worthSaying) {

@@ -47,15 +47,63 @@ function occ(
   }
 }
 
-/** A CR client double that records what it was asked to cancel. */
-function fakeCr(items: ScheduleItem[], failOn: number[] = []) {
+interface FakeOpts {
+  /** Occurrence ids whose cancel should fail. */
+  failCancel?: number[]
+  /** occurrence_id -> member ids on it, consumed as moves succeed. */
+  rosters?: Record<number, number[]>
+  /** Member ids whose move should be refused, with the message to throw. */
+  refuseMove?: Record<number, string>
+  /** Occurrence ids whose roster read should fail. */
+  failRoster?: number[]
+}
+
+/** A CR client double recording cancels and moves, with mutable rosters. */
+function fakeCr(items: ScheduleItem[], opts: FakeOpts = {}) {
   const cancelled: string[] = []
+  const moves: Array<{ from: number; to: number; member: number; notify?: boolean }> = []
+  const rosters: Record<number, number[]> = JSON.parse(JSON.stringify(opts.rosters ?? {}))
   return {
     cancelled,
+    moves,
+    rosters,
     cr: {
       schedule: async () => items,
+      roster: async (_eventId: number, occurrenceId: number) => {
+        if (opts.failRoster?.includes(occurrenceId)) {
+          throw new Error('courtreserve-api GET roster -> 500: boom')
+        }
+        return (rosters[occurrenceId] ?? []).map((id) => ({
+          org_member_id: id,
+          member_name: `Member ${id}`,
+          email: null,
+          has_email: false,
+        }))
+      },
+      moveRegistrant: async (req: {
+        from_res_id: number
+        to_res_id: number
+        org_member_id: number
+        notify?: boolean
+      }) => {
+        const refusal = opts.refuseMove?.[req.org_member_id]
+        if (refusal) throw new Error(refusal)
+        moves.push({
+          from: req.from_res_id,
+          to: req.to_res_id,
+          member: req.org_member_id,
+          notify: req.notify,
+        })
+        rosters[req.from_res_id] = (rosters[req.from_res_id] ?? []).filter(
+          (id) => id !== req.org_member_id,
+        )
+        rosters[req.to_res_id] = [...(rosters[req.to_res_id] ?? []), req.org_member_id]
+        return { ok: true }
+      },
       cancel: async ({ res_id }: { res_id: string }) => {
-        if (failOn.includes(Number(res_id))) throw new Error('503 Court Reserve browser busy')
+        if (opts.failCancel?.includes(Number(res_id))) {
+          throw new Error('503 Court Reserve browser busy')
+        }
         cancelled.push(res_id)
         return { success: true }
       },
@@ -212,7 +260,7 @@ describe('choosing what to keep', () => {
     const r = resolveDuplicate(findDuplicateOccurrences([a, b], COURTS)[0])
     expect(r.keep.members).toBe(6)
     expect(r.removable.map((o) => o.members)).toEqual([0])
-    expect(r.blocked).toHaveLength(0)
+    expect(r.mergeable).toHaveLength(0)
   })
 
   it('when both are empty, keeps the one on more courts and removes the other', () => {
@@ -241,8 +289,8 @@ describe('choosing what to keep', () => {
       )[0],
     )
     expect(r.removable).toHaveLength(0)
-    expect(r.blocked).toHaveLength(1)
-    expect(r.blocked[0].members).toBe(3)
+    expect(r.mergeable).toHaveLength(1)
+    expect(r.mergeable[0].members).toBe(3)
     expect(r.unknown).toHaveLength(0)
   })
 
@@ -259,7 +307,7 @@ describe('choosing what to keep', () => {
     )
     expect(r.keep.members).toBe(5)
     expect(r.removable).toHaveLength(1)
-    expect(r.blocked.map((o) => o.members)).toEqual([2])
+    expect(r.mergeable.map((o) => o.members)).toEqual([2])
   })
 })
 
@@ -316,15 +364,15 @@ describe('running it', () => {
     expect(out[0].cancelled).toEqual([empty.Id])
   })
 
-  it('cancels NOTHING when both copies have registrants', async () => {
-    const { cr, cancelled } = fakeCr([
+  it('identifies the copy with players as one to merge, not one to drop', async () => {
+    const { cr } = fakeCr([
       occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 5),
       occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 3),
     ])
     const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
-    expect(cancelled).toEqual([])
-    expect(out[0].blocked).toHaveLength(1)
-    expect(out[0].cancelled).toBeUndefined()
+    expect(out[0].removable).toHaveLength(0)
+    expect(out[0].mergeable).toHaveLength(1)
+    expect(out[0].mergeable[0].members).toBe(3)
   })
 
   it('cancels nothing on a dry run', async () => {
@@ -338,9 +386,9 @@ describe('running it', () => {
 
   it('records a failed cancel rather than claiming it worked', async () => {
     const empty = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0)
-    const { cr } = fakeCr([occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 8), empty], [
-      empty.Id as number,
-    ])
+    const { cr } = fakeCr([occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 8), empty], {
+      failCancel: [empty.Id as number],
+    })
     const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
     expect(out[0].cancelled).toBeUndefined()
     expect(out[0].failed?.[0].occurrence_id).toBe(empty.Id)
@@ -356,20 +404,25 @@ describe('running it', () => {
     await expect(runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })).rejects.toThrow('500')
   })
 
-  it('posts a report naming what it removed and what it left', async () => {
+  it('posts one report covering what it removed and what it merged', async () => {
     const posted: unknown[] = []
     const rest = { postEmbed: async (p: unknown) => { posted.push(p); return 'm1' } } as never
-    const { cr } = fakeCr([
-      occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4, 3], 8),
-      occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0),
-      occ(1633147, '2026-10-28', '10:00', '12:00', [4], 5),
-      occ(1633147, '2026-10-28', '10:00', '12:00', [1], 4),
-    ])
+    const keeper = occ(1633147, '2026-10-28', '10:00', '12:00', [4], 5)
+    const withPeople = occ(1633147, '2026-10-28', '10:00', '12:00', [1], 4)
+    const { cr } = fakeCr(
+      [
+        occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4, 3], 8),
+        occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0),
+        keeper,
+        withPeople,
+      ],
+      { rosters: { [withPeople.Id as number]: [11, 12, 13, 14], [keeper.Id as number]: [1, 2, 3, 4, 5] } },
+    )
     await runDuplicateCleanup(cr, rest, COURTS, { days: 7, now: NOW })
-    const embed = posted[0] as { embeds: { title: string; description: string }[] }
+    const embed = posted[0] as { embeds: { title: string; description: string } [] }
     expect(embed.embeds[0].title).toContain('1 removed')
-    expect(embed.embeds[0].title).toContain('1 need')
-    expect(embed.embeds[0].description).toContain('by hand')
+    expect(embed.embeds[0].title).toContain('1 merged')
+    expect(embed.embeds[0].description).toContain('4 moved, not emailed')
   })
 
   it('says nothing when there is nothing to say', async () => {
@@ -378,6 +431,132 @@ describe('running it', () => {
     const { cr } = fakeCr([occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 8)])
     await runDuplicateCleanup(cr, rest, COURTS, { days: 7, now: NOW })
     expect(posted).toEqual([])
+  })
+})
+
+describe('merging two copies that both have players', () => {
+  const keeper = () => occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4, 3], 5)
+  const other = () => occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 3)
+
+  it('moves every player onto the keeper, then cancels the emptied copy', async () => {
+    const keep = keeper()
+    const src = other()
+    const { cr, cancelled, moves, rosters } = fakeCr([keep, src], {
+      rosters: { [src.Id as number]: [11, 12, 13], [keep.Id as number]: [1, 2, 3, 4, 5] },
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+
+    expect(moves.map((m) => m.member)).toEqual([11, 12, 13])
+    expect(moves.every((m) => m.from === src.Id && m.to === keep.Id)).toBe(true)
+    expect(rosters[keep.Id as number]).toEqual([1, 2, 3, 4, 5, 11, 12, 13])
+    expect(cancelled).toEqual([String(src.Id)])
+    expect(out[0].merged).toEqual([{ occurrence_id: src.Id, moved: [11, 12, 13] }])
+  })
+
+  it('never emails the players it moves', async () => {
+    const src = other()
+    const { cr, moves } = fakeCr([keeper(), src], { rosters: { [src.Id as number]: [11, 12] } })
+    await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(moves).toHaveLength(2)
+    expect(moves.every((m) => m.notify === false)).toBe(true)
+  })
+
+  it('stops at the first refusal and does NOT cancel the copy', async () => {
+    const src = other()
+    const { cr, cancelled, moves } = fakeCr([keeper(), src], {
+      rosters: { [src.Id as number]: [11, 12, 13] },
+      refuseMove: { 12: '9 of 10 places are taken, 1 open, and 1 were named — refusing' },
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+
+    expect(moves.map((m) => m.member)).toEqual([11])
+    expect(cancelled).toEqual([])
+    expect(out[0].mergeFailed?.[0].moved).toEqual([11])
+    expect(out[0].mergeFailed?.[0].half_moved).toBe(false)
+    expect(out[0].mergeFailed?.[0].error).toContain('refusing')
+  })
+
+  it('flags a half-finished move, where somebody is on both copies', async () => {
+    const src = other()
+    const { cr, cancelled } = fakeCr([keeper(), src], {
+      rosters: { [src.Id as number]: [11, 12] },
+      refuseMove: {
+        12: 'courtreserve-api POST /events/registrations/move -> 409: HALF MOVED: member 12 IS now registered on 900002',
+      },
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(cancelled).toEqual([])
+    expect(out[0].mergeFailed?.[0].half_moved).toBe(true)
+  })
+
+  it('refuses to cancel a copy whose roster still lists somebody', async () => {
+    // The roster re-read is the proof. A double whose roster never empties stands
+    // in for a move Court Reserve reported as fine but did not apply.
+    const src = other()
+    const { cr, cancelled } = fakeCr([keeper(), src], { rosters: { [src.Id as number]: [11] } })
+    const stubborn = {
+      ...(cr as unknown as Record<string, unknown>),
+      roster: async () => [{ org_member_id: 11, member_name: 'Member 11', email: null, has_email: false }],
+    } as never
+    const out = await runDuplicateCleanup(stubborn, null, COURTS, { days: 7, now: NOW })
+    expect(cancelled).toEqual([])
+    expect(out[0].mergeFailed?.[0].error).toContain('still on the copy')
+  })
+
+  it('does not move anybody when the roster cannot be read', async () => {
+    const src = other()
+    const { cr, cancelled, moves } = fakeCr([keeper(), src], {
+      rosters: { [src.Id as number]: [11, 12] },
+      failRoster: [src.Id as number],
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(moves).toEqual([])
+    expect(cancelled).toEqual([])
+    expect(out[0].mergeFailed?.[0].error).toContain('could not read the roster')
+  })
+
+  it('records a cancel that fails after a successful merge, without losing the moves', async () => {
+    const src = other()
+    const { cr, moves } = fakeCr([keeper(), src], {
+      rosters: { [src.Id as number]: [11, 12] },
+      failCancel: [src.Id as number],
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(moves).toHaveLength(2)
+    expect(out[0].merged?.[0].moved).toEqual([11, 12])
+    expect(out[0].failed?.[0].occurrence_id).toBe(src.Id)
+  })
+
+  it('moves nobody on a dry run, and says what it would do', async () => {
+    const src = other()
+    const lines: string[] = []
+    const { cr, cancelled, moves } = fakeCr([keeper(), src], {
+      rosters: { [src.Id as number]: [11, 12, 13] },
+    })
+    await runDuplicateCleanup(cr, null, COURTS, {
+      days: 7,
+      now: NOW,
+      dryRun: true,
+      log: (m) => lines.push(m),
+    })
+    expect(moves).toEqual([])
+    expect(cancelled).toEqual([])
+    expect(lines.join('\n')).toContain('would move 3 player(s)')
+    expect(lines.join('\n')).toContain('no email')
+  })
+
+  it('leaves an unknown-count copy out of the merge entirely', async () => {
+    const mystery = occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, {
+      MembersCount: null,
+    })
+    const { cr, cancelled, moves } = fakeCr([keeper(), mystery], {
+      rosters: { [mystery.Id as number]: [11] },
+    })
+    const out = await runDuplicateCleanup(cr, null, COURTS, { days: 7, now: NOW })
+    expect(moves).toEqual([])
+    expect(cancelled).toEqual([])
+    expect(out[0].unknown).toHaveLength(1)
+    expect(out[0].mergeable).toHaveLength(0)
   })
 })
 
@@ -395,16 +574,36 @@ describe('buildDuplicateEmbed', () => {
     const green = buildDuplicateEmbed([clean]) as { embeds: { color: number }[] }
     expect(green.embeds[0].color).toBe(0x2ecc71)
 
-    const blockedGroups = findDuplicateOccurrences(
+    // Amber is now for what the run could not judge: an unreported sign-up count.
+    const unknownGroups = findDuplicateOccurrences(
       [
         occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 8),
-        occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 2),
+        occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 0, { MembersCount: null }),
       ],
       COURTS,
     )
-    const amber = buildDuplicateEmbed([resolveDuplicate(blockedGroups[0])]) as {
+    const amber = buildDuplicateEmbed([resolveDuplicate(unknownGroups[0])]) as {
       embeds: { color: number }[]
     }
     expect(amber.embeds[0].color).toBe(0xf39c12)
+
+    // A merge that stopped part-way is red — somebody has to look at it.
+    const stuck = resolveDuplicate(
+      findDuplicateOccurrences(
+        [
+          occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [4], 8),
+          occ(STRUCTURED_PLAY, '2026-10-27', '17:00', '19:00', [2], 2),
+        ],
+        COURTS,
+      )[0],
+    )
+    stuck.mergeFailed = [
+      { occurrence_id: stuck.mergeable[0].occurrence_id, moved: [1], error: '409 HALF MOVED', half_moved: true },
+    ]
+    const red = buildDuplicateEmbed([stuck]) as {
+      embeds: { color: number; title: string; description: string }[]
+    }
+    expect(red.embeds[0].color).toBe(0xe74c3c)
+    expect(red.embeds[0].description).toContain('both')
   })
 })

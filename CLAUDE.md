@@ -163,14 +163,23 @@ if both have registrants keep one and move the registrants over to the one that 
   (attendance is read off those), never a cancelled row. This is the same judgement
   `jobs/fixImbalance.ts` has always made about an extra session — "never one with
   registered members".
-- **NOT removed, and reported instead:** a slot where more than one copy has registrants.
-  **Moving a registration between events is not something this system can do** — the Court
-  Reserve service exposes no register, unregister or transfer call, and a future
-  occurrence's registrant *names* are not readable either (the schedule feed carries only a
-  count; `/checkin/scan` covers past occurrences only). So the second half of that
-  direction needs a new capability in `courtreserve-api` before it can exist. Until then
-  those slots are named in Discord and left exactly as they are, because cancelling one
-  would drop those people's bookings.
+- **MERGED, when more than one copy has registrants.** Ron, 2026-10-25: *"There IS a way to
+  reschedule players from one session to another."* There is — `GET /events/{id}/roster` then
+  `POST /events/registrations/move` per member, both already on the service. For each copy
+  being discarded: read its roster, move each person onto the keeper, re-read the roster, and
+  cancel the copy **only once it re-reads as empty**. The service registers the destination
+  and verifies it before withdrawing the source, so a mid-way failure leaves the person on
+  BOTH copies — visible, one click to undo — rather than on neither; that state comes back as
+  a 409 and is reported as `half_moved`, in red, because a person has to look at it.
+  - **`notify: false` on every move.** Ron, 2026-10-25: *"I am ok with them getting an email
+    because I don't think there is a way to prevent that -- but if there is one -- then use
+    it."* There is one. Narrower than his 2026-10-14 direction that registration emails in
+    general go via Court Reserve, which still holds and is still the service's default.
+  - **A merge stops at the first refusal and cancels nothing.** The service gates each move —
+    the keeper being full, capacity unreadable ("not registered blind"), the member already on
+    the keeper, a withdrawal that would promote someone off the copy's waitlist — and those
+    gates are the protection, so this does not second-guess them. Whatever moved before the
+    refusal stays moved, the copy stays on the calendar, and the slot is reported.
 - **A cancel is destructive and not undoable by the same path**, so every removal is logged
   with its occurrence id and posted to Discord. `--dry-run` reports without cancelling;
   `--no-dedupe` turns the cleanup off and leaves court expansion running.

@@ -5,6 +5,62 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-25 — Duplicate sessions with players on both copies are now MERGED
+
+Ron corrected the surface reading: *"There IS a way to reschedule players from one session
+to another -- its in the UX for the 'days' of an event -- I believe there is already code
+available"*. He was right, and the earlier entry below is wrong where it says the service
+exposes no transfer call.
+
+**What was actually already there,** found by attaching `courtreserve-api` and reading it:
+`GET /events/{event_id}/roster?occurrence_id=&start=&end=` → `[{org_member_id, member_name,
+email, has_email}]`, and `POST /events/registrations/move` → `event_signups.move_registrant`
+(`service.py:1593`, `event_signups.py:342-375`), plus register/unregister routes at
+`service.py:1540,1567`. The earlier claim that these "run as a drain off the approvals rail"
+and are unreachable over HTTP was simply wrong — the drain is one caller among others. What
+is NOT the answer, and that part stands: the Dates-tab reschedule
+(`/EventReservation/RescheduleEventOccurrence`) carries registrants but relocates a whole
+occurrence to a different DATE, so it cannot fold two same-time copies into one.
+`courtreserve-api#507`, opened asking for a capability that already existed, is closed as
+not needed with the correction recorded on it.
+
+**Done.** `cr.roster()` and `cr.moveRegistrant()` on the client (`ts/src/cr/client.ts`,
+shapes in `cr/types.ts`), and `mergeDuplicate` in `ts/src/jobs/duplicateEvents.ts`. The
+`blocked` bucket is renamed `mergeable`, because it is now what the run WILL do rather than
+what it is stuck on. Per discarded copy: read its roster → move each member onto the keeper
+with `notify: false` → re-read the roster → cancel the copy ONLY if it re-reads empty.
+
+Ron's decision on notifying, recorded: *"I am ok with them getting an email because I don't
+think there is a way to prevent that -- but if there is one -- then use it."* There is one,
+so every move passes `notify: false`. This is narrower than D-0198's 2026-10-14 direction
+that registration emails in general go via Court Reserve, and leaves the service default at
+`True`.
+
+**Why it does not second-guess the service's gates.** `assess_register` already refuses when
+the keeper is full, when capacity cannot be read ("not registered blind"), and when the
+member is already on the keeper; `assess_unregister` refuses a withdrawal that would promote
+someone off the copy's waitlist unless explicitly allowed (left at the default, so it fails
+closed). So a merge moves one member at a time and **stops at the first refusal**: whatever
+moved stays moved, the copy stays on the calendar, and the slot is reported. No local
+capacity pre-check was added, because the schedule feed does not carry a reliable capacity
+and a guess would be worse than the gate that already exists.
+
+**The one state that needs a person:** `move_registrant` registers the destination and
+verifies it BEFORE withdrawing the source, so a mid-way failure leaves the member on BOTH
+copies — visible, one click to undo — rather than on neither. The service answers 409 saying
+which half landed; that surfaces as `half_moved`, reported in red with "one player is
+registered on both copies".
+
+Tests: 9 added for the merge — every player moved then the copy cancelled; `notify: false` on
+every move; a refusal stopping the run with nothing cancelled; a half-finished move flagged;
+a roster that will not empty refusing the cancel; an unreadable roster moving nobody; a
+cancel that fails after a successful merge keeping the record of the moves; a dry run moving
+nobody; and an unknown-count copy staying out of the merge entirely. Two earlier tests were
+retargeted where the behaviour genuinely changed (the both-have-players case now merges
+instead of needing a human, so the report says "merged" and is green, not amber). Suite 249
+pass, `tsc --noEmit` clean. Nothing in the session touched live Court Reserve.
+
+---
 ## 2026-10-25 — Duplicate sessions are now REMOVED, not just reported (Ron's direction)
 
 Ron, 2026-10-24: *"add a check in that for any duplicate events running at the same time on
