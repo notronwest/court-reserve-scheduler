@@ -5,6 +5,53 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-25 — the cancel fix is CONFIRMED against live Court Reserve
+
+Three runs of the one-off on the mini (`ts/scripts/oneoff-live-duplicate-merge.ts`) and the
+result that matters: **`POST /cancel` now works.** The fixed request removed all four
+occurrences the earlier runs had stranded on 12/9/2026 20:00 — 63119172, 63119176, 63119638,
+63119654 — each reporting `✅ cancelled`, ending "nothing left behind". The calendar is clean.
+Note that the FIRST pair was still there, so it had never been cleared: the 422 was real and
+total, exactly as the fix's reasoning said.
+
+So the duplicate cleanup on `main` can now actually remove a copy, and `jobs/fixImbalance.ts`
+can cancel a surplus session for the first time in its existence.
+
+**Three faults of mine surfaced on the way, and only the first was in shipped code.**
+
+1. The cancel request was missing `event_id` and `date` — the real find, fixed and merged
+   (PR #98), with the contract now asserted against the body put on the wire.
+2. `--merge-only` only skipped step 3's emptiness check and left the booking and sign-up
+   running, while its own banner said "books nothing, registers nobody". It booked two more
+   live occurrences and died at the same charge gate. Ron ran it and got an identical error,
+   correctly. Fixed, and this time **verified end to end** against a stub courtreserve-api:
+   `book 0, register 0`, one move with `notify false`, cancels carrying `event_id` and `date`.
+3. An unrecognised `--flag` was silently ignored, so passing `--merge-only` to a checkout
+   that predated it took the path that WRITES instead. Unknown flags now exit before any
+   work. And because a stale checkout was indistinguishable from a broken fix twice over,
+   every path now prints a hand-bumped `SCRIPT_REVISION` and the branch/sha it is running
+   from.
+
+The lesson under 2 and 3 is the same one: typechecking a script is not running it, and a
+one-off that writes to Court Reserve earns the same verification as the code it is testing.
+The stub lives in the session scratchpad, not the repo — the durable E2E suite is a separate
+piece of work and this is not a seed for it.
+
+**Still open, and not ours.** The automated setup cannot sign anybody up: the service refuses
+with "what this would charge cannot be read", because `event_signups.dearest_drop_in` reads
+one field (`MaxDropInPrice`) off the occurrence's dates-grid row and it came back unreadable
+on a freshly created occurrence. Ron, 2026-10-25: *"You shouldn't have to set this -- it will
+automatically be set to the value their membership sets."* He is right, and the refusal is
+still correct — asserting a price nobody can read, against a member's account, is the money
+rule, and `known_cost: 0` was NOT passed to get around it. Filed as courtreserve-api#512,
+which also asks whether the field is unreadable specifically on a new occurrence (a
+hypothesis, not established). Until then the merge half is exercised with `--merge-only`
+after a human does the sign-ups in Court Reserve's own UI, where the membership rate applies.
+
+**The merge itself is still unproven against live Court Reserve** — verified only against the
+stub. That is the one thing this run set out to do and has not yet done.
+
+---
 ## 2026-10-25 — EVERY cancel this repo sent was a 422. Found by the first live run.
 
 The first live run of the duplicate-merge one-off (`ts/scripts/oneoff-live-duplicate-merge.ts`,

@@ -155,7 +155,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
  * the output was indistinguishable from the fix not working. The banner now says
  * which revision actually ran, so one pasted output settles it instead of a guess.
  */
-const SCRIPT_REVISION = 'r4 — merge-only genuinely skips booking and sign-up'
+const SCRIPT_REVISION = 'r5 — every path says which revision it is'
 
 /** The commit this file is being run from, for the same reason. Best effort. */
 function gitDescribe(): string {
@@ -257,6 +257,12 @@ async function occurrencesAtSlot(
 async function main(): Promise<void> {
   const cr = new CourtReserveClient(BASE, KEY)
 
+  // Before anything, including the --cancel path: say which revision this is.
+  // The first --cancel run printed no revision line because this block returned
+  // ahead of the banner, so that path could not self-identify either.
+  log(`oneoff-live-duplicate-merge  ${SCRIPT_REVISION}`)
+  log(`  checkout   ${gitDescribe()}`)
+
   if (CANCEL_ARG) {
     const ids = CANCEL_ARG.split(',')
       .map((x) => Number(x.trim()))
@@ -290,8 +296,6 @@ async function main(): Promise<void> {
   const ymd = target.formatYmd()
 
   log('ONE-OFF LIVE TEST — duplicate session, two players, merge')
-  log(`  revision   ${SCRIPT_REVISION}`)
-  log(`  checkout   ${gitDescribe()}`)
   log(`  event      ${EVENT_ID}`)
   log(`  slot       ${date} ${ampm(START_HM)} – ${ampm(END_HM)}  (${DAYS_AHEAD} days out)`)
   log(`  courts     #${COURT_A} and #${COURT_B}`)
