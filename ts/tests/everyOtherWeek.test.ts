@@ -11,7 +11,7 @@ import { recommend } from '../src/recommender'
 import { scanPatternGaps, horizonDates } from '../src/jobs/patternGaps'
 import { scanCatchUp } from '../src/jobs/catchUp'
 import { NaiveDateTime } from '../src/datetime'
-import { isOnWeek, onWeekStatus, type FixedEvent, type Policy } from '../src/policy'
+import { invalidCadence, isOnWeek, onWeekStatus, type FixedEvent, type Policy } from '../src/policy'
 import { dropExpired, resolveFixedEvents } from '../src/fixedEvents'
 
 const FX = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -109,6 +109,30 @@ describe('every-other-week standing sessions', () => {
     expect(wed.stats.skipped_fixed_events).toContainEqual(
       expect.objectContaining({ event_id: EID, reason: 'bad_anchor' }),
     )
+  })
+
+  // D-0224: the anchor answers WHICH WEEK, not when the series begins. A pattern put on a
+  // group that has already been meeting has to name a Wednesday it really ran on, and the
+  // only honest one is in the past — so a back-dated anchor is a correct row, not a defect.
+  // What it must never do is add a session: it sets parity and nothing else.
+  it('a back-dated anchor sets the parity and books nothing extra', () => {
+    // Same Wednesdays as `divas` (10/7, 10/21, 11/4 …), named from four weeks earlier.
+    const running: FixedEvent = { ...divas, anchor_date: '2026-09-09' }
+    expect(invalidCadence(running)).toBe(false)
+    for (const d of WINDOW) expect(isOnWeek(running, d)).toBe(isOnWeek(divas, d))
+
+    // The OTHER parity is a different series, not the same one read loosely — one week of
+    // back-dating flips which Wednesdays run, which is why it is never guessed at.
+    const offParity: FixedEvent = { ...divas, anchor_date: '2026-09-16' }
+    expect(isOnWeek(offParity, NaiveDateTime.parseDate('10/7/2026'))).toBe(false)
+    expect(isOnWeek(offParity, NaiveDateTime.parseDate('10/14/2026'))).toBe(true)
+
+    // And nothing is booked before the pattern's own window: the scheduler only ever asks
+    // about dates from today forward, and a date before the anchor is off either way.
+    expect(isOnWeek(running, NaiveDateTime.parseDate('9/2/2026'))).toBe(false)
+    const policy = policyWith([running])
+    expect(recommend([], '10/7/2026', policy).recommendations.some((r) => r.event_id === EID)).toBe(true)
+    expect(recommend([], '10/14/2026', policy).recommendations.some((r) => r.event_id === EID)).toBe(false)
   })
 
   it('alerts when a resolved pattern has an unusable anchor, and passes the fields through', async () => {
