@@ -81,12 +81,21 @@ daily job books 14 days out — not `policy.json`. The scheduler reads it over
 2. **cache** — the last-good read, when the service is unreachable. Alerts.
 3. **seed** — `policy.json`'s `fixed_events.events`, when there is no usable cache. Alerts.
 
-Three rules that exist because of real incidents:
+Four rules that exist because of real incidents:
 
 - **A fallback is never silent.** Anything but a clean live read posts a Discord
   failure alert (D-0049's path, `sendFailureAlert`). So does a pattern that resolves
   to **zero** active slots, because "everything is retired" and "the read quietly
   returned nothing" are indistinguishable to the recommender.
+- **A run that BOOKS uses a live read only.** The cache and the seed keep the pattern
+  readable through an outage; they cannot make it trustworthy to write from. A cache
+  re-applies `until`, so it cannot book a *retired* slot — but nothing in it can show
+  a slot that **moved**, and the club moved one Tuesday→Monday and retired six inside
+  one fortnight. So on the auto-book path (`ts/src/scheduler.ts`) a non-live source
+  books **no** standing slot and says so in the alert; `--dry-run` and `--recommend`
+  still show the fallback pattern, because seeing it is the point. The 8:45
+  pattern-gaps job books the standing sessions from a live read and alarms when it
+  has none — the rule it has always followed, now shared by both booking jobs.
 - **`until` is the retirement switch, honoured on every source.** A row whose `until`
   is on or before today is not booked. The service filters it server-side, but the
   cache and the seed do not — so the cutoff is re-applied on each read.
@@ -105,6 +114,18 @@ Three rules that exist because of real incidents:
 4. **2-hour minimum gap between same-event occurrences** (no back-to-back)
 5. All 5 skill levels covered when possible
 6. Fill toward 60% utilization target
+
+**Constraints 3 and 3b are measured against `existing + recommended combined` — for
+EVERY event id.** `policy.json` has always said so; the code used to count only the
+five generic Open Play ids, and dropped every other `EventId` on the live calendar on
+the floor. So for a standing slot with its own Court Reserve event (a Level Play or
+Structured Play), the recommender could not see the occurrence it had booked a day
+earlier: it found the court busy, took the next free one, and the slot ran as **two
+instances of one session at one hour on different courts**. One hour of one session is
+one occurrence holding however many courts it needs — a second booking of it is a
+defect, not a two-court session. `ts/tests/duplicateFixedEvents.test.ts` holds that
+line, and the booking path refuses a repeat of `(event_id, date, start_time)` even if
+one reaches it.
 
 Skill levels: Beginner · Advanced Beginner · Intermediate · Advanced Intermediate · Advanced
 

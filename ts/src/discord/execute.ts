@@ -63,30 +63,31 @@ function isMulti(rec: RecommendationDict): boolean {
   return (rec.extra_court_ids?.length ?? 0) > 0
 }
 
-/** Book one recommendation (primary court, then extra courts for multi-court). */
+/**
+ * Book one recommendation as ONE occurrence holding ALL its courts.
+ *
+ * This used to be two calls — `/book` for the primary court, then
+ * `/events/courts` to add the rest — and it threw the second call's result away.
+ * So a two-court session whose widening step hit `503 browser busy` was reported
+ * as a clean success while it sat on one court at half capacity, which then read
+ * as a gap to the 8:45 pattern-gaps job. `/book` owns both steps now and returns
+ * a failure rather than a partial success when it cannot get every court asked
+ * for (courtreserve-api #409, daemon D-0166) — the same call `patternGaps.ts`
+ * already makes. `max_people` is sent only when the recommendation carries one,
+ * so a Pass 1/2 slot with no cap is left uncapped exactly as before.
+ */
 async function bookOne(cr: CourtReserveClient, rec: RecommendationDict): Promise<CrActionResult> {
-  const result = await callCr(() =>
+  return callCr(() =>
     cr.book({
       event_id: String(rec.event_id),
       date: rec.date,
       start_time: rec.start_time,
       end_time: rec.end_time,
-      court_id: String(rec.court_id),
+      court_ids: [rec.court_id, ...(rec.extra_court_ids ?? [])].map(String),
+      ...(rec.max_participants ? { max_people: rec.max_participants } : {}),
       dry_run: false,
     }),
   )
-  if (result.success && isMulti(rec) && result.occurrence_id != null) {
-    const allIds = [rec.court_id, ...rec.extra_court_ids]
-    await callCr(() =>
-      cr.setCourts({
-        res_id: String(result.occurrence_id),
-        court_ids: allIds.map(String),
-        max_people: rec.max_participants,
-        event_id: String(rec.event_id),
-      }),
-    )
-  }
-  return result
 }
 
 export interface AutoBookResult {
@@ -129,6 +130,35 @@ async function bookOneWithRetry(
 }
 
 /**
+ * Drop any recommendation that repeats a session already in this list — same
+ * event, same date, same start time. One hour of one session is one occurrence
+ * holding however many courts it needs; two bookings of it are the duplicate
+ * Ron sees on the calendar, not a two-court session. The recommender is where
+ * that is decided, so a repeat reaching here means something upstream regressed:
+ * refuse it at the boundary too, and say so in the log rather than booking it.
+ */
+export function dedupeRecommendations(
+  recs: readonly RecommendationDict[],
+  log: (m: string) => void = noop,
+): RecommendationDict[] {
+  const seen = new Set<string>()
+  const out: RecommendationDict[] = []
+  for (const rec of recs) {
+    const key = `${rec.event_id}|${rec.date}|${rec.start_time}`
+    if (seen.has(key)) {
+      log(
+        `  ⚠️  SKIPPED duplicate ${rec.date} ${rec.start_time} ${rec.event_name} ` +
+          `(event ${rec.event_id}) — already booked in this run`,
+      )
+      continue
+    }
+    seen.add(key)
+    out.push(rec)
+  }
+  return out
+}
+
+/**
  * Book a list of recommendations directly — no Discord, no approval gate.
  * Used by the daily scheduler's auto-book mode. Logs each result; returns the
  * per-event outcomes (for the booking log + failure alert). Transient errors
@@ -142,7 +172,7 @@ export async function bookAll(
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<AutoBookResult[]> {
   const results: AutoBookResult[] = []
-  for (const rec of recs) {
+  for (const rec of dedupeRecommendations(recs, log)) {
     const r = await bookOneWithRetry(cr, rec, log, sleep)
     const where = `${rec.date} ${rec.start_time} Court #${rec.court_num} ${rec.level}`
     if (r.success) log(`  ✅ booked ${where}`)

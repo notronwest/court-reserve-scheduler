@@ -5,6 +5,59 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-24 — Duplicate standing sessions: one session booked twice at one hour
+
+**Symptom (Ron, evening of 10/24):** "There are a lot of double booked courts and same
+sessions booked at the same time (e.g Advanced Open Play on 2 courts but two different
+instances)."
+
+**Cause, found and reproduced:** `ts/src/recommender.ts` seeded its occurrence tally
+(`eventCounts` / `eventSessions`) from `APPROVED_EVENTS_ORDER` only, and the
+`eventCounts.has(e.event_id)` gate then discarded every live occurrence whose `EventId`
+was not one of the five generic Open Play ids. For a standing slot with its own Court
+Reserve event — the 18 of 27 active `courtreserve.fixed_events` rows that carry an
+`event_id`, among them Co-Ed/Co-ed Structured Play and the Level Play slots — hard
+constraints 3 (max 2/day) and 3b (2-hour gap) were therefore measured against an empty
+history, although `policy.json` scopes both as "existing + recommended combined". The
+only surviving guard was per-court availability, so Pass 0 saw its own occurrence's
+court busy, took the next free court, and booked a **second instance of the same session
+at the same hour**. The 8:30 catch-up (`cli.ts catch-up --book`, 15 dates every morning)
+is what fired it repeatedly: `classify` can never return `ok` for such a date, because
+Pass 0 always re-recommends the slot, so any date whose `booking_log_<date>.json` was
+missing or recorded `booked: 0` went back through the full recommend+book path. The
+mini's Court Reserve link failing 10/15→10/17 is what left those logs missing.
+
+Refuted on the way: a `null` `event_id` does **not** create a new event series — it maps
+to the level's generic Open Play id (`recommender.ts` Pass 0), and those ids were the
+ones correctly protected. `until` was already honoured on all three sources
+(`fixedEvents.ts` `dropExpired`, applied in `finish()`); the LLM path already drops
+hallucinated slots (`llm/ranker.ts` `parseBookings`); `patternGaps.ts` already widens
+rather than double-books and already fails closed on a non-live pattern.
+
+**Done:**
+- Every live occurrence now counts toward constraints 3 and 3b, collapsed to one entry
+  per `(event_id, start, end)` so a two-court occurrence is one occurrence rather than
+  two — which also stops a miscount silently eating a day's second standing session.
+- `bookOne` books one occurrence holding ALL its courts in a single `/book` with
+  `court_ids`, the contract `cr/types.ts` already documents (courtreserve-api #409,
+  D-0166). It used to `/book` the primary court and then `/events/courts` the rest while
+  **discarding that second result**, so a widening step that hit `503 browser busy` left
+  a half-capacity single-court session reported as a clean success.
+- `bookAll` refuses a repeat of `(event_id, date, start_time)` at the booking boundary.
+- The auto-book path books no standing slot from a cached or seeded pattern, and the
+  alert says which source and how many slots were withheld. Preview paths are unchanged.
+- Regression: `ts/tests/duplicateFixedEvents.test.ts` (10 tests; 5 fail on `main`).
+  Full suite 197 pass, `tsc --noEmit` clean.
+
+**Not done / known:** the duplicates already sitting on the upcoming calendar are not
+touched by this. They are enumerable from `logs/booking_log_<date>.json` on the mini
+(each `results` row carries `event_id`, `start_time`, `court_num` and the
+`occurrence_id`), with one caveat: a catch-up re-book overwrites that date's log in
+place, so the FIRST instance's `occurrence_id` is lost and the Discord auto-book
+confirmations are the only record of it. Removing an occurrence is a Court Reserve
+write and a `cancel_session` ask, not something this repo does unprompted.
+
+---
 ## 2026-10-22 — Builder: issue #83 — standing sessions every other week (D-0202)
 
 **Done:** One predicate (`onWeekStatus`/`isOnWeek` in `ts/src/policy.ts`) now answers "is this
