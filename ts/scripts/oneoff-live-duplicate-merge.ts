@@ -50,6 +50,7 @@
  * CRTEST_MEMBER_A, CRTEST_MEMBER_B (names, or numeric org_member_ids to skip the
  * name lookup), CRTEST_COURT_A, CRTEST_COURT_B.
  */
+import { execFileSync } from 'node:child_process'
 import 'dotenv/config'
 import { CourtReserveClient } from '../src/cr/client'
 import { COURTS } from '../src/recommender'
@@ -144,6 +145,31 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
     throw new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`)
   }
   return (text ? JSON.parse(text) : undefined) as T
+}
+
+/**
+ * Bumped by hand on every change to this file.
+ *
+ * It exists because the same failure has now happened twice: a flag or a fix was
+ * added here, the operator ran the script from a checkout that predated it, and
+ * the output was indistinguishable from the fix not working. The banner now says
+ * which revision actually ran, so one pasted output settles it instead of a guess.
+ */
+const SCRIPT_REVISION = 'r4 — merge-only genuinely skips booking and sign-up'
+
+/** The commit this file is being run from, for the same reason. Best effort. */
+function gitDescribe(): string {
+  try {
+    const run = (args: string[]): string =>
+      execFileSync('git', args, { encoding: 'utf8' })
+        .trim()
+    const sha = run(['rev-parse', '--short', 'HEAD'])
+    const branch = run(['rev-parse', '--abbrev-ref', 'HEAD'])
+    const dirty = run(['status', '--porcelain', '--', 'scripts/oneoff-live-duplicate-merge.ts'])
+    return `${branch} @ ${sha}${dirty ? ' (uncommitted edits to this script)' : ''}`
+  } catch {
+    return 'unknown (git not readable from here)'
+  }
 }
 
 const log = (m: string): void => console.log(m)
@@ -264,6 +290,8 @@ async function main(): Promise<void> {
   const ymd = target.formatYmd()
 
   log('ONE-OFF LIVE TEST — duplicate session, two players, merge')
+  log(`  revision   ${SCRIPT_REVISION}`)
+  log(`  checkout   ${gitDescribe()}`)
   log(`  event      ${EVENT_ID}`)
   log(`  slot       ${date} ${ampm(START_HM)} – ${ampm(END_HM)}  (${DAYS_AHEAD} days out)`)
   log(`  courts     #${COURT_A} and #${COURT_B}`)
