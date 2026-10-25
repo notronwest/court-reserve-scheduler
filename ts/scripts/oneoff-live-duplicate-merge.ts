@@ -1,0 +1,351 @@
+/**
+ * ONE-OFF LIVE TEST — duplicate session, two players, merge. NOT a regression test.
+ *
+ * Ron, 2026-10-25: *"Run a test where you create a duplicate event on the same day
+ * -- sign up Caryn for one of those and Me for the other -- and then delete the
+ * duplicate re-assigning the member to the event that was kept (I have a separate
+ * session building E2E regression tests so just do this as a one off)."*
+ *
+ * It lives in `ts/scripts/`, NOT `ts/tests/`, on purpose: it writes to the LIVE
+ * Court Reserve and must never be picked up by `vitest` or CI. The durable E2E
+ * suite is somebody else's work — do not grow this into it.
+ *
+ * ## What it does, in order
+ *
+ *  1. Health-check the service and refuse to go on without it.
+ *  2. Resolve the two members by name from the live membership records.
+ *  3. Prove the target slot is EMPTY. It refuses rather than touching a real session.
+ *  4. Book occurrence A, then occurrence B — same event, same hour, two courts.
+ *     That is the duplicate, made the way the bug made it.
+ *  5. Register one member on each, `notify: false`.
+ *  6. Prove the two rosters hold one member each.
+ *  7. Run the REAL cleanup — `runDuplicateCleanup`, exactly what the 9/11/13/15/17
+ *     job runs, no test double.
+ *  8. Prove it: one occurrence left, BOTH members on it, the other gone.
+ *  9. Clean up after itself — withdraw both members and cancel the survivor — in a
+ *     `finally`, so a failure half-way still tidies up rather than leaving two
+ *     members booked onto a test session.
+ *
+ * ## Why it is safe to run
+ *
+ * - It needs `--confirm`. Without it, it prints the plan and exits.
+ * - It only ever touches the slot it created. Step 3 aborts on anything already there.
+ * - The date defaults to 45 days out and the hour to 20:00 — outside the booking
+ *   horizon the scheduler works in, and outside the operating window the recommender
+ *   fills, so no other job interacts with it.
+ * - `notify: false` throughout, so neither member is emailed about any of it.
+ * - Teardown runs even on failure, and says loudly what it could not undo.
+ *
+ * ## Usage (on the club Mac, where the service and its credentials live)
+ *
+ *   npx tsx scripts/oneoff-live-duplicate-merge.ts            # plan only
+ *   npx tsx scripts/oneoff-live-duplicate-merge.ts --confirm   # do it
+ *
+ * Overrides: CRTEST_EVENT_ID, CRTEST_DAYS_AHEAD, CRTEST_START, CRTEST_END,
+ * CRTEST_MEMBER_A, CRTEST_MEMBER_B (names, or numeric org_member_ids to skip the
+ * name lookup), CRTEST_COURT_A, CRTEST_COURT_B.
+ */
+import 'dotenv/config'
+import { CourtReserveClient } from '../src/cr/client'
+import { COURTS } from '../src/recommender'
+import { NaiveDateTime } from '../src/datetime'
+import { runDuplicateCleanup } from '../src/jobs/duplicateEvents'
+import { findDuplicateOccurrences, readOccurrences } from '../src/availability'
+import type { ScheduleItem } from '../src/cr/types'
+
+const CONFIRMED = process.argv.includes('--confirm')
+
+/** Co-ed Advanced Open Play by default — a real event, so the duplicate is real. */
+const EVENT_ID = Number(process.env.CRTEST_EVENT_ID ?? 1633147)
+const DAYS_AHEAD = Number(process.env.CRTEST_DAYS_AHEAD ?? 45)
+const START_HM = process.env.CRTEST_START ?? '20:00'
+const END_HM = process.env.CRTEST_END ?? '22:00'
+const COURT_A = Number(process.env.CRTEST_COURT_A ?? 1)
+const COURT_B = Number(process.env.CRTEST_COURT_B ?? 2)
+const NAME_A = process.env.CRTEST_MEMBER_A ?? 'Caryn'
+const NAME_B = process.env.CRTEST_MEMBER_B ?? 'Ron'
+
+const BASE = process.env.CRAPI_URL ?? 'http://localhost:8787'
+const KEY = process.env.CRAPI_KEY ?? ''
+
+/**
+ * Direct call for the two endpoints the scheduler's client has no method for —
+ * register and unregister, plus the membership-records read. Deliberately local to
+ * this script rather than added to `CourtReserveClient`: the live jobs never
+ * register anybody, and a one-off test should not widen the production client.
+ */
+async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { 'X-API-Key': KEY, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(`${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`)
+  }
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+const log = (m: string): void => console.log(m)
+const step = (n: number, m: string): void => console.log(`\n── ${n}. ${m}`)
+
+class TestFailed extends Error {}
+
+function ampm(hm: string): string {
+  const [h, m] = hm.split(':').map(Number)
+  const suffix = h < 12 ? 'AM' : 'PM'
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${suffix}`
+}
+
+/**
+ * Resolve a member by name against the live membership records, or pass a numeric
+ * id straight through. Refuses an ambiguous name rather than guessing which
+ * "Ron" was meant — registering the wrong member is not recoverable by this script.
+ */
+function resolveMember(
+  nameOrId: string,
+  records: Array<Record<string, unknown>>,
+): { id: number; name: string } {
+  if (/^\d+$/.test(nameOrId)) return { id: Number(nameOrId), name: `member ${nameOrId}` }
+
+  const needle = nameOrId.trim().toLowerCase()
+  const seen = new Map<number, string>()
+  for (const r of records) {
+    const name = String(r.member_name ?? r.MemberName ?? r.name ?? '').trim()
+    const id = Number(r.org_member_id ?? r.OrgMemberId ?? r.member_id ?? NaN)
+    if (!name || !(id > 0)) continue
+    if (name.toLowerCase().includes(needle)) seen.set(id, name)
+  }
+  if (seen.size === 0) {
+    throw new TestFailed(
+      `no member matched "${nameOrId}". Pass a numeric org_member_id instead, e.g. ` +
+        `CRTEST_MEMBER_A=123456`,
+    )
+  }
+  if (seen.size > 1) {
+    const options = [...seen.entries()].map(([id, n]) => `${n} (#${id})`).join(', ')
+    throw new TestFailed(
+      `"${nameOrId}" matched ${seen.size} members — ${options}. Pass the org_member_id you ` +
+        'mean so this cannot register the wrong person.',
+    )
+  }
+  const [[id, name]] = [...seen.entries()]
+  return { id, name }
+}
+
+/** Occurrences of EVENT_ID at the target slot, read fresh from the live calendar. */
+async function occurrencesAtSlot(
+  cr: CourtReserveClient,
+  date: string,
+  startHm: string,
+): Promise<ReturnType<typeof readOccurrences>> {
+  const items = (await cr.schedule(date, date)) as ScheduleItem[]
+  const known = new Set(Object.keys(COURTS).map(Number))
+  return readOccurrences(items, known).filter(
+    (o) => o.event_id === EVENT_ID && o.start.formatHm() === startHm,
+  )
+}
+
+async function main(): Promise<void> {
+  const cr = new CourtReserveClient(BASE, KEY)
+
+  const today = NaiveDateTime.parseDate(new Date().toLocaleDateString('en-US'))
+  const target = today.addHours(24 * DAYS_AHEAD)
+  const date = target.formatDate() // M/D/YYYY
+  const ymd = target.formatYmd()
+
+  log('ONE-OFF LIVE TEST — duplicate session, two players, merge')
+  log(`  event      ${EVENT_ID}`)
+  log(`  slot       ${date} ${ampm(START_HM)} – ${ampm(END_HM)}  (${DAYS_AHEAD} days out)`)
+  log(`  courts     #${COURT_A} and #${COURT_B}`)
+  log(`  members    ${NAME_A}  and  ${NAME_B}`)
+  log(`  emails     suppressed on every write (notify: false)`)
+
+  if (!CONFIRMED) {
+    log('\nPlan only. Re-run with --confirm to write to the live Court Reserve.')
+    return
+  }
+
+  step(1, 'Service health')
+  if (!(await cr.health())) {
+    throw new TestFailed('courtreserve-api is not answering — nothing was touched.')
+  }
+  log('   ok')
+
+  step(2, `Resolve ${NAME_A} and ${NAME_B}`)
+  const bothNumeric = /^\d+$/.test(NAME_A) && /^\d+$/.test(NAME_B)
+  const records = bothNumeric
+    ? []
+    : (await api<{ items?: Array<Record<string, unknown>> }>('GET', '/memberships/records'))
+        ?.items ?? []
+  const memberA = resolveMember(NAME_A, records)
+  const memberB = resolveMember(NAME_B, records)
+  log(`   ${memberA.name} (#${memberA.id})`)
+  log(`   ${memberB.name} (#${memberB.id})`)
+  if (memberA.id === memberB.id) {
+    throw new TestFailed('both names resolved to the same member — nothing was touched.')
+  }
+
+  step(3, 'Prove the slot is empty')
+  const before = await occurrencesAtSlot(cr, date, START_HM)
+  if (before.length > 0) {
+    throw new TestFailed(
+      `${before.length} occurrence(s) of event ${EVENT_ID} already sit at ${date} ` +
+        `${START_HM} — refusing to touch a real session. Move the slot with ` +
+        'CRTEST_DAYS_AHEAD or CRTEST_START.',
+    )
+  }
+  log('   empty')
+
+  let occA: number | undefined
+  let occB: number | undefined
+  let survivor: number | undefined
+  const registered: Array<{ res: number; member: number; name: string }> = []
+
+  try {
+    step(4, 'Book the duplicate — same event, same hour, two courts')
+    for (const court of [COURT_A, COURT_B]) {
+      const res = (await cr.book({
+        event_id: String(EVENT_ID),
+        date,
+        start_time: ampm(START_HM),
+        end_time: ampm(END_HM),
+        court_ids: [String(COURTS[court].id)],
+      })) as { success?: boolean; occurrence_id?: number; error?: string }
+      if (res?.success === false) {
+        throw new TestFailed(`booking court #${court} failed: ${res.error ?? 'no reason given'}`)
+      }
+      log(`   booked court #${court} → occurrence ${res?.occurrence_id ?? '(id not returned)'}`)
+    }
+
+    const pair = await occurrencesAtSlot(cr, date, START_HM)
+    if (pair.length !== 2) {
+      throw new TestFailed(
+        `expected exactly 2 occurrences at the slot, the live calendar shows ${pair.length}`,
+      )
+    }
+    // Lowest occurrence id is the one rankForKeeping will keep when both copies
+    // hold one player on one court — so the survivor is predictable, and asserted.
+    const ordered = [...pair].sort((a, b) => a.occurrence_id - b.occurrence_id)
+    occA = ordered[0].occurrence_id
+    occB = ordered[1].occurrence_id
+    survivor = occA
+    log(`   duplicate confirmed: ${occA} and ${occB}`)
+
+    step(5, `Register ${memberA.name} on ${occA} and ${memberB.name} on ${occB}`)
+    for (const [res, member] of [
+      [occA, memberA],
+      [occB, memberB],
+    ] as const) {
+      await api('POST', '/events/registrations/register', {
+        event_id: EVENT_ID,
+        res_id: res,
+        org_member_ids: [member.id],
+        notify: false,
+      })
+      registered.push({ res, member: member.id, name: member.name })
+      log(`   ${member.name} → ${res}`)
+    }
+
+    step(6, 'Prove one player on each copy')
+    for (const [res, member] of [
+      [occA, memberA],
+      [occB, memberB],
+    ] as const) {
+      const roster = await cr.roster(EVENT_ID, res, date, date)
+      const ids = roster.map((r) => r.org_member_id)
+      if (!ids.includes(member.id) || ids.length !== 1) {
+        throw new TestFailed(
+          `occurrence ${res} should hold exactly ${member.name} (#${member.id}); roster is ` +
+            `[${ids.join(', ')}]`,
+        )
+      }
+      log(`   ${res}: ${member.name} only`)
+    }
+
+    step(7, 'Run the real cleanup (what the 9/11/13/15/17 job runs)')
+    const resolutions = await runDuplicateCleanup(
+      cr,
+      null, // no Discord post from a test
+      new Set(Object.keys(COURTS).map(Number)),
+      { days: DAYS_AHEAD + 1, log: (m) => log(`   ${m}`) },
+    )
+    const mine = resolutions.find((r) => r.group.event_id === EVENT_ID && r.group.date === date)
+    if (!mine) throw new TestFailed('the cleanup did not see the duplicate it was given')
+    if (mine.mergeFailed?.length) {
+      throw new TestFailed(
+        `the merge stopped part-way: ${JSON.stringify(mine.mergeFailed)}. ` +
+          'If half_moved is true, somebody is on BOTH copies — fix that by hand.',
+      )
+    }
+
+    step(8, 'Prove the result on the live calendar')
+    const after = await occurrencesAtSlot(cr, date, START_HM)
+    if (after.length !== 1) {
+      throw new TestFailed(`expected 1 occurrence left, the calendar shows ${after.length}`)
+    }
+    survivor = after[0].occurrence_id
+    if (survivor !== occA) {
+      throw new TestFailed(
+        `expected the lower-id copy ${occA} to be kept, but ${survivor} survived — ` +
+          'the keeper rule did not behave as rankForKeeping says it should',
+      )
+    }
+    const finalRoster = await cr.roster(EVENT_ID, survivor, date, date)
+    const finalIds = finalRoster.map((r) => r.org_member_id).sort((a, b) => a - b)
+    const wanted = [memberA.id, memberB.id].sort((a, b) => a - b)
+    if (JSON.stringify(finalIds) !== JSON.stringify(wanted)) {
+      throw new TestFailed(
+        `the surviving copy should hold BOTH members [${wanted.join(', ')}]; roster is ` +
+          `[${finalIds.join(', ')}]`,
+      )
+    }
+    // Both are now on the survivor, so teardown withdraws them from there.
+    registered.length = 0
+    registered.push(
+      { res: survivor, member: memberA.id, name: memberA.name },
+      { res: survivor, member: memberB.id, name: memberB.name },
+    )
+    log(`   one copy left (${survivor}) holding ${memberA.name} and ${memberB.name}`)
+    log('\n✅ PASS — the duplicate was removed and both players ended up on the copy kept.')
+  } finally {
+    step(9, 'Clean up after the test')
+    const stuck: string[] = []
+    for (const r of registered) {
+      try {
+        await api('POST', '/events/registrations/unregister', {
+          event_id: EVENT_ID,
+          res_id: r.res,
+          org_member_id: r.member,
+          notify: false,
+        })
+        log(`   withdrew ${r.name} from ${r.res}`)
+      } catch (e) {
+        stuck.push(`${r.name} (#${r.member}) is still on occurrence ${r.res}`)
+      }
+    }
+    for (const id of [survivor, occA, occB].filter((x): x is number => x != null)) {
+      const live = await occurrencesAtSlot(cr, date, START_HM)
+      if (!live.some((o) => o.occurrence_id === id)) continue
+      try {
+        await cr.cancel({ res_id: String(id) })
+        log(`   cancelled test occurrence ${id}`)
+      } catch (e) {
+        stuck.push(`test occurrence ${id} is still on the calendar`)
+      }
+    }
+    if (stuck.length) {
+      log('\n⚠️  COULD NOT FULLY CLEAN UP — deal with these by hand:')
+      for (const s of stuck) log(`   • ${s}`)
+    } else {
+      log('   nothing left behind')
+    }
+  }
+}
+
+main().catch((err) => {
+  const message = err instanceof Error ? err.message : String(err)
+  console.error(`\n❌ FAIL — ${message}`)
+  process.exit(1)
+})
