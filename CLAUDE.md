@@ -127,6 +127,14 @@ defect, not a two-court session. `ts/tests/duplicateFixedEvents.test.ts` holds t
 line, and the booking path refuses a repeat of `(event_id, date, start_time)` even if
 one reaches it.
 
+**A cancelled reservation holds no court and is not the session being present.** The
+`/schedule` feed can carry cancelled rows; `isCancelled` in `ts/src/availability.ts` is
+the one predicate for them, used by every reader of the feed. This is what lets a
+cleanup hold: cancel one of two duplicate instances and the survivor still blocks a
+re-book, while the cancelled instance's court goes back to being usable. Cancelling the
+**only** instance of a standing slot does not retire it — the gap-filler books it again
+the next morning, by design. A standing slot is retired by stamping its `until`.
+
 Skill levels: Beginner · Advanced Beginner · Intermediate · Advanced Intermediate · Advanced
 
 ## Common Operations
