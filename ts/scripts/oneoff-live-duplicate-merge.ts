@@ -63,7 +63,7 @@ const END_HM = process.env.CRTEST_END ?? '22:00'
 const COURT_A = Number(process.env.CRTEST_COURT_A ?? 1)
 const COURT_B = Number(process.env.CRTEST_COURT_B ?? 2)
 const NAME_A = process.env.CRTEST_MEMBER_A ?? 'Caryn'
-const NAME_B = process.env.CRTEST_MEMBER_B ?? 'Ron'
+const NAME_B = process.env.CRTEST_MEMBER_B ?? 'Ron West'
 
 const BASE = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const KEY = process.env.CRAPI_KEY ?? ''
@@ -102,6 +102,14 @@ function ampm(hm: string): string {
  * Resolve a member by name against the live membership records, or pass a numeric
  * id straight through. Refuses an ambiguous name rather than guessing which
  * "Ron" was meant — registering the wrong member is not recoverable by this script.
+ *
+ * Narrowest match that finds anybody wins, because a plain substring is far too
+ * loose on real names: "Ron" is inside Aaron, Sharon, Caron, Gendron, Bergeron,
+ * Perron and Erin Caron, so the first live run came back with 25 candidates.
+ *
+ *   1. the whole name, exactly       — "Ron West"
+ *   2. a whole word in the name      — "Ron" → Ron West, Ron Bose, …
+ *   3. a substring anywhere          — last resort, so a partial still works
  */
 function resolveMember(
   nameOrId: string,
@@ -110,28 +118,42 @@ function resolveMember(
   if (/^\d+$/.test(nameOrId)) return { id: Number(nameOrId), name: `member ${nameOrId}` }
 
   const needle = nameOrId.trim().toLowerCase()
-  const seen = new Map<number, string>()
+  const people: Array<{ id: number; name: string }> = []
   for (const r of records) {
     const name = String(r.member_name ?? r.MemberName ?? r.name ?? '').trim()
     const id = Number(r.org_member_id ?? r.OrgMemberId ?? r.member_id ?? NaN)
     if (!name || !(id > 0)) continue
-    if (name.toLowerCase().includes(needle)) seen.set(id, name)
+    if (!people.some((p) => p.id === id)) people.push({ id, name })
   }
-  if (seen.size === 0) {
+
+  const exact = people.filter((p) => p.name.toLowerCase() === needle)
+  const byWord = people.filter((p) =>
+    p.name
+      .toLowerCase()
+      .split(/[^a-z0-9']+/)
+      .includes(needle),
+  )
+  const loose = people.filter((p) => p.name.toLowerCase().includes(needle))
+  const hits = exact.length ? exact : byWord.length ? byWord : loose
+
+  if (hits.length === 0) {
     throw new TestFailed(
       `no member matched "${nameOrId}". Pass a numeric org_member_id instead, e.g. ` +
-        `CRTEST_MEMBER_A=123456`,
+        'CRTEST_MEMBER_A=123456',
     )
   }
-  if (seen.size > 1) {
-    const options = [...seen.entries()].map(([id, n]) => `${n} (#${id})`).join(', ')
+  if (hits.length > 1) {
+    const options = hits
+      .slice(0, 12)
+      .map((p) => `${p.name} (#${p.id})`)
+      .join(', ')
     throw new TestFailed(
-      `"${nameOrId}" matched ${seen.size} members — ${options}. Pass the org_member_id you ` +
-        'mean so this cannot register the wrong person.',
+      `"${nameOrId}" matched ${hits.length} members — ${options}` +
+        `${hits.length > 12 ? ', …' : ''}. Give the full name, or the org_member_id you mean, ` +
+        'so this cannot register the wrong person.',
     )
   }
-  const [[id, name]] = [...seen.entries()]
-  return { id, name }
+  return hits[0]
 }
 
 /** Occurrences of EVENT_ID at the target slot, read fresh from the live calendar. */
