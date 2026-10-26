@@ -4342,6 +4342,43 @@ falls before the pattern's own earliest first session or before today. Guessing 
 was given — a cadence-2 slot with no first date is refused in plain words with the control named,
 never defaulted to this week. Booking any session before the event's own start.
 
+### D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed
+
+*2026-10-26 · scope: `ts/src/jobs/patternGaps.ts, ts/src/scheduler.ts, ts/src/jobs/catchUp.ts, courtreserve_api/events_drain.py, courtreserve_api/load.py` · source: Ron, 2026-10-26, after the gap sweep booked six standing sessions and reported eight with no Court Reserve event behind them — *"One thing I am seeing -- I may delete recurring events -- if we see that I have deleted a recurring event in the future -- don't recreate it"*. He had deleted the conflicting events himself before creating a replacement, which is why the earlier read said every court was full.*
+
+**Decision.** Deleting a recurring event in Court Reserve is an instruction, not damage. Nothing
+in the fleet may undo it.
+
+1. **Never recreate.** No job, drain or sweep creates a Court Reserve event to satisfy a
+   standing pattern that has lost one. The gap sweep books *occurrences against an event that
+   exists*; it has never created an event, and that is now a rule rather than an accident of
+   how it was written. A future "helpful" fix that notices a pattern missing its event and
+   makes one is forbidden by this record, not merely absent.
+
+2. **A deleted event retires its pattern — it does not alarm every week.** Today a pattern
+   whose event is gone reports `no_event` on every date in the horizon, for ever: eight of the
+   seventeen gaps in the 2026-10-26 sweep were two patterns repeating across six dates. An
+   alarm that cannot be acted on and never stops is noise that trains people to ignore the
+   channel. When the event is **confirmed deleted or cancelled in Court Reserve**, the pattern
+   is retired through the same rail the dashboard's Retire uses, once, and said once.
+
+3. **Confirmed, never inferred.** "Absent from a read" is not "deleted". A failed fetch, a
+   windowed mirror or a renamed event must not retire a club session — that is the
+   fail-closed rule this operation already applies to every other destructive step. Retirement
+   requires a positive read of the event as deleted or cancelled; anything else stays an alarm.
+
+4. **A pattern that NEVER had an event is a different fault, and keeps its own name.** The
+   2026-10-26 sweep's eight were `event_id` **null** — seeded weekly patterns that never
+   carried a Court Reserve event at all, not deletions. They cannot book and never could, and
+   calling them "deleted" would hide a seeding gap behind a human's decision. The two cases are
+   reported with different words.
+
+**Why this is Ron's to decide and not ours to optimise.** A deleted recurring event is him
+changing what the club runs. The cost of getting it wrong is asymmetric: re-creating something
+he removed puts a session in front of members that he decided should not exist, and it does so
+silently, weekly. Leaving a genuinely accidental deletion un-recreated costs one sentence in a
+channel and a click. The fleet takes the cheaper mistake.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
