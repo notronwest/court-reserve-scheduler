@@ -5,6 +5,19 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-10-27 — the 8:00 run and the 8:30 catch-up report "started" and "finished" (#85, D-0154)
+
+`ts/ops/fleet-run.sh` (sourced by `run-scheduler.sh` and `run-catch-up.sh`) calls daemon's
+`run-report.sh start|end`. Both calls are timeboxed to 2s and their result ignored, so a dead
+endpoint cannot delay or skip a booking; the recorder itself only spools locally. Outcome:
+all booked and none failed -> `ok`; some booked / some failed -> `degraded`; nothing booked on
+error -> `failed` (catch-up: exit 0 -> `ok`, else `failed`). The 8:00 self-heal window through
+8:30 is declared in daemon's `JOBS` (`scheduler-daily heal=30`). These wrappers have no host
+gate or lock of their own, so `start` is the first thing after the date is computed.
+Tests: `ts/tests/runReport.test.ts`. No deploy-shape change (`./setup.sh` installs the same
+wrappers).
+
+---
 ## 2026-10-25 — EVERY cancel this repo sent was a 422. Found by the first live run.
 
 The first live run of the duplicate-merge one-off (`ts/scripts/oneoff-live-duplicate-merge.ts`,
