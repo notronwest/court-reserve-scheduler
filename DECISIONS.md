@@ -4379,6 +4379,56 @@ he removed puts a session in front of members that he decided should not exist, 
 silently, weekly. Leaving a genuinely accidental deletion un-recreated costs one sentence in a
 channel and a click. The fleet takes the cheaper mistake.
 
+### D-0239 — A merged migration is not an applied migration; where it applies is each repo's DEPLOYMENT.md, and on the mini it is a human act
+
+*2026-10-28 · scope: `supabase/migrations/**, **migrations/**, .github/workflows/migrations.yml, DEPLOYMENT.md, agents/builder/**, infrastructure/heartbeat/**` · source: demonstrated 2026-10-27 — Ron ran `./setup.sh` in `courtreserve-api` on the mini at ~15:38Z to apply `0071_cr_pos_catalog_all_items.sql`; `migrate --status` read 71 of 72 applied with 0071 `[PENDING]` before and 72 of 72 after. The migration had been merged to `main` hours earlier and nothing had applied it. Supersedes D-0004, whose "applied by CI on merge" is the premise that failed. Already recorded true elsewhere and contradicted: D-0114 rule 6, D-0135, D-0092's closing paragraph.*
+
+**Decision.** D-0004's first half stands and is carried forward: a schema change is **code**, drafted
+in a PR and reviewed; no interactive session or agent runs `supabase db push`; there is no migration
+outside a PR. The Builder may draft additive and reversible migrations — create table/index/view, a
+nullable column, a new enum value, a non-`SECURITY DEFINER` function — and blocks destructive DDL,
+`NOT NULL` or `UNIQUE` on populated columns, RLS and policies, `SECURITY DEFINER`, money, and
+backfills. One clause changes, and it is the one that matters at the other end.
+
+1. **A merge is not an application.** D-0004 said migrations are "applied by CI on merge to the routed
+   branch". That is not true fleet-wide and must never be assumed. **What applies a migration is
+   per-repo, and the authority is that repo's `DEPLOYMENT.md` YAML block** (D-0007), parsed — never
+   inferred from a workflow file, a `wrangler.*`, or the fleet norm.
+2. **Where it is a human act, it is the owner's.** In `club-dashboard`, `courtreserve-api`, `qbo-api`
+   and `court-reserve-scheduler` a migration applies when a person runs `git pull && ./setup.sh` on
+   the club Mac mini. That command is a deploy **and** a production schema migration against the one
+   live database, so it is stop-list row 3 and Ron's (D-0096). An agent prepares it, hands him the
+   step in D-0068's shape, and does not run it.
+3. **The only evidence of application is the live state, read back.** `migrate --status`, or the
+   relevant `schema_migrations` table. Merged, CI green, promoted to `production`, and a current
+   checkout on the mini are each fully compatible with `PENDING`. This is D-0083: a self-report
+   ("merged") is not the outcome ("applied").
+4. **What this record does not assert.** It names the four hand-applied repos because daemon's own
+   register already records them (D-0114 rule 6, D-0135, D-0092). It makes **no** claim about the CI
+   path in `tournament-manager`, `third-shot-academy` or `rating-session-manager`: that was not
+   verified, because this session could read only daemon. For those three, rule 1 is the whole
+   instruction — read their `DEPLOYMENT.md`.
+
+**Why.** A premise that migrations auto-apply makes a merged migration look live, so a session reads
+D-0004, concludes the schema change has landed, and reports it done while the SQL sits unapplied on a
+machine nobody has touched. On 2026-10-27 that cost a day of the point-of-sale catalogue being empty
+while everyone believed it had shipped; the fix was Ron running `./setup.sh` himself. It also sets up
+the worse error in the other direction — treating the merge as the promotion, when the promotion is a
+separate human act on a specific machine.
+
+The register had the truth and the falsehood active at the same time. D-0114 rule 6 says it outright
+("club-dashboard's migrations are not applied by CI, whatever the fleet norm says"), D-0135 and
+D-0092 say it again, and D-0004 and D-0137 went on asserting the opposite — so which a session
+believed depended on which record it happened to read. That is the fault being closed, not merely a
+wrong sentence.
+
+**Forbids.** Reporting, recording or carding a schema change as live, applied or shipped on the
+strength of a merge, a green check, a promotion or a fresh checkout. An agent or session applying a
+migration to a live database — including through a SQL or migration tool (D-0218). Writing "applied
+by CI on merge" into a record, doc or prompt for a repo whose `DEPLOYMENT.md` says a human applies it.
+Inferring a repo's migration path from a CI workflow, a plist or a `wrangler.*` instead of parsing its
+`DEPLOYMENT.md` YAML block. `supabase db push` from a session or agent, or a migration outside a PR.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
