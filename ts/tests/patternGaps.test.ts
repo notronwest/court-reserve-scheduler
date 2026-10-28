@@ -61,6 +61,44 @@ describe('scanPatternGaps', () => {
     })
   })
 
+  // ── A court taken back by hand stays taken back (D-0234) ──────────────────
+  // Ron, 2026-10-28: "during the week I may delete an event that is set to recurring
+  // because I need the court -- we should not try and fix the missing recurring event."
+  // This job used to filter cancellations out and book the hole straight back, so a court
+  // reclaimed by hand lasted until the next sweep.
+  it('a cancelled occurrence is withdrawn, not missing — nothing is reported and nothing books', () => {
+    const cancelled = item({ EventName: 'Co-ed Intermediate Structured Play (Cancelled)' })
+    expect(scanPatternGaps([intermediate], [cancelled], dates)).toEqual([])
+  })
+
+  it('withdrawn beats SHORT of courts, so a cancelled one-court copy is not widened either', () => {
+    const cancelled = item({ EventName: 'Cancelled - Co-ed Intermediate Structured Play', Courts: 'Court #4' })
+    expect(scanPatternGaps([intermediate], [cancelled], dates)).toEqual([])
+  })
+
+  it('a cancellation at ANOTHER hour does not silence the real gap', () => {
+    const elsewhere = item({
+      EventName: 'Co-ed Intermediate Structured Play (Cancelled)',
+      StartDateTime: '2026-10-19T09:00:00', EndDateTime: '2026-10-19T11:00:00',
+    })
+    const gaps = scanPatternGaps([intermediate], [elsewhere], dates)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ status: 'no_court', has_courts: 0 })
+  })
+
+  it('a cancellation of a DIFFERENT session does not silence this one', () => {
+    const other = item({ Id: 7, EventId: 1, EventName: 'Co-ed Intermediate Open Play (Cancelled)' })
+    const gaps = scanPatternGaps([intermediate], [other], dates)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ status: 'no_court' })
+  })
+
+  it('a LIVE occurrence beside a cancelled one is still judged on its courts', () => {
+    const live = item({ Courts: 'Court #2, Court #3' })
+    const cancelled = item({ Id: 8, EventName: 'Co-ed Intermediate Structured Play (Cancelled)' })
+    expect(scanPatternGaps([intermediate], [live, cancelled], dates)).toEqual([])
+  })
+
   it('catches the session that is there on too few courts', () => {
     const gaps = scanPatternGaps([intermediate], [item({ Courts: 'Court #4' })], dates)
     expect(gaps).toHaveLength(1)
