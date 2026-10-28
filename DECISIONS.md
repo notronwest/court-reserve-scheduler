@@ -4342,43 +4342,6 @@ falls before the pattern's own earliest first session or before today. Guessing 
 was given — a cadence-2 slot with no first date is refused in plain words with the control named,
 never defaulted to this week. Booking any session before the event's own start.
 
-### D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed
-
-*2026-10-26 · scope: `ts/src/jobs/patternGaps.ts, ts/src/scheduler.ts, ts/src/jobs/catchUp.ts, courtreserve_api/events_drain.py, courtreserve_api/load.py` · source: Ron, 2026-10-26, after the gap sweep booked six standing sessions and reported eight with no Court Reserve event behind them — *"One thing I am seeing -- I may delete recurring events -- if we see that I have deleted a recurring event in the future -- don't recreate it"*. He had deleted the conflicting events himself before creating a replacement, which is why the earlier read said every court was full.*
-
-**Decision.** Deleting a recurring event in Court Reserve is an instruction, not damage. Nothing
-in the fleet may undo it.
-
-1. **Never recreate.** No job, drain or sweep creates a Court Reserve event to satisfy a
-   standing pattern that has lost one. The gap sweep books *occurrences against an event that
-   exists*; it has never created an event, and that is now a rule rather than an accident of
-   how it was written. A future "helpful" fix that notices a pattern missing its event and
-   makes one is forbidden by this record, not merely absent.
-
-2. **A deleted event retires its pattern — it does not alarm every week.** Today a pattern
-   whose event is gone reports `no_event` on every date in the horizon, for ever: eight of the
-   seventeen gaps in the 2026-10-26 sweep were two patterns repeating across six dates. An
-   alarm that cannot be acted on and never stops is noise that trains people to ignore the
-   channel. When the event is **confirmed deleted or cancelled in Court Reserve**, the pattern
-   is retired through the same rail the dashboard's Retire uses, once, and said once.
-
-3. **Confirmed, never inferred.** "Absent from a read" is not "deleted". A failed fetch, a
-   windowed mirror or a renamed event must not retire a club session — that is the
-   fail-closed rule this operation already applies to every other destructive step. Retirement
-   requires a positive read of the event as deleted or cancelled; anything else stays an alarm.
-
-4. **A pattern that NEVER had an event is a different fault, and keeps its own name.** The
-   2026-10-26 sweep's eight were `event_id` **null** — seeded weekly patterns that never
-   carried a Court Reserve event at all, not deletions. They cannot book and never could, and
-   calling them "deleted" would hide a seeding gap behind a human's decision. The two cases are
-   reported with different words.
-
-**Why this is Ron's to decide and not ours to optimise.** A deleted recurring event is him
-changing what the club runs. The cost of getting it wrong is asymmetric: re-creating something
-he removed puts a session in front of members that he decided should not exist, and it does so
-silently, weekly. Leaving a genuinely accidental deletion un-recreated costs one sentence in a
-channel and a click. The fleet takes the cheaper mistake.
-
 ### D-0239 — A merged migration is not an applied migration; where it applies is each repo's DEPLOYMENT.md, and on the mini it is a human act
 
 *2026-10-28 · scope: `supabase/migrations/**, **migrations/**, .github/workflows/migrations.yml, DEPLOYMENT.md, agents/builder/**, infrastructure/heartbeat/**` · source: demonstrated 2026-10-27 — Ron ran `./setup.sh` in `courtreserve-api` on the mini at ~15:38Z to apply `0071_cr_pos_catalog_all_items.sql`; `migrate --status` read 71 of 72 applied with 0071 `[PENDING]` before and 72 of 72 after. The migration had been merged to `main` hours earlier and nothing had applied it. Supersedes D-0004, whose "applied by CI on merge" is the premise that failed. Already recorded true elsewhere and contradicted: D-0114 rule 6, D-0135, D-0092's closing paragraph.*
@@ -4601,6 +4564,45 @@ repo the sync could fast-forward, 43 and up for every one it could not.
   solved. Rules 2 and 3 are open gaps with no enforcement, stated here so a later
   session does not read this file and relax.
 
+### D-0248 — A cancelled occurrence of a standing session is withdrawn, not missing — the sweep never books it back
+
+*2026-10-28 · scope: `ts/src/jobs/patternGaps.ts, ts/src/scheduler.ts` · source: Ron, 2026-10-28, correcting the reading recorded two days earlier — *"during the week I may delete an event that is set to recurring because I need the court -- we should not try and fix the missing recurring event."* D-0233 had taken "delete a recurring event" to mean retiring the whole weekly pattern. He meant ONE occurrence, mid-week, to free a court.*
+
+**Decision.** Cancelling one occurrence of a standing session is a human taking a court back.
+It is an instruction, and nothing in the fleet undoes it.
+
+1. **A cancelled occurrence at a pattern's hour means the session is WITHDRAWN for that
+   date.** No gap is reported, nothing is booked, and it is not counted as short of courts.
+   The sweep previously filtered cancellations out of the day — deliberately, with a comment
+   saying a cancellation "is the session being gone, which is exactly what this job exists to
+   notice" — and then booked the hole straight back on the same run. A court reclaimed by hand
+   lasted until the next sweep.
+
+2. **Checked before the court arithmetic, not after.** Otherwise a cancelled one-court copy of
+   a two-court session reads as "short" and gets widened, which is the same mistake in a
+   different hat.
+
+3. **Narrow on purpose.** The cancellation has to be of THAT session at THAT hour on THAT
+   date. A cancellation at another hour, or of another session, silences nothing — a real gap
+   is still a real gap, and the pattern's other dates are untouched. One withdrawn Thursday
+   does not retire a Thursday session.
+
+4. **What did NOT change, and is still asserted.** A cancelled instance holds no court, so its
+   court is free for anything else; the recommender does not re-book a slot its surviving copy
+   still covers; a session booked twice at one hour is reported and never acted on. Only the
+   verdict on an all-cancelled slot moved.
+
+**Why this supersedes D-0233 rather than amending it.** That record answered a different
+question — what happens when a recurring EVENT is deleted outright — and built retirement of
+the whole pattern on top of it. Retiring a weekly session because one week was cancelled is
+far more destructive than the behaviour it was trying to prevent, and it was reasoning from a
+misreading. The parts of D-0233 worth keeping are restated here as rule 4 and rule 1: never
+recreate what a human removed, and never infer removal from an absence.
+
+**The asymmetry, as before.** Putting a session back that he deliberately took out gives the
+court away again, silently, and he finds out when somebody turns up to play on it. Leaving a
+genuinely accidental cancellation un-restored costs one sentence and a re-book.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
@@ -4612,3 +4614,4 @@ repo the sync could fast-forward, 43 and up for every one it could not.
 - D-0016 — daemon is the architect of record; decisions live in a register and each repo carries its slice (2026-09-16) → superseded by D-0134
 - D-0130 — The fleet watchdog lives off the fleet, and a quiet agent is an alarm (2026-10-11) → superseded by D-0155
 - D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable (2026-10-14) → superseded by D-0189
+- D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed (2026-10-26) → superseded by D-0248
