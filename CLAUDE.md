@@ -13,7 +13,7 @@ and books confirmed events on Court Reserve automatically.
 
 ## Architecture
 
-**The live jobs run TypeScript (`ts/`), not the Python at the repo root.** Five
+**The live jobs run TypeScript (`ts/`), not the Python at the repo root.** Seven
 launchd agents run on the club Mac, installed by `./setup.sh` from
 [`ts/ops/`](ts/ops/). Court Reserve access goes through the `courtreserve-api`
 HTTP service — none of these drives a browser. The Python tree is the rollback
@@ -22,6 +22,8 @@ path (`ts/ops/rollback.sh`), kept working but not what runs.
 | Service | When | What |
 |---|---|---|
 | `com.whitemountain.scheduler` | Daily 8:00 AM | LLM recommendations → **books directly** (auto-book) → Discord confirmation + `logs/booking_log_<date>.json` |
+| `com.whitemountain.catch-up` | Daily 8:30 AM | Re-books any date in today..today+14 the 8:00 run left empty or never finished; posts to Discord only when it found something |
+| `com.whitemountain.pattern-gaps` | Daily 8:45 AM | Asks per SESSION whether every standing pattern has its occurrence in the next 14 days; books what it can from a **live** read, alarms on the rest |
 | `com.whitemountain.listener` | Always-on | Polls Discord every 3s — handles `!book`/`!move`/`!schedule`/`!help` and waitlist expansions |
 | `com.whitemountain.fetch-history` | Mondays 7:00 AM | Fetches 3 months of attendance history |
 | `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | Alerts on waitlists that can be expanded to another court **and removes duplicate sessions** (see below) |

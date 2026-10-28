@@ -13,7 +13,7 @@
 #   3. Installs Playwright browser (Chromium)
 #   4. Installs the TypeScript runtime deps the launchd jobs run on (ts/)
 #   5. Creates .env from .env.example if it doesn't exist
-#   6. Installs and loads the five launchd services (from ts/ops — see below)
+#   6. Installs and loads the seven launchd services (from ts/ops — see below)
 #   6. Opens Court Reserve in a browser window so you can log in (first time only)
 # ─────────────────────────────────────────────────────────────────────────────
 
