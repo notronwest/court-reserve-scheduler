@@ -1,16 +1,17 @@
 # Deployment — court-reserve-scheduler
 
 No cloud host and no web frontend. This is a **node/tsx** system installed on
-**one always-on Mac** as five launchd agents: a daily auto-booker, a daily
-waitlist checker, a weekly history fetch, a weekly past-event check-in, and a
-persistent Discord listener. "Deploying" is `./setup.sh` on that machine.
+**one always-on Mac** as seven launchd agents: a daily auto-booker, a daily
+catch-up re-booker, a daily standing-session gap filler, a daily waitlist
+checker, a weekly history fetch, a weekly past-event check-in, and a persistent
+Discord listener. "Deploying" is `./setup.sh` on that machine.
 Pushing to `main` deploys nothing.
 
 **The jobs run TypeScript, not Python.** `setup.sh` installs the plists from
 [`ts/ops/`](./ts/ops/); the Python tree at the repo root is the rollback path
 ([`ts/ops/rollback.sh`](./ts/ops/rollback.sh)), not the live one. Court Reserve
 access goes through the [`courtreserve-api`](../courtreserve-api) HTTP service —
-**none of these five jobs drives a browser.**
+**none of these seven jobs drives a browser.**
 
 It still has to be a real Mac, one step removed: `courtreserve-api` drives
 **non-headless Chrome** against a saved browser profile, on the club's
@@ -63,7 +64,7 @@ targets:
     url: n/a — TWO halves. (1) court expansion: PROPOSES to Discord, a human taps ✅, the listener executes. (2) duplicate-session cleanup (ts/src/jobs/duplicateEvents.ts): CANCELS a duplicate occurrence with a reported count of zero registrants, and MERGES a slot where more than one copy has registrants — moving each player onto the copy being kept via POST /events/registrations/move with notify=false, then cancelling the emptied copy only once its roster re-reads as empty. Both unattended; it posts what it did. This is the only unattended Court Reserve DELETE in the repo, and the only unattended write that touches a member's registration — `--dry-run` covers both halves, `--no-dedupe` disables the cleanup without touching expansion
     host: same machine
     config_scope: same .env
-    verify: the job's log under ~/Library/Logs/court_reserve/ — the cleanup logs one line per duplicated slot and names every occurrence id it cancelled. FIRST RUN AFTER DEPLOY: run `npx tsx src/cli.ts`'s waitlist job by hand with --dry-run from ts/ before the 9/11/13/15/17 clock fires it, and read what it says it WOULD cancel. POST /cancel has never been exercised against live Court Reserve, and whether a cancel emails an occurrence's registrants is unestablished — the cleanup only ever cancels occurrences with a REPORTED count of zero, so there is nobody to email on that path, but the first live run is still the first live run
+    verify: the job's log under ~/Library/Logs/court_reserve/ — the cleanup logs one line per duplicated slot and names every occurrence id it cancelled. FIRST RUN AFTER DEPLOY: run `npx tsx src/jobs/checkWaitlists.ts --dry-run` by hand from ts/ before the 9/11/13/15/17 clock fires it, and read what it says it WOULD cancel — `src/cli.ts` has no waitlist subcommand, so the command this line used to name did not exist. Holding the clock off while you look is `launchctl unload ~/Library/LaunchAgents/com.whitemountain.check-waitlists.plist`, and `launchctl load` the same path afterwards; the plist is RunAtLoad false, so loading it does not fire a run. Note that a bare `git pull` arms this job on its next tick — the jobs run out of the working tree through tsx with no build step, so the dry run belongs BETWEEN the pull and the next 9/11/13/15/17, not after `./setup.sh`. POST /cancel has never been exercised against live Court Reserve, and whether a cancel emails an occurrence's registrants is unestablished — the cleanup only ever cancels occurrences with a REPORTED count of zero, so there is nobody to email on that path, but the first live run is still the first live run
     rollback: launchctl unload the plist; to keep expansion but stop the cleanup, add --no-dedupe to ts/ops/run-check-waitlists.sh
   - name: fetch-history
     kind: mac-mini-launchd
@@ -98,7 +99,7 @@ targets:
   - name: cr-browser-session
     kind: none
     trigger: MANUAL, interactive — step 8 of ./setup.sh opens a browser to log in
-    note: used by the Python rollback path only; the five TS jobs reach CR via courtreserve-api
+    note: used by the Python rollback path only; the seven TS jobs reach CR via courtreserve-api
     source: cache/chrome_profile/
     env: PROD
     url: n/a
@@ -131,7 +132,7 @@ git pull && ./setup.sh
 ```
 
 It builds the venv, installs dependencies and Playwright's Chromium, installs
-the `ts/` node dependencies, creates `.env`, **installs and reloads all five
+the `ts/` node dependencies, creates `.env`, **installs and reloads all seven
 launchd agents from [`ts/ops/`](./ts/ops/)**, and walks the first-time Court
 Reserve login. `./setup.sh --restore <bundle.tar.gz>` restores a prior install's
 `.env`, history, browser profile, and booking logs.
@@ -216,7 +217,7 @@ Logs live under `~/Library/Logs/court_reserve/`.
 
 ## Roll back
 
-`git checkout <earlier-commit>` and re-run `./setup.sh` — it reloads all five
+`git checkout <earlier-commit>` and re-run `./setup.sh` — it reloads all seven
 agents. To stop a single job, `launchctl unload ~/Library/LaunchAgents/<label>.plist`.
 To remove everything, `./uninstall.sh`.
 
