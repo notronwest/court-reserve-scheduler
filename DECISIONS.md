@@ -4429,6 +4429,88 @@ by CI on merge" into a record, doc or prompt for a repo whose `DEPLOYMENT.md` sa
 Inferring a repo's migration path from a CI workflow, a plist or a `wrangler.*` instead of parsing its
 `DEPLOYMENT.md` YAML block. `supabase db push` from a session or agent, or a migration outside a PR.
 
+### D-0241 — A decision record never carries a person's name, and the register refuses one that does
+
+*2026-10-28 · scope: `decisions/**, infrastructure/decision-register/**, DECISIONS.md` · source: Ron 2026-10-28, "Go", on daemon#974 — stop the register publishing real people's names into public repositories, and write the rule so the next one is refused rather than caught. The finding behind it: writing D-0238 the day before, a session was about to commit two members' names into a record and the permission gate refused the write on [PII Data Handling] — "the gate is the thing that caught it and not me".*
+
+**Decision.** A person's name does not go into a decision record. Not a member's, not an
+instructor's, not a prospect's, not a caller's — and not in the body, the `title`, or the
+`source:` line, which publishes too.
+
+1. **Say what the person IS to the decision.** "the coach", "a member", "three instructors,
+   333 / 68 / 5 bookings, one with a login". Every record that named someone would have been
+   complete without them: the name was colour, and the measurement was the finding. Who they are
+   lives in the club database, which is where a reader with a reason to know already looks.
+
+2. **The register refuses a record that carries one.** `no-person-names.sh` reads every active
+   and proposed record for a `Firstname Lastname` token and refuses any that is not on the
+   committed `TERMS-NOT-PEOPLE` allowlist. It is wired into `render.sh check` **as an integrity
+   fault, not a quality fault** — the one place this record departs from D-0160. D-0160 ruled that
+   incomplete metadata must not withhold a rule from the repo it binds, because a stale slice is
+   recoverable. **A name on public GitHub is not.** Disclosure is one-way, so it blocks
+   distribution and a missing `enforced-by` does not.
+
+3. **The test is shape, and the allowlist holds only non-people.** A roster check was rejected for
+   two independent reasons: the gate has to be the required pre-merge check, which D-0149 rule 2
+   holds to host-independent, network-free and credential-free — a detector needing database
+   credentials goes amber on its own, teaches its readers to merge past it, and cannot run in a
+   cloud session, which is where most records are now written. And **a roster committed to a repo
+   is itself the disclosure.** So nothing in this mechanism writes a person's name to disk: the
+   allowlist is product names, board columns, lesson types and ordinary English pairs, and is
+   publishable as it stands.
+
+4. **It fails closed, and the friction is the point.** An unrecognised `Firstname Lastname` is
+   refused, so a new product or lesson name costs the author one line in `TERMS-NOT-PEOPLE`, in
+   the same change. **It is a floor, not a guarantee**: it does not catch a lone first name, a
+   nickname, an email address, a phone number or a member number. Rule 1 is the rule; the script
+   is the part of it a machine can decide.
+
+5. **Superseding is the remedy for a record already merged.** A merged record's decision text is
+   never edited (`README.md`), and `render.sh slice` renders a superseded record as a one-line
+   title with no body and no `source:` — so a name-free successor removes the name from all
+   twelve slices without touching the original, which stays in daemon's private history where the
+   audit trail belongs. The gate agrees with the renderer: a superseded record is read on its
+   title line only.
+
+6. **What was already public is removed in the same change as this rule.** D-0183 clause 2 named
+   three instructors with their individual lesson counts in `rating-session-manager`, which is
+   **public**; it is superseded by D-0242, name-free. D-0141's `source:` named a member; D-0108's
+   named a caller and carried a phone number; D-0079's quoted a prospect's name. Those three are
+   **frontmatter metadata, not decision text** — the same class of field as `status` and
+   `superseded_by`, which a supersession edits as a matter of course — so each was redacted in
+   place, marked as redacted, with the original in daemon's git history. Three records name
+   someone in their **body** and publish only into private slices: `GRANDFATHERED` lists their
+   ids and reasons, never their names, and it shrinks only.
+
+**Why.** `render.sh slice` writes a record's **full body** into `DECISIONS.md` and `publish.sh`
+pushes that file into every repo in `REPOS`. **Three of those repos are public.** daemon being
+private contains nothing: the register's whole purpose is to reach the repos it binds, so a name
+typed into a record is a name on public GitHub, and nobody writing a record had reason to know
+that. Measured 2026-10-28 (daemon#974): three named instructors with their individual lesson
+counts were in plain text in a public repository, from a record thirteen days old and `active`.
+
+The attempt caught the day before was caught by a **classifier** firing on [PII Data Handling] —
+not by a rule, and not by the author. Under D-0071 a convention is a gate deployed via a hook or
+it is not a rule, and there was no written convention saying a person's name stays out of a
+record. A control that depends on a general-purpose classifier noticing is a control that has
+already failed six times in this register without anyone hearing about it.
+
+Severity, stated rather than inflated: what was exposed is names with work volumes attached, not
+billing, membership state or contact details. It needed a decision, not an alarm. The decision is
+that the register stops being able to do it.
+
+**Applies to.** Every decision record in every operation's register, and anything generated from
+one. The register's own tooling. Any proposal to loosen the gate to make a record pass.
+
+**Forbids.** A person's name in a record's body, `title` or `source:`. Adding a person's name to
+`TERMS-NOT-PEOPLE` to make a record pass — the refusal is the ask it exists to raise, and the
+allowlist is publishable only because it holds no people. Adding a record to `GRANDFATHERED` for
+anything not already merged, or to spare a record that publishes into a public repo. Editing a
+merged record's decision text to remove a name — supersede it. Making the check a quality fault,
+or skipping it in `--for-publish`, so a slice carrying a name can publish. Giving the check a
+database, a credential or a network call (D-0149 rule 2). A member's phone number, email address
+or member number in a record, which the shape test does not catch and this rule still forbids.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
