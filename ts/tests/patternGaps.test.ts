@@ -99,6 +99,39 @@ describe('scanPatternGaps', () => {
     expect(scanPatternGaps([intermediate], [live, cancelled], dates)).toEqual([])
   })
 
+  // ── A session MOVED on the same day is not missing (D-0249) ───────────────
+  // Ron, 2026-10-28: "Make it so that moves of an event on the same day count -- so its
+  // not recreated during the sweep." A Court Reserve move edits the occurrence in place
+  // and leaves nothing at the old hour, so the cancellation rule above cannot see it.
+  // Measured live: Mens Advanced Plus booked 10/29 17:00 on courts 1+2, moved to 16:00 on
+  // 3+4, and the next sweep reported 17:00 missing.
+  it('a session moved to another hour the same day is not missing — nothing books', () => {
+    const moved = item({ StartDateTime: '2026-10-19T16:00:00', EndDateTime: '2026-10-19T18:00:00' })
+    expect(scanPatternGaps([intermediate], [moved], dates)).toEqual([])
+  })
+
+  it('a move onto FEWER courts is still a move — his choice, not a shortage to widen', () => {
+    const moved = item({ StartDateTime: '2026-10-19T16:00:00', EndDateTime: '2026-10-19T18:00:00', Courts: 'Court #4' })
+    expect(scanPatternGaps([intermediate], [moved], dates)).toEqual([])
+  })
+
+  it('the same session on ANOTHER day does not silence this day', () => {
+    const elsewhere = item({ StartDateTime: '2026-10-20T16:00:00', EndDateTime: '2026-10-20T18:00:00' })
+    const gaps = scanPatternGaps([intermediate], [elsewhere], dates)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ status: 'no_court', has_courts: 0 })
+  })
+
+  it('two sittings of one session in a day: the present one does not silence the absent one', () => {
+    const early: FixedEvent = { ...intermediate, start_time: '09:00', end_time: '11:00' }
+    const late = intermediate // 17:00
+    // Only the 09:00 sitting is on the calendar, at its OWN hour — so 17:00 is genuinely missing.
+    const onlyEarly = item({ StartDateTime: '2026-10-19T09:00:00', EndDateTime: '2026-10-19T11:00:00' })
+    const gaps = scanPatternGaps([early, late], [onlyEarly], dates)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ start_time: '17:00', status: 'no_court' })
+  })
+
   it('catches the session that is there on too few courts', () => {
     const gaps = scanPatternGaps([intermediate], [item({ Courts: 'Court #4' })], dates)
     expect(gaps).toHaveLength(1)

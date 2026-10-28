@@ -66,6 +66,12 @@ export type GapStatus =
    * (D-0234). Never re-booked, never alarmed — it is not missing, it is withdrawn.
    */
   | 'withdrawn'
+  /**
+   * The session IS on the calendar for this date, at a different hour. A human moved it
+   * (D-0249). Never re-booked — a move leaves nothing behind in Court Reserve, so without
+   * this the sweep reads the old hour as empty and books the session a SECOND time.
+   */
+  | 'moved'
 
 export interface PatternGap {
   date: string // M/D/YYYY
@@ -195,6 +201,29 @@ export function scanPatternGaps(
         )
       ) {
         continue
+      }
+      // Moved beats missing, for the same reason and a harder one (D-0249). Ron,
+      // 2026-10-28: "Make it so that moves of an event on the same day count -- so its not
+      // recreated during the sweep." A Court Reserve MOVE edits the occurrence in place and
+      // leaves NOTHING behind at the old hour — no cancellation, no trace — so the rule
+      // above cannot see it and the sweep books the session a second time. Measured:
+      // Mens Advanced Plus was booked 10/29 17:00 on courts 1+2, then moved to 16:00 on
+      // 3+4; the next sweep reported 17:00 missing and would have made a duplicate at
+      // 08:45 the following morning.
+      //
+      // A candidate must not already belong to ANOTHER pattern's own hour — two patterns
+      // of one name on one day (an early and a late sitting) would otherwise let the
+      // present one silence the absent one.
+      if (hits.length === 0) {
+        const claimedHours = new Set(
+          patterns.filter((q) => q.name === p.name && isOnWeek(q, date)).map((q) => q.start_time),
+        )
+        const movedTo = onThisDate.find(
+          (i) =>
+            matchesPattern(i.EventName, p.name) &&
+            !claimedHours.has(NaiveDateTime.fromISO(i.StartDateTime as string).formatHm()),
+        )
+        if (movedTo) continue
       }
       const wants = p.courts ?? 1
       // Courts held across all of them, counted once each.
