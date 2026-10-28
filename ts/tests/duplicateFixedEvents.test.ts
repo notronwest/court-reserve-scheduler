@@ -142,11 +142,18 @@ describe('cancelling one duplicate holds, and frees only that court', () => {
     expect(isCancelled(survivor)).toBe(false)
   })
 
-  it('pattern-gaps reads a slot whose ONLY instance was cancelled as missing, not present', () => {
+  // ⚠️ REVERSED DELIBERATELY (D-0234, 2026-10-28). This used to assert that a slot whose
+  // ONLY instance was cancelled reads as MISSING — and that is exactly the behaviour Ron
+  // asked to stop: "during the week I may delete an event that is set to recurring because
+  // I need the court -- we should not try and fix the missing recurring event." Reading it
+  // as missing is what let the next sweep book the court straight back.
+  //
+  // The two facts around it are unchanged and still asserted above: a cancelled instance
+  // holds no court (its court is usable again), and the recommender does not re-book a slot
+  // its survivor still covers. What changed is only the verdict on an ALL-cancelled slot.
+  it('pattern-gaps reads a slot whose ONLY instance was cancelled as WITHDRAWN — no gap at all', () => {
     const gaps = scanPatternGaps(TUE_PATTERN, [cancelled], [NaiveDateTime.parseDate(TUESDAY)])
-    expect(gaps).toHaveLength(1)
-    expect(gaps[0].has_courts).toBe(0)
-    expect(gaps[0].status).toBe('no_court')
+    expect(gaps).toEqual([])
   })
 })
 

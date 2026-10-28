@@ -61,6 +61,11 @@ export type GapStatus =
   | 'failed'
   /** More than one occurrence of this session at this hour — reported, never acted on. */
   | 'duplicate'
+  /**
+   * The session IS on the calendar for this date, cancelled. A human took the court back
+   * (D-0234). Never re-booked, never alarmed — it is not missing, it is withdrawn.
+   */
+  | 'withdrawn'
 
 export interface PatternGap {
   date: string // M/D/YYYY
@@ -154,14 +159,17 @@ export function scanPatternGaps(
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
-    // A cancelled reservation is not the session being present — it is the
-    // session being gone, which is exactly what this job exists to notice.
-    const onThisDate = items.filter(
-      (i) =>
-        i.StartDateTime &&
-        NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd &&
-        !isCancelled(i),
+    // ⚠️ A cancelled occurrence is NOT an absence to repair (D-0234). Ron, 2026-10-28:
+    // "during the week I may delete an event that is set to recurring because I need the
+    // court -- we should not try and fix the missing recurring event." This job used to
+    // filter cancellations out and then book the hole straight back, so taking a court
+    // back by hand lasted until the next sweep. Both lists are kept: `onThisDate` is what
+    // is actually holding court, `cancelledOnDate` is what a human deliberately removed.
+    const sameDay = items.filter(
+      (i) => i.StartDateTime && NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd,
     )
+    const onThisDate = sameDay.filter((i) => !isCancelled(i))
+    const cancelledOnDate = sameDay.filter((i) => isCancelled(i))
     for (const p of patterns) {
       // An off-week (or an unplaceable two-week row) is never missing — D-0202.
       if (!isOnWeek(p, date)) continue
@@ -175,6 +183,19 @@ export function scanPatternGaps(
           NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
           matchesPattern(i.EventName, p.name),
       )
+      // Withdrawn beats missing: if this session is on the calendar for this date and
+      // cancelled, a human took the court back and that is the end of it. Checked BEFORE
+      // the court arithmetic so a withdrawn session is never counted as short either.
+      if (
+        hits.length === 0 &&
+        cancelledOnDate.some(
+          (i) =>
+            NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
+            matchesPattern(i.EventName, p.name),
+        )
+      ) {
+        continue
+      }
       const wants = p.courts ?? 1
       // Courts held across all of them, counted once each.
       const heldCourts = new Set<number>()
