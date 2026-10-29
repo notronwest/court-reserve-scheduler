@@ -2551,6 +2551,84 @@ record point at the guard.
   session reads, which is the loss D-0151's sibling work (daemon PR #399) exists to stop.
 - Enumerating the `pre-push` allowlist in a new record as though it were closed. Name the guard.
 
+### D-0153 — The CTO stands up with every repo on a schedule, and the fleet map is a committed artifact
+
+*2026-10-12 · scope: `agents/cto/**, infrastructure/cto-standup/**` · source: Ron, 2026-10-12 — "Make sure that the CTO implements a scheduled standup with each repo so he understands where everything is."*
+
+**Decision.** Seth runs a **standup with every repo on a schedule** and writes what he learns
+into a **committed fleet map** — `agents/cto/fleet/INDEX.md` plus one `agents/cto/fleet/<repo>.md`
+card per repo. The map is **committed**, so a cold session reads where everything is **without
+running anything**, and it is a **fixed shape**, so two passes diff cleanly.
+
+⚠️ **Decided ≠ built, and the record says which is which.** What is decided and real today is
+the artifact: the two committed files, their fixed shape, and the rules about what may go in a
+row. What is decided and **not built** is the schedule — nothing regenerates the map. Both
+files therefore open by stating that they are a dated hand snapshot from 2026-10-12 on one
+machine. The target remains a regenerated map; asserting it in the present tense while a reader
+trusts a 17-day-old hand pass is the precise failure this operation keeps paying for, so the
+artifact tells the truth about itself until the job exists.
+
+**He splits across two hosts, by what each half must survive.** D-0130 — now superseded by D-0155, which restates it unchanged — put Seth off-fleet; that
+stays true of the half it was written for, and this record states the other half plainly:
+
+| Half | Runs | Must survive | Why there |
+|---|---|---|---|
+| **The watch** (uptime) | off-fleet, Cloudflare Worker | the whole fleet being down | its entire job is to report that |
+| **The standup** (truth) | the Builder host, under its host fact + lock | nothing — if the repos are unreachable there is nothing to stand up about | it needs checkouts, `git`, `gh` and a model |
+
+This does not weaken D-0130. The thing that must outlive the fleet is the watch, and the watch
+is untouched. The standup is listed in `infrastructure/heartbeat/JOBS` and beats on completion,
+so if it dies the off-fleet half says so — which is the whole point of having both.
+
+**One contractor per repo, never a department.** Each run spawns one subagent per repo, loaded
+with that repo's `DECISIONS.md` slice, returning a fixed-shape report, and then it is gone — the
+pattern already in `decisions/PROCESS.md`. This is the shape D-0130 endorsed when it refused
+departments: depth comes from spawning a specialist per run, and what grows is **data** (a row
+per repo), not `ROLE.md` files with heartbeats of their own.
+
+**The map has two halves, because a repo map does not answer Ron's question.** Where the
+code lives is `fleet/INDEX.md`; **what is actually running** is `fleet/AGENTS.md`, a row per
+standing agent and automation. Every row carries a **state**, and `capability — not
+activated` is a first-class, non-alarming value — built code that nothing schedules is a
+capability, not a service, and reporting it green invents an uptime that does not exist.
+The symmetric error is alarming on something deliberately switched off, which is how an
+alert channel becomes wallpaper. A row sourced from another session rather than from disk
+is **recorded as second-hand**, never laundered into fact.
+
+**The card is a fixed shape**, so two runs diff cleanly and a drift is a line change, not a
+re-read: what it is · what it ships and how (parsed from its `DEPLOYMENT.md` YAML block, never
+inferred) · branch→environment routing · what data it owns · what is in flight · what is stale ·
+**what contradicts itself**. The last field is the one that earns the job.
+
+**Seth reads; he does not tidy.** A standup finding becomes a card or a line in the digest. He
+never edits another repo to make its card prettier.
+
+**Why.** Ron, after Seth was specced: *"so he understands where everything is."* He is right that
+nothing did. The first pass, run by hand on 2026-10-12 against the laptop, found in one sweep:
+`CLAUDE.md`'s sibling-layout block is **wrong about three repos on the machine it is read on** —
+the scheduler's documented laptop spelling no longer matches disk, `rating-session-manager` is
+checked out as `session-manager` with no note anywhere, and `wmpc-mcp` is in the layout and not on
+this machine at all. Two repos on disk (`agent-marketplace`, `watchlist`) appear in no list; one
+of them has **no git remote**. Three sibling directories are worktrees, not repos, and a naive
+reader counts them as five extra products. And four repos' `STATUS.md` had not been touched in a
+month or more.
+
+Every one of those is the same failure as the night before: **a thing we believe, that stopped
+being true, with nothing scheduled to notice.** `CLAUDE.md` already carries a hand-written warning
+that the scheduler's directory name "DIFFERS BY MACHINE — `ls` before you read a file under it,"
+added after it cost a session real time. That warning is a human doing by hand, once, badly, what
+this job does every week.
+
+**Forbids.**
+- Hand-editing a card in `agents/cto/fleet/`. It is generated; fix the source or the generator.
+- Inferring a repo's deploy shape from a `wrangler.*`, a plist or a CI workflow when its
+  `DEPLOYMENT.md` block is parseable — and recording a guess rather than `unknown` when it is not.
+- Giving the standup write access to the repos it reads. It reports; the Builder changes.
+- Treating a directory under the projects root as a repo without checking: a worktree
+  (`.git` as a file), a missing remote, and a non-repo directory are three different findings.
+- Adding a second standing watcher per subject. One officer, one card per repo, contractors per
+  run (D-0155, restating D-0130 parts 1-2).
+
 ### D-0155 — The engineering function reports to the CTO — the no-departments rule bars a second watcher, not a report
 
 *2026-10-12 · scope: `agents/**, infrastructure/*-dispatch/**, infrastructure/fleet-watch/**, infrastructure/heartbeat/**, docs/ai-agents.md` · source: Ron, 2026-10-12, with a path and nothing else — `agents/CTO/agents/user-story` — then, asked how far it went, "All engineering agents move under the CTO." He first asked for D-0130 to be reworded before it merged; it merged first (#517), so the register's own rule applies instead: never edit a merged record's decision text, supersede it.*
@@ -2706,63 +2784,6 @@ selector in one rail and a labeller in another. Removing `daemon-ruling` without
 Re-labelling an issue that carries `ruled`. Adding a rail's own artifact to a reader's disposable
 allowlist instead of excluding it at the writer (D-0144). Installing a rail whose committed enable
 fact says `no`, or re-filing an approval Ron has denied.
-
-### D-0161 — A pause covers one phase, and the phase it covers is named in code
-
-*2026-10-13 · scope: `infrastructure/builder-dispatch/**, **HALT*` · source: Ron, 2026-10-13 — "narrow the halt — no new cards, rework continues", answering the call D-0128 explicitly left to him; found while draining the Blocked + In Review queues (STATUS 2026-10-13)*
-
-**Decision.** The Builder's committed `HALT` pauses **exactly one phase**: a fresh build off an
-Agent Ready card with no open PR (Phase B2). Three things explicitly continue — rework of an
-existing PR (B1), orphan recovery (A), and the whole zero-token board reconcile.
-
-1. **A pause is a mode, not an early exit.** `HALT` set `exit 0` at the top of the dispatcher,
-   before the host lock, the board read and every reconcile. A pause implemented as an exit
-   cannot distinguish the inflow it means to stop from the landing it means to protect, because
-   it runs before anything has been classified. The gate now sets `HALT_NEW_BUILDS` and the
-   decision is applied *after* classification — because "a new card" is a classification
-   outcome, not a board column: an Agent Ready card is rework if an open PR already closes its
-   issue, and a fresh build if not.
-2. **A pause whose file and whose code disagree is the file lying.** `HALT` said *"The Builder
-   finishes nothing it has not already started"* and the code finished nothing **at all**, for
-   four days, invisibly. A pause states which phase it covers and a test proves the others still
-   run, or it is not a pause — it is an outage with a note attached.
-3. **A paused item is named, never silently skipped, and an idle tick caused by a pause says so.**
-   The run summary carries `paused_builds=<n>`, the log names the issue numbers, the heartbeat
-   payload carries `paused_builds` and `halt`, and the idle ping stops claiming "Agent Ready is
-   empty — add cards" when the halt is what emptied it.
-4. **Capping interacts with pausing, and the retained set is what gets capped.** The per-run cap
-   is 5 and is applied before classification on the normal path, unchanged. Under the pause it is
-   applied to the retained set instead — five paused cards ahead of a rework item in board order
-   would otherwise consume every slot and starve the phase the narrowing exists to permit, while
-   the log reported a full tick.
-
-**Why.** D-0128 (2026-10-11) named this deadlock and declined to resolve it: *"This record does
-not narrow the pause of 2026-10-09 — that is Ron's call."* Its rule 2 is the binding half — *a
-release condition whose only possible satisfier is inside the pause is a deadlock, not a
-condition* — and `HALT` condition 1 asked the open-PR count to fall while the pause switched off
-rework, the only non-hand way a `reviewed:changes` PR moves. Ron chose the second of the two
-remedies rule 2 allows: scope the pause to leave the satisfier out. So condition 1 is also
-rewritten here to the **agent-opened** count per D-0128 rule 3, and its unmeasurable *"with no
-one touching it by hand"* clause is retired.
-
-Measured the same day, and recorded so this record is not read as a cure: **all 18 open
-`reviewed:changes` PRs in BUILDER-REPOS are session-opened** — not one carries a
-`feature|db|fn/issue-<N>-` branch and 13 have no linked issue at all, so no card exists to
-trigger the Builder's rework path. Narrowing lets the Builder finish **its own** bounced PRs and
-restores the free reconcile; it moves none of those 18. That is a second, separate gap (a
-session-opened PR has no executor and no card), not this one.
-
-**The signal that says this stopped working** (D-0084). A tick that logs `paused_builds=0` while
-cards sit in Agent Ready with no open PR means the gate is no longer reached — the `exit 0` shape
-has come back. A `HALT` file whose text names phases that `test-halt.sh` does not assert means the
-two have drifted apart again.
-
-**Forbids.** Implementing a pause as an early `exit 0` ahead of classification. Shipping a pause
-whose file names a phase no test asserts. Skipping a paused work item without naming it. Reporting
-an idle tick as a dry queue when a pause emptied it. Applying a per-run cap before a pause filters
-the queue, so paused items consume the slots of the phase still permitted. Reinstating `HALT`
-condition 1's "with no one touching it by hand" clause, or judging the pause on one
-undifferentiated open-PR total (D-0128 rule 3).
 
 ### D-0166 — Creating an event never dead-ends, never reports a success that did not happen, and a 'no' is dated
 
@@ -4690,12 +4711,12 @@ measured). Pillar 5 `docs/design-system.md`, Pillar 2 `docs/change-discipline.md
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
-- D-0153 — The CTO stands up with every repo on a schedule, and the fleet map is a committed artifact (2026-10-12)
 - D-0154 — A run is recorded at its start and its end, so a cut-off is visible and liveness is a query (2026-10-12)
 
 ## Superseded (history)
 
 - D-0016 — daemon is the architect of record; decisions live in a register and each repo carries its slice (2026-09-16) → superseded by D-0134
 - D-0130 — The fleet watchdog lives off the fleet, and a quiet agent is an alarm (2026-10-11) → superseded by D-0155
+- D-0161 — A pause covers one phase, and the phase it covers is named in code (2026-10-13) → superseded by D-0181
 - D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable (2026-10-14) → superseded by D-0189
 - D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed (2026-10-26) → superseded by D-0248
