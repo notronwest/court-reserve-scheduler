@@ -4708,6 +4708,184 @@ reading), D-0049, D-0071 (every clause above is a hook, a guard or a required ch
 (the new required-check step is host-independent, network-free and credential-free, and
 measured). Pillar 5 `docs/design-system.md`, Pillar 2 `docs/change-discipline.md`.
 
+### D-0263 — The dashboard reads what the fleet can do from a swept one-way projection, and seeing a route grants nothing
+
+*2026-10-30 · scope: `infrastructure/capability-registry/**, capabilities.json, supabase/migrations/**, web/src/views/FleetCapabilities.tsx, web/src/lib/loadFleetCapabilities.ts` · source: Ron 2026-10-30 — "Make the dashboard learn about new services", reopening the half of his 2026-10-14 sentence that D-0178 recorded and did not build: "I want the dashboard to continue to never say can't and I want to evolve without me such that if some action build a new endpoint or API moving forward the dashboard just call that API directly." D-0178 shipped the brain's half; a repo-wide search of the dashboard for "capabilit" returned only a status log, a published slice, an unrelated camera helper and a migration comment. Table per decisions/PROCESS.md, six voices on origin/main (daemon, club-dashboard, courtreserve-api, wmpc-web, qbo-api, wmpc-mcp): ONE VETO and five concerns. The veto was verified, upheld, and the first design withdrawn entirely; rules 2, 4, 5 and 6 exist in this form because a voice said so.*
+
+**Decision.** The assembled route table reaches the dashboard as a **redacted, one-way, swept
+projection** in the dashboard's own database, and the surface that renders it is a reader, never an
+actor. D-0178's text is unchanged; this record narrows one sentence of its **Forbids** list and
+says exactly how far.
+
+1. **The projection is not the route table, and the narrowing is precisely this.** D-0178 forbids
+   "a new Supabase table for either the route table or the cache". That forbid is narrowed to **the
+   system of record**: the committed per-repo manifests remain the only place a capability is
+   declared, and a table that is written one way from them, that nothing self-registers into, and
+   that is swept on every sync, is permitted. D-0178 rule 2's own title — "a committed manifest per
+   repo, **not a table in the database**" — and its stated rationale are about self-registration:
+   D-0004 bars the build robot from hand-reviewed row-level security, so a registry it cannot write
+   is a registry nothing self-registers into. A read-only projection does not touch that. D-0181
+   rule 1 already established the pattern in this fleet, in these words: the catalogue of business
+   areas "holds a row per key with its open flag, reconciled **one way** from the committed
+   catalogue by the Builder host on sync, exactly as each repo's `DECISIONS.md` slice is published",
+   and "a key in `build_areas` with no entry in the catalogue is ignored".
+
+   **And the objection this does NOT escape, named rather than waved past.** D-0178 rule 2
+   dismissed the "a second store to keep in step" objection on one explicit ground: *"there is no
+   first store"*. That ground is **gone** — the manifests exist now, this record creates the second
+   store, and the objection therefore applies in full. It is not inapplicable; it is *survivable*,
+   and only because of the sweep. The projection is reconciled in both directions on every sync: an
+   entry with no row is written, a row with no entry is **deleted**. Nothing reads the table to
+   decide anything; the brain still reads the manifests. If the sweep stops, the objection bites
+   immediately, which is why the sweep is the first thing named in `enforced-by` and why its failure
+   raises its own alarm rather than being folded into the write's.
+
+2. **A committed artifact was the first design and is forbidden, on two measured grounds.** The
+   dashboard voice vetoed it and both legs were verified rather than accepted:
+   - the dashboard's JavaScript bundle is served **unauthenticated** — measured 2026-10-30: HTTP
+     200, 2,268,315 bytes, no credential — so a bundled table is world-readable. **An admin gate
+     protects a view, never a bundle.** This is the load-bearing fact, and it is why the payload is
+     redacted even though row-level security already restricts the table to admins: two boundaries,
+     not one.
+   - the pre-push guard's allowlist carries the continuity files and nothing under a product repo's
+     application source, so the publishing push would be refused on every cycle. Widening that
+     allowlist to carry generated code into a product repo's default branch is **forbidden** as a
+     way to achieve this.
+
+   A third ground is not security but honesty: that repo's default branch builds the test site and
+   its production site is promoted separately, so a committed table would have been **stale on the
+   production dashboard until the next promotion**, while looking live.
+
+3. **Seeing a route is never permission to walk it, and the surface adds no call path.** Three
+   facts are rendered from **three separate sources** and labelled as three things: *what exists*
+   from the projection; *what is permitted* from a **live** read of the authority registry at render
+   time, joined on the one linking key; *what is reachable* from the projection's own host list. The
+   projection carries **no permission verdict** — not a boolean, not a copy of a grant — because a
+   permission copied into a row is a permission that outlives it being switched off (D-0178 rule
+   10). The dashboard **never calls a fleet endpoint directly.** Where an affordance exists it hands
+   the ask to the existing Chief-of-Staff queue, where the authority check already runs at the call
+   site. "The dashboard just calls that API directly" is honoured as *the ask reaches the thing that
+   can do it without a person wiring a route*, which is what the analogy is about; a browser holding
+   fleet credentials is not that, and would make learning a route into being authorised to walk it.
+
+4. **Permitted is not reachable, and the surface owes the third column.** Six read tools on the
+   assistant-facing connector carry an **enabled** key in the authority registry while being callable
+   only by the assistant over a person's own grant — never by the brain, which is exactly why D-0178
+   rule 6 calls them permanently cache-ineligible. A surface showing only *exists* and *permitted*
+   would render them as actionable behind a dead button. So `reachable_by` is carried and rendered,
+   an empty list reads as "described here, called by the assistant you talk to, not from this
+   screen", and the affordance requires the brain's host to be in that list.
+
+5. **No affordance on a write, and none without a standing grant.** The hand-to-the-queue affordance
+   requires **all** of: `effect: read`, a non-null linking key, that key enabled in the live read,
+   and the brain's host in `reachable_by`. One voice named the case that settles it: an entry that
+   cuts the accounting link is `effect: write` with no standing grant, and recovering it needs a
+   person re-consenting at the provider. A surface that "never ends at a refusal" must not turn the
+   least recoverable thing a service owns into a one-click proposal sitting beside a report lookup.
+   D-0133 is satisfied by **telling the person the path** — which switch, who sets it, what happens
+   next — not by offering a button for everything.
+
+6. **The payload says what the fleet can do, never how to call it.** `invoke`, `auth` and `input`
+   are dropped and never written. One voice put the reason exactly: thirty-one
+   capabilities on one public tunnel host behind a single shared static key, among them the lines
+   that reopen a charge against a member's card and cancel a membership — publishing exact
+   method-and-path to everyone in an admin group "makes the only thing standing between a reader and
+   a member's card that one shared key. The key is not disclosed; the target list is." That service
+   had already put its own contract read behind a second credential so the route list would not be
+   broadly readable, and a screen rendering the same routes would have reversed it. Credential
+   **names** are permitted by D-0093 and are still dropped: permitted is not needed, and nothing on
+   the screen uses them.
+
+   **The line is drawn at what-versus-how, not at "drop everything unneeded", and `examples` sits
+   on the kept side.** An example is a plain-words ask a person would type — "What is on court 4
+   tomorrow?" — carrying no address, method, credential or argument shape, and the manifest schema
+   already requires it to be a real ask. It is also the field that makes rule 5's affordance real:
+   without it the surface would have to manufacture a request out of the `does` sentence, which
+   reads as a description rather than an ask and reaches the brain as a worse prompt than the
+   manifest already holds. Dropping it would have been caution with no threat behind it, and the
+   test asserts it **positively** so a later tidy-up cannot quietly remove it.
+
+7. **A row is a claim about a commit, and the surface says so in its own words.** Each row carries
+   the repo, the commit it was read at, when the manifests were read, whether that repo has a check
+   that refuses a capability change, and whether it is hand-deployed. A hand-deployed entry's
+   presence is **never** evidence it is running (D-0178 rule 7) and the surface states that; only a
+   successful call is. Rows from a repo that honestly declares no gate are **marked as not
+   automatically checked** rather than shown as equally trustworthy — one voice was right that its
+   deferred per-intent gate becomes "a wrong statement on someone else's screen" the moment another
+   surface renders its entries as what exists, and the honest answer is to show which rows carry that
+   risk, not to hide it.
+
+8. **Staleness is stated, never implied.** The surface renders its own age from the assembled
+   timestamp and says plainly what it is looking at. Three staleness sources are named on screen
+   because all three are real: the brain's host stops assembling; a malformed manifest makes the
+   assembler refuse to republish, so the previous table stands; or the write fails. A stale table
+   that looks live is the failure this rule exists to prevent, and the age is rendered from a
+   timestamp in the data rather than from when the page loaded.
+
+**Why.** Ron's analogy was exact about what was missing, and D-0178 built three quarters of it. The
+brain learned routes; the dashboard did not, so "what can this fleet do?" had no answer on the one
+surface he actually reads, and every new endpoint still needed a person to tell him it existed. The
+reachability gap was never a design question anyone had answered: the assembled table was a file on
+one machine's local disk and the dashboard runs on someone else's edge.
+
+The interesting part is what the table changed. The first design — publish the table as a committed
+file, the way every repo's decision slice is published — was clean, consistent with the fleet, and
+**wrong**, for a reason no amount of care would have caught from inside the design: the dashboard's
+own bundle is public, so "committed artifact" and "admin-only" are incompatible, and the one repo
+that knew that is the one that said so. A second voice independently found that the push would have
+been refused anyway. Five more voices each removed a way the surface would have misled a person —
+permitted read as reachable, a write offered as a proposal, a route list published as a target list,
+an ungated repo's rows presented as checked. **The design that shipped is not a polished version of
+the one proposed; it is a different one.**
+
+**Forbids.**
+
+- Writing `invoke`, `auth`, `input` or any endpoint, method, host, credential name or input schema
+  into the projection or onto the surface — including flattened or renamed, which the test checks
+  by value and not only by key name.
+- Removing `examples` from the projection, which is kept deliberately (rule 6) and asserted
+  positively, because the affordance in rule 5 becomes decorative without it.
+- Writing any permission verdict into the projection, or rendering *permitted* from anything but a
+  live read of the authority registry at render time.
+- A direct call from the dashboard to a fleet endpoint, or any browser-held fleet credential, on
+  the strength of a route appearing in this table.
+- An affordance on a row that is `effect: write`, has a null linking key, whose key is disabled in
+  the live read, or whose `reachable_by` excludes the brain's host.
+- Bundling the table into the dashboard's build output, or widening the pre-push allowlist to carry
+  it into a product repo's default branch.
+- Treating the projection as the system of record: reading it to decide a route, letting anything
+  self-register into it, or shipping the writer without the sweep.
+- Presenting a hand-deployed entry's presence as evidence it is live, or a row from a repo with no
+  gate as equally checked.
+- A surface that renders the table and ends at a refusal, a disabled control with an explanation
+  beside it, or "it doesn't do that today" (D-0133).
+- Rendering an age from when the page loaded rather than from the assembled timestamp in the data.
+- Calling the authority registry and this projection by the same name (D-0178 rule 1).
+
+**The voices.** One veto, five concerns, every one folded in. The veto (club-dashboard) killed the
+committed-artifact route on the public-bundle and pre-push-allowlist grounds, both verified, and on
+re-review returned no objection to the replacement; it also corrected a stale migration number read
+off a checkout twenty migrations behind, which is the standing lesson about measuring `origin/main`
+rather than a working tree. daemon required this record to meet the "second store" objection in its
+own terms rather than lean on D-0004 alone — rule 1's second paragraph exists because of that, and
+it is the single most load-bearing correction here. courtreserve-api supplied rule 6's reasoning and
+the recon-surface framing. wmpc-mcp supplied rule 4, having found that six of its tools would render
+as permitted and actionable. qbo-api supplied rule 5 and the entry that makes it concrete.
+wmpc-web supplied rule 7's marking of ungated rows. Two voices corrected the brief itself: both had
+manifests on their default branch while the proposal described them as later repos.
+
+**Related records.** D-0178 (the route table and the learned-route cache; rule 1 narrows one
+sentence of its Forbids and leaves its text untouched), D-0181 rule 1 (a committed catalogue
+reconciled one way into the dashboard's database — the pattern this follows), D-0127 (a capability
+is a service plus a registry row — the *authority* registry, which this must never be confused
+with), D-0133 (no surface ends at "it cannot be done"), D-0094 rule 7 (an unroutable ask leaves a
+capability request behind), D-0054 (plain language where a person reads), D-0093 (a credential name,
+never a value — and here not even the name), D-0084 (one alarm rail), D-0049 (no second surface),
+D-0147 (one statement of a fact; the kept field list is declared once and asserted against),
+D-0004 (no hand-reviewed row-level security from the build robot), D-0002 (a singleton gates on a
+committed fact), D-0165 rule 1 (a run reports its population from the read side), D-0241 (a record
+carries no person's name).
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
