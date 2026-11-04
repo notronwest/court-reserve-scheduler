@@ -2584,6 +2584,115 @@ this job does every week.
 - Adding a second standing watcher per subject. One officer, one card per repo, contractors per
   run (D-0155, restating D-0130 parts 1-2).
 
+### D-0154 — A run is recorded at its start and its end, so a cut-off is visible and liveness is a query
+
+*2026-10-12 · scope: `infrastructure/heartbeat/**, infrastructure/fleet-watch/**, supabase/migrations/**, agents/cto/**` · source: Ron 2026-10-12, after D-0130 (since superseded by D-0155, which is the governing record) shipped a CTO with nothing to read — "merge 438 and write the run record decision". Table run 2026-10-12 (`decisions/PROCESS.md`): four voices — daemon, club-dashboard, courtreserve-api, court-reserve-scheduler — **four concerns, no veto**. Reworked 2026-10-23 on review to re-base on D-0155. Proposed rather than active because three of the concerns are the exact ones D-0015 reserves for Ron: a production schema change, a new external service, and a customer-facing booking path.*
+
+**Decision.** A run is recorded at **both** edges — a row when it starts, the same row closed
+when it ends. Liveness stops being a separate fact and becomes a query over those rows: the
+newest close per actor. **A success-only beat cannot express a cut-off**, because a beat that
+never arrives is indistinguishable from a job that is not yet due, and that is precisely the
+2026-10-11 failure — three runs died mid-step and the only thing that noticed was Ron looking
+at a stuck modal. Today `cos_requests` step-staleness catches it for CoS work alone.
+
+Eight rules, seven of them written by the table rather than by the proposal:
+
+1. **No machine gets a database credential.** The recorder posts to **one ingest endpoint**
+   (the `wmpc-campaign-report` shape — narrow credential, never `service_role`), which accepts
+   a **fixed field enum** — actor, host, kind, outcome, one-line summary, detail pointer — and
+   rejects free text. That is what makes "no transcript ever leaves the machine" a gate instead
+   of a reminder. `heartbeat.sh` makes no network call today and the fleet's only Supabase
+   credentials sit on the mini; shipping keys to every laptop to fix observability would be a
+   worse trade than the blindness.
+2. **Fail open, always, at both edges.** The recorder keeps `heartbeat.sh`'s invariant — always
+   exit 0, never break the job that beats it — and writes fire-and-forget through a **local
+   spool with replay**. A write that fails is a write that retries later, never a run that
+   stops. **A start-row write may never gate work**: a failed post must not skip an 8:00
+   booking run, which would cost real court hours.
+3. **The start row is written after the host gate and after the lock, never at the top of a
+   wrapper.** `courtreserve-daily-sync` gates on `SYNC-HOST` inside `sync.py`, deliberately
+   before credentials, because `reconcile.sh` copies the repo everywhere — it fired 90 times on
+   a laptop between 2026-07-14 and 10-11. A recorder above that gate would emit one
+   start-with-no-end per non-designated machine per morning: **a phantom cut-off page per
+   laptop per day**, which would discredit the alarm in a week.
+4. **A cut-off is a conjunction, never a lone open row.** Open past 2× the interval **and** the
+   host's own liveness absent **and** past that job's declared self-heal window. A failed close
+   with a live host is tier 2, not a page. `scheduler-catch-up` at 8:30 exists because the 8:00
+   run can partially act, so a partial 8:00 **is expected and self-heals** and must not page
+   before 8:30.
+5. **Outcomes are `ok | degraded | failed | skipped | cut-off`.** `degraded` is not a nicety:
+   `courtreserve-daily-sync` completes and exits 1 DEGRADED most mornings on a flaky
+   `guest_waivers` feed, and both other mappings lie — `failed` pages Ron daily, `ok` erases
+   real data loss.
+6. **Where a repo already records its runs, the fleet row points at that row and restates
+   nothing.** `courtreserve.sync_runs` (migration 0001) is already a committed start/end record
+   with `_start_run`/`_finish_run`, 20+ tables carrying `sync_run_id`, and `occupancy.py`
+   reading it for staleness. It stays the detail **and the freshness source**; the fleet row
+   carries its id. A second freshness source is the D-0049 defect this rule exists to refuse.
+7. **Volume is bounded by rule, not by hope.** A tick that does no work **updates one liveness
+   row per actor**; it does not insert. Only a run that does work inserts a pair. Without this,
+   `cos-dispatch` alone writes thousands of rows a day. Retention is stated with the migration:
+   detail ages out, the liveness row survives.
+8. **One liveness name, and it already exists.** D-0022 specifies a Fleet heartbeat view
+   (`public.fleet_heartbeat`) as Engineering-tab item 1. That name is canonical and the
+   Engineering item is the Fleet health surface, phone-first (D-0047) — **not a second screen**
+   (D-0049). D-0155 part 1 (restating D-0130 part 1, which it superseded) names the published
+   signal the off-fleet watcher reads as "a `fleet_heartbeats` row in the shared Supabase
+   project". That plural name exists in no code, migration or view on `main` (checked
+   2026-10-23), so this rule **amends only that one name**: the signal D-0155 part 1 requires is
+   `public.fleet_heartbeat`. It changes nothing D-0155 decides — the watcher still lives off the
+   fleet, still reads a published row and never a host's files, and still belongs to the CTO — so
+   it does **not** supersede D-0155 and leaves `supersedes:` blank. On activation, the
+   `infrastructure/fleet-watch/DESIGN.md` reference is corrected in the same change.
+
+**Why.** The log existed on 2026-10-11, three layers deep, and could not raise a hand — every
+layer was a file on the machine that went to sleep. Seven places a log lands in this fleet and
+five of them die with the host: `.ok` files, launchd `out`/`err`, `.claude/history/` (gitignored
+by design, because transcripts quote secrets), CoS steps, one Discord alarm path, an activity
+digest that was never installed, and the written record. The gap was never a shortage of logs.
+It was that **the logs lived on the machine whose death we were trying to notice**, and that the
+one signal we did publish only ever said "I finished," never "I started."
+
+This is also the thing D-0155 (superseding D-0130) has the CTO read. `fleet_heartbeats` appears
+in that record and in `infrastructure/fleet-watch/DESIGN.md` and nowhere in any code, so Seth as
+merged is blind on day one — and by his own rule, blindness pages Ron tier 1 after two checks. A watcher
+with nothing to read is worse than no watcher, because it is trusted.
+
+**Forbids.**
+- Shipping a database credential to a machine in order to record its runs. The recorder posts to
+  the ingest endpoint or it does not record.
+- A recorder call that can fail a run: gating work on a start-row write, or letting a failed
+  close surface as a cut-off while the host is demonstrably alive.
+- A recorder call placed above a job's host gate or lock.
+- Mapping a degraded completion onto `ok` or `failed`.
+- Restating a repo's own run record, or introducing a second freshness source for data a repo
+  already tracks (D-0049).
+- Inserting a row for a tick that did no work.
+- A second Fleet health screen, or a second liveness name, while D-0022's Engineering item and
+  `public.fleet_heartbeat` exist.
+
+**Activated 2026-11-04** on Ron's yes of 2026-10-23 (Discord card, "Yes, build it"; D-0198). What
+is true on the day, so the record matches what runs:
+
+- **Built:** the recorder (`infrastructure/heartbeat/run-report.sh`), the ingest Worker, and
+  `public.fleet_runs` and `public.fleet_heartbeat`. Rule 8's name is a **view**, over `fleet_runs`
+  and a table, `public.fleet_liveness`, that holds one row per actor. Writers and repair notes
+  name the table; anything that reads liveness reads the view, so this is not the second name the
+  Forbids list refuses.
+- **Rule 3 outside this repo, read by hand:** the Court Reserve sync starts its run after its
+  `SYNC-HOST` gate. The booking run and its catch-up start at the top of their wrappers and have
+  no gate to sit under, because they are installed on the mini alone. That is safe only while it
+  stays a single install, and nothing here checks it.
+- **Not built yet:** rule 4's cut-off itself. Nothing marks a run `cut-off` until the off-fleet
+  watcher is live (daemon#845). Today an open row is visible and nothing pages on it.
+- **Rule 2 failed in practice until this activation, and it was found by checking it:** launchd
+  kills what remains of a job's process group when the job exits, so the detached flush died with
+  each job and orphaned its lock. Jobs never noticed, as rule 2 requires, but the mini's reports
+  stayed on the mini: its spool sat at the cap from 2026-10-31 and dropped 3,884 of them, oldest
+  first, and its published liveness read up to six days old. The flush now takes its own session.
+  **Those 3,884 are gone**, so `fleet_runs` is thin for the mini between 10-31 and 11-04, and a
+  dropped close can leave a row open forever. The watcher has to survive that (daemon#845).
+
 ### D-0155 — The engineering function reports to the CTO — the no-departments rule bars a second watcher, not a report
 
 *2026-10-12 · scope: `agents/**, infrastructure/*-dispatch/**, infrastructure/fleet-watch/**, infrastructure/heartbeat/**, docs/ai-agents.md` · source: Ron, 2026-10-12, with a path and nothing else — `agents/CTO/agents/user-story` — then, asked how far it went, "All engineering agents move under the CTO." He first asked for D-0130 to be reworded before it merged; it merged first (#517), so the register's own rule applies instead: never edit a merged record's decision text, supersede it.*
@@ -4906,7 +5015,6 @@ resolves to KEEP. Design and the verification of all three proofs:
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
-- D-0154 — A run is recorded at its start and its end, so a cut-off is visible and liveness is a query (2026-10-12)
 
 ## Superseded (history)
 
