@@ -5012,6 +5012,88 @@ because a proof nobody can roll back is a proof nobody can retract. Every uncert
 resolves to KEEP. Design and the verification of all three proofs:
 `infrastructure/worktrees/DESIGN.md`.
 
+### D-0282 — Every Court Reserve write goes through courtreserve-api; a missing endpoint is built, never hand-driven
+
+*2026-11-06 · scope: `courtreserve-api/courtreserve_api/**, club-dashboard/web/src/**, daemon/infrastructure/hand-work-gate/**, daemon/infrastructure/decision-register/render.sh, daemon/decisions/**` · source: Ron 2026-11-06, after a session spent thirty minutes adding member accounts by hand in the booking admin and the records failed afterwards — "Add a gate into every decision related to CR to Use the API -- Just worked a session for 30 minutes that tried to add members manually and after that they failed / Anything asked to be done to CR should use the API and if the API doesn't exists they should create it -- we went over this a million times". Extends D-0199's hand-work gate to the act it could not see, and supplies the enforcement D-0108 clause 1 and D-0110 were written without.*
+
+**Decision.** Four rules about the club's booking system.
+
+1. **Every write goes through `courtreserve-api`.** Creating or changing a member account, a
+   membership plan, an event, a registration, a reservation, a lesson type, a waiver or a
+   transaction is an endpoint call. No session, agent or subagent fills in an admin screen to
+   change a record. **Reading the admin stays free** — that is how a screen gets understood and
+   how a number gets checked — and so does reading the synced mirror, which is the preferred read
+   (D-0060, D-0103).
+2. **A missing endpoint is built, not typed around.** Where no endpoint covers the kind of record
+   in front of you, the work is to add one to `courtreserve-api` and call it, in that order. "The
+   API doesn't exist yet" is the instruction to build it, not the permission to do it by hand.
+   The build lands with its row in `infrastructure/hand-work-gate/WRITE-PATHS.tsv` and its entry
+   in that repo's `capabilities.json`, so the next session is handed the endpoint instead of the
+   refusal.
+3. **A record about the booking system declares its write path.** One frontmatter line,
+   `cr-path:`, with one of four values and a reason: `api — <the endpoint>`, `read — <reads the
+   mirror, writes nothing>`, `none — <touches no write path>`, `hand — <Ron's dated ruling that
+   this one stays by hand>`. Only Ron writes `hand`. A new or edited record without it is refused
+   pre-merge.
+4. **Hand work is overridable, once, and never silent.** Repeating a refused call runs it, and the
+   repeat is recorded as an acknowledged substitution on the filed request (D-0199). That carve-out
+   exists for a member being actively harmed while the endpoint is hours away (D-0197). A hand-done
+   write reported as though a mechanism produced it is the defect, not the delay.
+
+**Why.** The rule was already written down four times — D-0013 (the console calls
+`courtreserve-api`), D-0108 clause 1 ("it is the ONLY path that signs a person up … and never
+drive CR themselves"), D-0110 (a store write is an executor on the rail, not a hand pass), D-0199
+(the second hand-build is the defect) — and was enforceable in none of them at the moment it was
+being broken. D-0108's own `enforced-by` reads `none`. So the fleet had four statements of the
+rule and nothing that could refuse a keystroke.
+
+D-0199's gate was built for exactly this and fires on a **navigation to a create screen**. Its own
+DESIGN.md names the two blind spots that let this happen anyway: an **edit** screen is deliberately
+not a trigger, because you open one to look; and a screen **reached by clicking** carries no
+navigation at all. Adding member accounts goes through both. Measured on this machine the same day:
+the gate log is empty and no marker exists, so it never saw thirty minutes of hand-entering
+members.
+
+Typing is the choke point the navigation could not be. A record cannot be created or changed
+without a field being filled in, so `form_input` and `computer{action:type}` on that host see every
+hand write — through an edit screen, through a clicked-to screen, in a subagent, in either browser
+— while leaving every read untouched. The cost is that a legitimate keystroke on that host is
+refused once per session per kind of record; the benefit is that the act is no longer invisible.
+
+And the write half has **no free first time**, unlike the create half. The difference is not
+inconsistency: the first hand-*build* of a product screen teaches the screen, and the engine that
+replaced it was only writable because someone had driven it. Filling in a field teaches nothing —
+the service that owns writes already exists, so the first keystroke is already a route around a
+mechanism.
+
+The second half answers the ask literally. A gate that lives only in a hook binds sessions, not
+decisions, and this rule has been lost four times in **writing**. `cr-path:` makes the write path a
+thing a record cannot be silent about. 102 existing records touch the booking system and are
+reported rather than refused, because `check-introduced` fails only on faults a change adds — the
+same treatment `enforced-by` got under D-0160, and the reason it was adopted instead of stalling
+the register.
+
+**The table.** Six voices, no veto. `club-phone`, `wmpc-mcp` and `wmpc-web` returned no objection
+and each said the rule is already how they work — none holds a write path of its own, and the
+connector's whole security story is that it carries no booking credential. Three returned a
+concern, and all three are answered in rule 1 above rather than noted and left: the dashboard's
+competitor-panel reads (keyed on the other organisations' ids, not on the hostname), the service
+repo's field-map tracing (declared, logged, passed), and the scheduler's Playwright rollback
+(named as declared automation). The dashboard asked for the org fix in the write half itself,
+not in words, and that is where it went.
+
+**Forbids.**
+- Filling in, saving or submitting any form on the booking admin to change a record, from any
+  session, agent or subagent, in either browser — as the primary path. One acknowledged, declared
+  substitution per session per kind of record is the exception, not a second lane.
+- Switching surfaces to get around the refusal: driving the vendor's own API by hand, writing to
+  the synced mirror to simulate a change, or asking a subagent to do the typing.
+- Adding a row to `WRITE-PATHS.tsv` that names an endpoint which does not exist, or widening
+  `ADMIN-DOMAINS`, to make a call pass. The refusal is the ask it exists to raise.
+- Merging a new or edited record that touches the booking system without a `cr-path:` line, or
+  writing `cr-path: hand` without a dated ruling from Ron.
+- Reporting a hand-entered record as though an endpoint produced it.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
