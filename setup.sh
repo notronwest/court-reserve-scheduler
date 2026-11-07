@@ -15,6 +15,11 @@
 #   5. Creates .env from .env.example if it doesn't exist
 #   6. Installs and loads the seven launchd services (from ts/ops — see below)
 #   6. Opens Court Reserve in a browser window so you can log in (first time only)
+#
+# Release clone (D-0293): once ~/data/web/wmpc/releases/court-reserve-scheduler
+# exists, the jobs run from THAT clone and this script refuses to install from
+# anywhere else. release.sh runs it there with WMPC_RELEASE_NONINTERACTIVE=1 and
+# stdin closed: no prompts, and no browser login (only the Python rollback uses it).
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -35,6 +40,21 @@ PLIST_DIR="$HOME/Library/LaunchAgents"
 VENV="$INSTALL_DIR/venv"
 PYTHON_MIN="3.9"
 RESTORE_BUNDLE=""
+CHECK_LOCATION_ONLY=0
+NONINTERACTIVE="${WMPC_RELEASE_NONINTERACTIVE:-0}"
+
+# ── Release clone guard ───────────────────────────────────────────────────────
+# Runs before anything is written. With no clone on the machine it does nothing,
+# so today's `git pull && ./setup.sh` behaves exactly as before.
+RELEASE_CLONE="${WMPC_RELEASES_DIR:-$HOME/data/web/wmpc/releases}/court-reserve-scheduler"
+if [[ -d "$RELEASE_CLONE" ]]; then
+    if [[ "$(cd "$RELEASE_CLONE" && pwd -P)" != "$(cd "$INSTALL_DIR" && pwd -P)" ]]; then
+        echo "Refusing to install from $INSTALL_DIR:" >&2
+        echo "  the jobs run from the release clone at $RELEASE_CLONE." >&2
+        echo "  Install by releasing a commit (release.sh), not by running setup.sh here." >&2
+        exit 1
+    fi
+fi
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -45,9 +65,12 @@ while [[ $# -gt 0 ]]; do
             [[ -z "$RESTORE_BUNDLE" ]] && { echo "Usage: ./setup.sh --restore <bundle.tar.gz>"; exit 1; }
             shift
             ;;
+        --check-location) CHECK_LOCATION_ONLY=1; shift ;;   # guard above passed; stop (tests)
         *) echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+[[ "$CHECK_LOCATION_ONLY" == "1" ]] && exit 0
 
 step "── White Mountain Pickleball — Scheduler Setup ─────────────────────────"
 info "Install directory: $INSTALL_DIR"
@@ -176,7 +199,10 @@ fi
 # ── 5. Environment file ───────────────────────────────────────────────────────
 step "5. Environment configuration"
 
-if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+if [[ ! -f "$INSTALL_DIR/.env" && "$NONINTERACTIVE" == "1" ]]; then
+    # The release tool links .env in from the shared checkout; never invent one here.
+    warn ".env missing — expected from RELEASE-LINKS; not creating a placeholder"
+elif [[ ! -f "$INSTALL_DIR/.env" ]]; then
     cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
     warn ".env created from template — you MUST fill in these values before running:"
     echo ""
@@ -197,7 +223,8 @@ else
     ok ".env already exists"
 fi
 
-# Validate required keys are non-empty
+# Validate required keys are non-empty (nothing to read when a release left .env unlinked)
+if [[ -f "$INSTALL_DIR/.env" ]]; then
 required_keys=(CR_BASE_URL CR_EMAIL CR_PASSWORD DISCORD_WEBHOOK_URL DISCORD_BOT_TOKEN DISCORD_CHANNEL_ID ANTHROPIC_API_KEY)
 missing=()
 while IFS='=' read -r key _; do
@@ -217,6 +244,7 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     warn "The following keys in .env still have placeholder values:"
     for k in "${missing[@]}"; do echo "    • $k"; done
     warn "The scheduler will not work correctly until these are set."
+fi
 fi
 
 # ── 6. Required directories ───────────────────────────────────────────────────
@@ -273,7 +301,9 @@ install_plist "com.whitemountain.pattern-gaps"
 # ── 8. Court Reserve login (first time) ──────────────────────────────────────
 step "8. Court Reserve browser login"
 
-if [[ -f "$INSTALL_DIR/cache/chrome_profile/Default/Cookies" ]]; then
+if [[ "$NONINTERACTIVE" == "1" ]]; then
+    info "Non-interactive release — skipping the Court Reserve browser login (Python rollback path only)"
+elif [[ -f "$INSTALL_DIR/cache/chrome_profile/Default/Cookies" ]]; then
     ok "Browser profile already exists — Court Reserve session likely saved"
 else
     info "Opening Court Reserve in a browser window so you can log in."

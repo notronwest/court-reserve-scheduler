@@ -156,6 +156,34 @@ Uninstall: `./uninstall.sh` — unloads the agents, removes the plists and the l
 under `~/Library/Logs/court_reserve/`, and offers to delete the project
 directory. It does not touch Discord, the Anthropic key, or Court Reserve itself.
 
+### Release clone — before and after the move (D-0293)
+
+The repo is **ready** to run from a release clone at
+`~/data/web/wmpc/releases/court-reserve-scheduler`. Creating that clone and moving
+the jobs onto it is a separate, approved step; nothing here changes what runs until then.
+
+- **Before the clone exists (true today):** the jobs run from this checkout, and
+  `git pull && ./setup.sh` is the deploy, exactly as above.
+- **After the clone exists:** the jobs run from the clone, and `setup.sh` **refuses**
+  to run from any other path (it prints the clone's path and exits 1, writing nothing).
+  A commit is released with `release.sh` from the daemon repo
+  (`infrastructure/release/`), which runs `setup.sh` inside the clone with
+  `WMPC_RELEASE_NONINTERACTIVE=1` and stdin closed: no prompts and no Court Reserve
+  browser login (that step serves only the Python rollback).
+- **The release contract, all tracked at the released commit:** `setup.sh` (above),
+  `verify.sh` (wraps `./check.sh`; exit 0 is the only pass), and
+  [`RELEASE-LINKS`](./RELEASE-LINKS) — the gitignored state the jobs read between runs
+  (`.env`, `ts/.env`, `logs/`, `state/`, `history/`, `cache/`), linked from the shared
+  checkout so a new clone never starts empty. `logs/` matters most: the 8:30 catch-up
+  reads the booking ledger the 8:00 run wrote there, and the listener keeps pending
+  approvals there. The jobs resolve `../logs`, `../state` and `../history` from `ts/`,
+  so the links work unchanged. The sibling they reach (`daemon`, for heartbeats) is an
+  absolute `$HOME/...` path (`WMPC_DAEMON_DIR`), unaffected by `releases/`.
+- **Deploy:** `release.sh` for a commit. **Verify:** `./verify.sh` in the clone, then the
+  checks under "Verify a deploy". **Roll back:** `release.sh --rollback`.
+  `ts/ops/rollback.sh` stays inside the clone and only swaps launchd plists back to
+  Python; a rollback of the *code* goes through `release.sh --rollback`.
+
 ### cr-browser-session — the part no deploy can recreate
 
 The saved Chrome profile in `cache/chrome_profile/` **is** the Court Reserve
