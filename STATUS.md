@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-06 — ready to run from a release clone (#108, D-0293)
+
+`setup.sh` refuses outside `releases/court-reserve-scheduler` once that clone exists, and has
+`WMPC_RELEASE_NONINTERACTIVE=1` (no prompts, no browser login). Added tracked `RELEASE-LINKS`
+and `verify.sh` (wraps `check.sh`); `DEPLOYMENT.md` has the before/after. Jobs already resolve
+`../logs|state|history` from `ts/`, so links work unchanged. Tests: `ts/tests/releaseClone.test.ts`.
+Nothing runs differently until the clone is created (separate approved step). Two `catchUp`
+`--book` tests time out on clean `main` too; not addressed.
+
+---
 ## 2026-10-27 — the 8:00 run and the 8:30 catch-up report "started" and "finished" (#85, D-0154)
 
 `ts/ops/fleet-run.sh` (sourced by `run-scheduler.sh` and `run-catch-up.sh`) calls daemon's
