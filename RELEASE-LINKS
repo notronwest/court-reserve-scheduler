@@ -1,0 +1,15 @@
+# Gitignored state the jobs read between runs. The release tool links each of these
+# from the shared checkout into a release clone, so a new clone never starts empty.
+# `dir/` is a directory (created in the shared checkout if absent); anything else is a
+# file that must already exist there.
+.env
+ts/.env
+# 8:00 writes booking_log_*.json here, 8:30 catch-up reads it, the listener keeps
+# pending_approval.json here. An empty copy could re-book a day already booked.
+logs/
+# last-good fixed-events cache (D-0056)
+state/
+# attendance history the recommender reads
+history/
+# Chrome profile for the Python rollback path
+cache/

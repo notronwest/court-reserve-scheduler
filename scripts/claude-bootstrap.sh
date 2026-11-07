@@ -12,6 +12,9 @@
 # 0 so it never blocks a `git pull` or a session. Idempotent.
 set -e
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+# A release clone (releases/<repo>, D-0293) is not a working checkout: its sibling is not
+# the projects/ directory, so wmpc-meta would be cloned into releases/.
+[ "$(basename "$(dirname "$REPO_ROOT")")" = "releases" ] && exit 0
 META_DIR="$(dirname "$REPO_ROOT")/wmpc-meta"
 META_URL="git@github-notronwest:notronwest/wmpc-meta.git"
 
