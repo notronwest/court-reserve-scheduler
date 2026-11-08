@@ -5,6 +5,15 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-08 — a standing pattern runs only inside [anchor_date, until] (#111)
+
+`onWeekStatus` (`ts/src/policy.ts`) now returns `off` before `anchor_date` and after `until` for
+every cadence, weekly included; null edges behave as before. Pass 0, the level tally, the gap
+scan and its fixer all read it, so none can book or report a date outside the run. The
+whole-pattern drop in `dropExpired` is unchanged. Tests: `ts/tests/patternRange.test.ts`.
+Seeding the clinic patterns is daemon's, after this ships.
+
+---
 ## 2026-11-06 — ready to run from a release clone (#108, D-0293)
 
 `setup.sh` refuses outside `releases/court-reserve-scheduler` once that clone exists, and has

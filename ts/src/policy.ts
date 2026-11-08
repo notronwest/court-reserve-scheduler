@@ -45,14 +45,22 @@ export type OnWeek = 'on' | 'off' | 'invalid'
  * arithmetic (D-0202): Pass 0, the per-day level tally, the pattern-gap scan and its fixer
  * all ask here, so they cannot disagree about which dates are sessions.
  *
- * A date is an on-week iff it falls on `day_of_week`, is on or after `anchor_date`, and
- * the whole weeks between them divide by `every_weeks`. `invalid` is a two-week row whose
+ * A date is an on-week iff it falls on `day_of_week`, is within `[anchor_date, until]`
+ * (either edge may be null), and, for an every-other-week row, the whole weeks between
+ * them divide by `every_weeks`. `invalid` is a two-week row whose
  * anchor is missing, malformed or on the wrong weekday (or a cadence other than 1/2) —
  * never guessed at, never booked weekly; callers skip it and `fixedEvents` alerts.
  */
 export function onWeekStatus(fe: FixedEvent, date: NaiveDateTime): OnWeek {
   if (fe.day_of_week !== date.weekdayName()) return 'off'
   if (invalidCadence(fe)) return 'invalid'
+  const ymd = date.formatYmd()
+  // The run's own edges hold for every cadence, weekly included: nothing before
+  // `anchor_date`, nothing after `until` (the last date it runs).
+  const anchorYmd = fe.anchor_date ? String(fe.anchor_date).slice(0, 10) : null
+  if (anchorYmd && ymd < anchorYmd) return 'off'
+  const untilYmd = fe.until ? String(fe.until).slice(0, 10) : null
+  if (untilYmd && ymd > untilYmd) return 'off'
   if (fe.every_weeks == null || Number(fe.every_weeks) === 1) return 'on'
   const days = Math.round((date.ms - NaiveDateTime.parseDate(String(fe.anchor_date).slice(0, 10)).ms) / 86_400_000)
   if (days < 0) return 'off'
