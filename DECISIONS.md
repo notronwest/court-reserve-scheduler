@@ -5215,6 +5215,38 @@ empty roots file or an unreadable `gh` is reported as unknown or as a fault, nev
 as green. Replacing the deterministic audit with a model-driven one without first
 answering, in its own `DESIGN.md`, the four conditions the retired agent failed.
 
+### D-0308 — A buzz means one thing: a card with a button waiting for his press
+
+*2026-11-09 · scope: `infrastructure/alerting/ring.sh, infrastructure/alerting/alert.sh, infrastructure/discord-ui/card.sh, infrastructure/ping/**, infrastructure/ring-gate/**, infrastructure/pi-capture/src/camd.py, infrastructure/pi-capture/src/camera-health.sh, infrastructure/record-watchdog/record-watchdog.py, infrastructure/heartbeat/escalate.sh, src/notify.ts, src/deliver.ts, discord_notify.py, discord_listener.py, ts/src/discord/**, courtreserve_api/billing_drain.py, src/discord.ts` · source: Ron 2026-11-09, answering daemon#1285 — "Only a card I can press."*
+
+**Decision.** A Discord message from this operation may **ring Ron's phone** only when it is a
+**needs-you card carrying a button waiting for his press**. Everything else posts **quietly**
+(Discord's SUPPRESS_NOTIFICATIONS, `1 << 12`): in the channel, readable, no push, no badge.
+
+1. **Quiet now, that rang before:** the new-ledger-line ping, a session's question and its PR
+   link, the critical-fault ping after its ledger line, the camera faults on air, the
+   recording watchdog, and the meeting desk's message-to-Ron. `WMPC_ALERT_LOUD` is retired.
+2. **A failure that needs his hands is a card, never a line.** `infrastructure/ping/needs-you.sh`
+   raises a needs-you card with *Done — off my list* / *Tell me more*; camd's "press record
+   again" and Mr. Robot's lost question use it. A ledger line still reaches him: the ledger rail
+   turns it into a card with buttons, and that card is what rings.
+3. **The one exception: a needs-you card posted while buttons are offline still rings**, and
+   says so on the card. Otherwise a lost bot token would silence every ask on his list at once —
+   the louder failure is the recoverable one (D-0296 rule 3). A needs-you card with buttons
+   live but none attached is quiet: that is a renderer fault, and the test pins the renderers.
+4. **Every poster is registered** in `infrastructure/ring-gate/POSTERS`. A separate service
+   that still rings is listed `known-loud`, shrink-only, until its own repo fixes it.
+
+**Why.** D-0211 made two things loud — a needs-you card and a new ledger line — and asked each
+poster to remember the flag. Ron still got buzzed: the desk was a separate service that never
+set it, and the ledger ping rang for a line whose card rang again minutes later. A definition he
+can check ("is there a button?") replaces a list of components, and a gate replaces memory,
+because a poster that forgot is indistinguishable from one that deliberately rings (D-0071).
+
+**Forbids.** A plain line that rings, for any reason. A second ring predicate beside `ring.sh`.
+A fleet-wide loud override. Adding a `known-loud` line to spare a new file. Making a channel
+quiet by deleting what posts to it. A failure that needs him reaching him only as a quiet line.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
