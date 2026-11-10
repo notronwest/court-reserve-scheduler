@@ -5,6 +5,17 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-09 — Discord posts quietly; only a pressable card rings (#116, D-0308)
+
+Every body `discord_notify.py`, `discord_listener.py` and `ts/src/discord/rest.ts` (`postEmbed`,
+so every TS poster) POST now carries `flags: 4096` (SUPPRESS_NOTIFICATIONS), ORed into any flag
+already set. Tests: `test_discord_quiet.py`, and a block at the end of `ts/tests/discord.test.ts`.
+Left as-is, outside the three named files: `check_waitlists.py` and `test_connections.py` still
+post unflagged (Python rollback path / connection probe). Approval-shaped plain lines now quiet:
+the recommendations embed ("Reply with all/none"), the `!book`/`!move` previews, the waitlist
+expansion alert.
+
+---
 ## 2026-11-08 — a standing pattern runs only inside [anchor_date, until] (#111)
 
 `onWeekStatus` (`ts/src/policy.ts`) now returns `off` before `anchor_date` and after `until` for

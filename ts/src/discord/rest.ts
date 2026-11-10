@@ -40,6 +40,10 @@ export interface DiscordRestOptions {
   maxRetries?: number
 }
 
+/** Discord's SUPPRESS_NOTIFICATIONS message flag (1 << 12): posts to the channel, no push or
+ *  badge. Only a needs-you card with a button rings Ron's phone (D-0308). */
+export const SUPPRESS_NOTIFICATIONS = 1 << 12
+
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export class DiscordRest {
@@ -127,16 +131,18 @@ export class DiscordRest {
 
   /** POST an embed/content payload via the webhook. Returns the message id or null. */
   async postEmbed(payload: unknown): Promise<string | null> {
+    const base = (payload ?? {}) as { flags?: number }
+    const body = { ...base, flags: (base.flags ?? 0) | SUPPRESS_NOTIFICATIONS }
     const wait = this.botToken ? '?wait=true' : ''
     try {
       const res = await this.req(`${this.webhookUrl}${wait}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       })
       if (!res.ok) return null
-      const body = (await res.json().catch(() => ({}))) as { id?: string }
-      return body.id ?? null
+      const msg = (await res.json().catch(() => ({}))) as { id?: string }
+      return msg.id ?? null
     } catch {
       return null
     }

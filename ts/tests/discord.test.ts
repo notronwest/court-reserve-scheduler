@@ -847,3 +847,29 @@ describe('bookWindow', () => {
     expect(bookWindow({ date: 'nope', start_time: '6:00 PM', end_time: '8:00 PM' })).toBeNull()
   })
 })
+
+describe('DiscordRest.postEmbed posts quietly (D-0308)', () => {
+  async function bodyFor(payload: unknown): Promise<Record<string, unknown>> {
+    const { DiscordRest } = await import('../src/discord/rest')
+    let sent: Record<string, unknown> = {}
+    const rest = new DiscordRest({
+      botToken: 't',
+      channelId: 'c',
+      webhookUrl: 'https://discord.example/api/webhooks/1/x',
+      fetchImpl: async (_url, init) => {
+        sent = JSON.parse(String(init?.body))
+        return new Response(JSON.stringify({ id: 'm1' }), { status: 200 })
+      },
+    })
+    await rest.postEmbed(payload)
+    return sent
+  }
+
+  it('sets bit 4096 on a plain body', async () => {
+    expect(((await bodyFor({ content: 'x' })).flags as number) & 4096).toBe(4096)
+  })
+
+  it('ORs into flags already set, never overwrites', async () => {
+    expect((await bodyFor({ content: 'x', flags: 64 })).flags).toBe(64 | 4096)
+  })
+})

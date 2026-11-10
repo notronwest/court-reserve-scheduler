@@ -20,6 +20,16 @@ from recommender import Recommendation, LEVEL_ORDER
 
 HOSTNAME = socket.gethostname().split(".")[0]  # short name, no domain
 
+# Discord's SUPPRESS_NOTIFICATIONS message flag (1 << 12): the message lands in the channel
+# but sends no push or badge. Only a needs-you card with a button rings Ron's phone (D-0308).
+SUPPRESS_NOTIFICATIONS = 1 << 12
+
+
+def quiet(payload: dict) -> dict:
+    """Return the payload with the suppress-notifications bit ORed into any flags already set."""
+    return {**payload, "flags": payload.get("flags", 0) | SUPPRESS_NOTIFICATIONS}
+
+
 WEBHOOK_URL  = os.getenv("DISCORD_WEBHOOK_URL", "")
 BOT_TOKEN    = os.getenv("DISCORD_BOT_TOKEN", "")
 CHANNEL_ID   = os.getenv("DISCORD_CHANNEL_ID", "")
@@ -181,7 +191,7 @@ def maybe_send_fixed_events_reminder(policy: dict):
         }]
     }
 
-    requests.post(WEBHOOK_URL, json=payload, timeout=20).raise_for_status()
+    requests.post(WEBHOOK_URL, json=quiet(payload), timeout=20).raise_for_status()
     print("  ⚠  Fixed events reminder posted to Discord.")
 
 
@@ -218,7 +228,7 @@ def send_recommendations(
     # If we have a bot token we can get the message ID back for reply tracking
     params = {"wait": "true"} if BOT_TOKEN else {}
 
-    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
+    resp = requests.post(WEBHOOK_URL, json=quiet(payload), params=params, timeout=20)
     resp.raise_for_status()
 
     if BOT_TOKEN and resp.status_code == 200:
@@ -345,7 +355,7 @@ def _pack_lines_into_fields(name: str, lines: list[str], limit: int = 1024) -> l
 
 def _post_embed(payload: dict, params: dict):
     """POST an embed payload, surfacing Discord's error body on failure."""
-    resp = requests.post(WEBHOOK_URL, json=payload, params=params, timeout=20)
+    resp = requests.post(WEBHOOK_URL, json=quiet(payload), params=params, timeout=20)
     if resp.status_code >= 400:
         # Discord's 400 body names the exact offending field — don't swallow it.
         raise requests.HTTPError(
