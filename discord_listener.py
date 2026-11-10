@@ -148,7 +148,13 @@ def _get_bot_id():
         return None
 
 
+# Discord's SUPPRESS_NOTIFICATIONS flag (1 << 12): posts to the channel, no push. Only a
+# needs-you card with a button rings Ron's phone (D-0308).
+SUPPRESS_NOTIFICATIONS = 1 << 12
+
+
 def _post_embed(payload):
+    payload = {**payload, "flags": payload.get("flags", 0) | SUPPRESS_NOTIFICATIONS}
     params = {"wait": "true"} if BOT_TOKEN else {}
     try:
         r = _session.post(WEBHOOK_URL, json=payload, params=params, timeout=10)
