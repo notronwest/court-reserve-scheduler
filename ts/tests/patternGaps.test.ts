@@ -174,6 +174,29 @@ describe('scanPatternGaps', () => {
   })
 })
 
+describe('a clinic slot is a window the clinic rota fills, not a standing session', () => {
+  const slot: FixedEvent = {
+    name: 'Third Shot Academy Clinic',
+    day_of_week: intermediate.day_of_week,
+    start_time: intermediate.start_time,
+    end_time: intermediate.end_time,
+    courts: 1,
+    kind: 'clinic_slot',
+  }
+
+  it('is never a gap, on an empty calendar, and does not make the run need attention', () => {
+    const gaps = scanPatternGaps([slot], [], dates)
+    expect(gaps).toEqual([])
+    expect(needsAttention({ gaps, patternsLive: true, patternsSource: 'live', daysScanned: 1 })).toBe(false)
+  })
+
+  it('an ordinary row with no event is still reported — the marker decides, not the name', () => {
+    const gaps = scanPatternGaps([{ ...slot, kind: null }], [], dates)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0].status).toBe('no_event')
+  })
+})
+
 describe('the rules the gaps are judged by', () => {
   it('scales the cap when a session gets fewer courts than it wants', () => {
     // Ron: "we can't have 13 people on one court. The max would be 5."
