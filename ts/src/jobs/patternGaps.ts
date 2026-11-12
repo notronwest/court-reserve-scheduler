@@ -87,12 +87,12 @@ export type GapStatus =
   | 'duplicate'
   /**
    * The session IS on the calendar for this date, cancelled. A human took the court back
-   * (D-0248). Never re-booked, never alarmed — it is not missing, it is withdrawn.
+   * (D-0315 rule 5). Never re-booked, never alarmed — it is not missing, it is withdrawn.
    */
   | 'withdrawn'
   /**
    * The session IS on the calendar for this date, at a different hour. A human moved it
-   * (D-0248, 2026-10-28 addendum). Never re-booked — a move leaves nothing behind in Court Reserve, so without
+   * (D-0315 rule 5). Never re-booked — a move leaves nothing behind in Court Reserve, so without
    * this the sweep reads the old hour as empty and books the session a SECOND time.
    */
   | 'moved'
@@ -319,7 +319,7 @@ export function scanPatternGaps(
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
-    // ⚠️ A cancelled occurrence is NOT an absence to repair (D-0248). Ron, 2026-10-28:
+    // ⚠️ A cancelled occurrence is NOT an absence to repair (D-0315 rule 5). Ron, 2026-10-28:
     // "during the week I may delete an event that is set to recurring because I need the
     // court -- we should not try and fix the missing recurring event." This job used to
     // filter cancellations out and then book the hole straight back, so taking a court
@@ -356,7 +356,7 @@ export function scanPatternGaps(
       ) {
         continue
       }
-      // Moved beats missing, for the same reason and a harder one (D-0248 addendum). Ron,
+      // Moved beats missing, for the same reason and a harder one (D-0315 rule 5). Ron,
       // 2026-10-28: "Make it so that moves of an event on the same day count -- so its not
       // recreated during the sweep." A Court Reserve MOVE edits the occurrence in place and
       // leaves NOTHING behind at the old hour — no cancellation, no trace — so the rule
@@ -456,22 +456,29 @@ export async function runPatternGaps(
     log(`standing patterns came from ${resolved.source}, not a live read — nothing will be booked`)
   }
 
+  // The memory looks ONE day further than the repair does. The 8:00 booker creates a date a
+  // day before this job's horizon reaches it; without the extra day a session booked at 8:00
+  // and deleted or narrowed by hand before the next morning's sweep would never have been
+  // seen, and would be put back once.
+  const seenDates = [...dates, dates[dates.length - 1].addHours(24)]
+  const lastSeen = seenDates[seenDates.length - 1].formatDate()
+
   // One fetch for the whole horizon: 14 single-day calls would be 14 chances to half-fail.
-  const items = await cr.schedule(dates[0].formatDate(), dates[dates.length - 1].formatDate())
+  const items = await cr.schedule(dates[0].formatDate(), lastSeen)
   // Memory is only trusted alongside a live pattern set: a cached or seeded set could mark
   // a retired session's hole as "seen", and nothing is booked on such a run anyway.
   const prior = deps.memory?.load() ?? null
   const baseline = Boolean(deps.memory) && prior === null && patternsLive
   let ledger: SeenLedger = prior ?? {}
   if (baseline) {
-    ledger = recordSeen({}, resolved.events, items, dates, { baseline: true })
+    ledger = recordSeen({}, resolved.events, items, seenDates, { baseline: true })
     log(
       'no memory of earlier runs — recorded the calendar as it stands and left it alone; ' +
         'dates that come into range from tomorrow are repaired as usual',
     )
   }
   const gaps = scanPatternGaps(resolved.events, items, dates, undefined, ledger)
-  if (deps.memory && patternsLive && !baseline) ledger = recordSeen(ledger, resolved.events, items, dates)
+  if (deps.memory && patternsLive && !baseline) ledger = recordSeen(ledger, resolved.events, items, seenDates)
 
   const courtOrder = Object.keys(COURTS).map(Number)
   const byDate = new Map<string, OccupiedSlot[]>()
@@ -583,8 +590,8 @@ export async function runPatternGaps(
     // removed by hand at 9:00 would never have been seen, and would be booked again tomorrow.
     if (gaps.some((g) => g.status === 'booked' || g.status === 'widened')) {
       try {
-        const after = await cr.schedule(dates[0].formatDate(), dates[dates.length - 1].formatDate())
-        ledger = recordSeen(ledger, resolved.events, after, dates)
+        const after = await cr.schedule(dates[0].formatDate(), lastSeen)
+        ledger = recordSeen(ledger, resolved.events, after, seenDates)
       } catch (e) {
         log(`could not re-read the calendar after booking (${e instanceof Error ? e.message : String(e)}) — today's bookings are not remembered yet`)
       }

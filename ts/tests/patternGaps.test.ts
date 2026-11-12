@@ -361,6 +361,26 @@ describe('a session a person renamed, removed or narrowed is left alone (D-0315)
       expect((await run([[], []], memory)).booked).toHaveLength(1)
     })
 
+    it('sees a date the day BEFORE it can repair it, so an edit made in between is kept', async () => {
+      // Monday's run repairs Monday only (horizon 1) but looks at Tuesday too.
+      const tue: FixedEvent = { ...intermediate, day_of_week: 'Tuesday' }
+      const onTue = item({ StartDateTime: '2026-10-20T17:00:00', EndDateTime: '2026-10-20T19:00:00' })
+      let held: SeenLedger | null = {}
+      const memory = { load: () => held, save: (l: SeenLedger) => { held = l } }
+      const mk = (items: ScheduleItem[], booked: unknown[]) => ({
+        fixedEvents: async () => [tue],
+        schedule: async () => items,
+        book: async (r: unknown) => { booked.push(r); return { success: true } },
+      }) as never
+      const deps = { rest: { postEmbed: async () => 'm1' } as never, policy: { fixed_events: { events: [] } } as never, memory }
+      await runPatternGaps(mk([onTue], []), deps, { fix: true, horizonDays: 1, today: MON })
+      expect(held![ledgerKey(tue, NaiveDateTime.parseDate('10/20/2026'))]).toEqual({ seen: true, whole: true })
+      // Deleted by hand overnight; Tuesday's run leaves it deleted.
+      const booked: unknown[] = []
+      await runPatternGaps(mk([], booked), deps, { fix: true, horizonDays: 1, today: NaiveDateTime.parseDate('10/20/2026') })
+      expect(booked).toEqual([])
+    })
+
     it('leaves a narrowed session on its one court', async () => {
       const memory = memoryOf({ [ledgerKey(intermediate, MON)]: { seen: true, whole: true } })
       const { widened, booked } = await run([[item({ Courts: 'Court #2' })]], memory)

@@ -31,10 +31,22 @@ went are exactly the renamed sessions (11/13, 11/16, 11/20, 11/23 Co-ed Intermed
 11/17, 11/24 Women's Advanced Contract Time); three of those slots now read `duplicate`, which is
 what they are. 304 tests green, 17 new.
 
-**Not changed, and worth someone's attention:** eleven of the remaining gaps are "Third Shot Academy
-Clinic" rows with no Court Reserve event, which alarm on every date, every day, so the job has not
-exited 0 — or sent its heartbeat — in weeks. The `fixed_events` rows for the two renamed events
-still carry the old names.
+The memory looks one day further than the repair does, so a date the 8:00 booker has just created
+is seen the same morning, a day before this job may touch it.
+
+**No required check runs these tests.** The repo's checks are the issue link and the capability
+manifest; `npm test` is run by whoever builds the change. Said here because D-0315's
+`enforced-by` leans on the suite.
+
+**Not changed, and worth someone's attention:**
+- Ten of the remaining gaps are "Third Shot Academy Clinic" rows with no Court Reserve event. They
+  alarm on every date, every day: of the 26 runs in `launchd_pattern_gaps.log`, none ended with
+  nothing open, so the job has never sent its heartbeat.
+- The `fixed_events` rows for the two renamed events still carry the old names.
+- The 8:30 catch-up re-books a date with NOTHING on the calendar (`empty`) without consulting this
+  memory. A day thinned by hand is left alone; a day cleared completely would be rebuilt.
+- One disappearance was not explained: "booked 11/12 10:00 Co-Ed Advanced Structured Play on #3, #4"
+  at 8:45 was absent from the 11:00 read. Deleted by hand or never landed — not determined.
 
 ---
 ## 2026-11-09 — Discord posts quietly; only a pressable card rings (#116, D-0308)
