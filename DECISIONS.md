@@ -4649,45 +4649,6 @@ repo the sync could fast-forward, 43 and up for every one it could not.
   solved. Rules 2 and 3 are open gaps with no enforcement, stated here so a later
   session does not read this file and relax.
 
-### D-0248 — A cancelled occurrence of a standing session is withdrawn, not missing — the sweep never books it back
-
-*2026-10-28 · scope: `ts/src/jobs/patternGaps.ts, ts/src/scheduler.ts` · source: Ron, 2026-10-28, correcting the reading recorded two days earlier — *"during the week I may delete an event that is set to recurring because I need the court -- we should not try and fix the missing recurring event."* D-0233 had taken "delete a recurring event" to mean retiring the whole weekly pattern. He meant ONE occurrence, mid-week, to free a court.*
-
-**Decision.** Cancelling one occurrence of a standing session is a human taking a court back.
-It is an instruction, and nothing in the fleet undoes it.
-
-1. **A cancelled occurrence at a pattern's hour means the session is WITHDRAWN for that
-   date.** No gap is reported, nothing is booked, and it is not counted as short of courts.
-   The sweep previously filtered cancellations out of the day — deliberately, with a comment
-   saying a cancellation "is the session being gone, which is exactly what this job exists to
-   notice" — and then booked the hole straight back on the same run. A court reclaimed by hand
-   lasted until the next sweep.
-
-2. **Checked before the court arithmetic, not after.** Otherwise a cancelled one-court copy of
-   a two-court session reads as "short" and gets widened, which is the same mistake in a
-   different hat.
-
-3. **Narrow on purpose.** The cancellation has to be of THAT session at THAT hour on THAT
-   date. A cancellation at another hour, or of another session, silences nothing — a real gap
-   is still a real gap, and the pattern's other dates are untouched. One withdrawn Thursday
-   does not retire a Thursday session.
-
-4. **What did NOT change, and is still asserted.** A cancelled instance holds no court, so its
-   court is free for anything else; the recommender does not re-book a slot its surviving copy
-   still covers; a session booked twice at one hour is reported and never acted on. Only the
-   verdict on an all-cancelled slot moved.
-
-**Why this supersedes D-0233 rather than amending it.** That record answered a different
-question — what happens when a recurring EVENT is deleted outright — and built retirement of
-the whole pattern on top of it. Retiring a weekly session because one week was cancelled is
-far more destructive than the behaviour it was trying to prevent, and it was reasoning from a
-misreading. The parts of D-0233 worth keeping are restated here as rule 4 and rule 1: never
-recreate what a human removed, and never infer removal from an absence.
-
-**The asymmetry, as before.** Putting a session back that he deliberately took out gives the
-court away again, silently, and he finds out when somebody turns up to play on it. Leaving a
-genuinely accidental cancellation un-restored costs one sentence and a re-book.
-
 ### D-0249 — A rendered artefact is graded on what you can see in a still, and the gate decides which rubric applies — not the author
 
 *2026-10-28 · scope: `infrastructure/design-gate/**, infrastructure/git-guards/**, docs/design-system.md, .design/**, **artefact*` · source: the owner's ruling 2026-10-28 — "Put it live now and change the rule this week"; this is the rule half. daemon#949. Extends D-0065, whose text is unchanged.*
@@ -5256,6 +5217,87 @@ because a poster that forgot is indistinguishable from one that deliberately rin
 A fleet-wide loud override. Adding a `known-loud` line to spare a new file. Making a channel
 quiet by deleting what posts to it. A failure that needs him reaching him only as a quiet line.
 
+### D-0315 — The standing-session sweep repairs only what has never been whole — a session a person renamed, deleted or narrowed is left as they left it
+
+*2026-11-12 · scope: `ts/src/jobs/patternGaps.ts, ts/src/scheduler.ts, ts/src/cli.ts` · source: Ron, 2026-11-12 — *"We have a problem with the CR scheduler -- we have a recurring schedule that has an 'auto-heal' component -- where the 'missing' events are re-added. However, they aren't missing -- I've either deleted them or altered them (moved them to 1 court instead of 2)"*. Measured the same day on the live calendar and the sweep's own log: one Friday session "booked" six mornings running, three duplicate copies standing a week out, a two-court session widened back the morning after it was cut to one.*
+
+**Decision.** The daily sweep that asks "is every standing session on the calendar?" repairs a
+session **the first time it meets it and never again**. Whatever happens to a session after
+the sweep has seen it was done by a person, and stays.
+
+1. **A session is recognised by its Court Reserve event, then by its name.** Either is
+   enough. The name alone was the largest fault: two events had been retitled in Court Reserve
+   while their standing rows kept the old title, the two names no longer contained one another,
+   and a session sitting on two courts read as absent. The sweep booked a second copy of it
+   every morning. A title is something a person edits; the event behind it is not.
+
+2. **The sweep remembers what it has seen.** Per session, per date: has it EVER been on the
+   calendar, and has it EVER held every court its pattern asks for. The memory is a file beside
+   the standing-pattern cache on the one machine that runs the job.
+   - Seen before, absent now → **a person deleted it. No gap, nothing booked, nothing said.**
+     A Court Reserve delete leaves no cancellation behind, so this cannot be read off the
+     calendar; the earlier sighting is the positive evidence.
+   - Whole before, on fewer courts now → **a person narrowed it. Not widened.**
+   - Never seen → missing, and booked, exactly as before.
+   - Seen but never whole → the system booked it short; still widened when a court frees.
+
+3. **The memory is written only from a calendar read, never from a booking's reply.** After
+   the sweep books or widens anything it reads the calendar again and records what is actually
+   there. A booking that "succeeded" and did not land is therefore not remembered and is tried
+   again; a session booked at 8:45 and removed by hand at 9:00 was seen, and is not.
+
+4. **With no memory, the sweep records the calendar as it stands and books nothing.** That is
+   the first run after this ships, and any later run that finds the file missing or unreadable.
+   Every date in range is treated as settled; dates that come into range afterwards are
+   repaired normally, so the ordinary rule covers everything within a fortnight. A memory that
+   cannot be WRITTEN fails the run — no heartbeat, the watchdog alarms — rather than the job
+   forgetting every day in silence.
+
+5. **Carried forward from D-0248, unchanged and still tested.** A cancelled occurrence at a
+   pattern's hour is withdrawn, not missing. A session moved to another hour the same day is
+   moved, not missing. Both are checked before the court arithmetic. A cancelled instance holds
+   no court. A session present twice at one hour is reported and never acted on — and two
+   copies never count as "whole", so a duplicate cannot teach the memory anything.
+
+   ⚠️ **Measured 2026-11-12: a cancel is not reliably visible either.** Three occurrences
+   cancelled through the booking service left the calendar read entirely — only the surviving
+   copies came back. So the cancelled-item check may never have fired on the live feed, which
+   would explain why D-0248 did not end the re-adding. Rule 2 is what protects a cancel in
+   practice; the cancelled-item check stays as a second line, not the first.
+
+6. **Memory is trusted only beside a live read of the standing patterns.** A cached or seeded
+   pattern set books nothing already; it now also neither reads nor writes the memory.
+
+**Why.** D-0248 said "never infer removal from an absence", and that was right about a single
+look at the calendar: a failed fetch and a deleted session look the same. It left the sweep with
+only two things it could recognise as a person's act — a cancel and a same-day move — while the
+club's owner also deletes outright, cuts a session to one court, and retitles events. Each of
+those was undone the next morning. The absence is no longer inferred from one read; it is the
+difference between two successful reads, and the fetch that fails still throws.
+
+The asymmetry is D-0248's and is unchanged: putting back a session he took out gives the court
+away again in front of members, silently; leaving a genuinely lost session un-restored costs a
+re-book. The sweep's original job — the session that was never booked at all, 2026-10-13 — is
+untouched, because that session has never been seen.
+
+7. **The memory looks one day further than the repair does.** The 8:00 booker creates a date a
+   day before the sweep's range reaches it. Recording that extra day means a session booked at
+   8:00 and edited by hand before the next morning has already been seen.
+
+**What this costs, said plainly.** A session that is on the calendar, seen, and then lost to
+something that is not a person — a Court Reserve fault — is no longer restored. The sweep's log
+was not audited for that case; the disappearances that were traced on 2026-11-12 were renamed
+events and the sweep's own duplicates, and one same-day disappearance was left unexplained.
+
+**Not covered.** The 8:30 catch-up re-books a date with nothing at all on the calendar and does
+not consult this memory: a day thinned by hand is left alone, a day cleared completely would be
+rebuilt.
+
+**Forbids.** Recognising a session by name alone. Recording a session as seen from a booking's
+return value. Booking or widening on a run that found no memory. Treating a duplicate as whole.
+Loosening rule 2 to "re-add after N days absent" — a deleted session is deleted on day one and
+day ten.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
@@ -5268,3 +5310,4 @@ quiet by deleting what posts to it. A failure that needs him reaching him only a
 - D-0161 — A pause covers one phase, and the phase it covers is named in code (2026-10-13) → superseded by D-0181
 - D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable (2026-10-14) → superseded by D-0189
 - D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed (2026-10-26) → superseded by D-0248
+- D-0248 — A cancelled occurrence of a standing session is withdrawn, not missing — the sweep never books it back (2026-10-28) → superseded by D-0315
