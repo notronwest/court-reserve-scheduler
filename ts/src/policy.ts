@@ -36,6 +36,10 @@ export interface FixedEvent {
   every_weeks?: number | null
   /** A real on-week date on `day_of_week`, `YYYY-MM-DD`. Required when `every_weeks` is 2. */
   anchor_date?: string | null
+  /** `courtreserve.fixed_events.kind`. `'clinic_slot'` is a standing weekly WINDOW whose
+   *  clinic changes every week: by a database check it never carries an event id, and the
+   *  clinic rota in courtreserve-api books it — not the standing-session sweep. */
+  kind?: string | null
 }
 
 export type OnWeek = 'on' | 'off' | 'invalid'

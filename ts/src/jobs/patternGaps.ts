@@ -333,6 +333,13 @@ export function scanPatternGaps(
     for (const p of patterns) {
       // An off-week (or an unplaceable two-week row) is never missing — D-0202.
       if (!isOnWeek(p, date)) continue
+      // A clinic slot is a window, not a session. Its clinic is a different Court Reserve
+      // event each week, placed by the clinic rota, and the row is FORBIDDEN an event id by
+      // a database check — so here it could only ever read as "no event attached", on every
+      // date, every morning. That alarm kept this job from ever finishing clean (26 runs,
+      // no heartbeat) and Ron asked for it to stop, 2026-11-12. Keyed on the row's own kind,
+      // never its name; an ordinary row with no event is still the alarm it always was.
+      if (p.kind === 'clinic_slot') continue
       // EVERY occurrence at this hour, not the first one the feed happens to list.
       // Taking only the first made the outcome depend on CR's ordering: with a
       // healthy two-court instance AND a one-court duplicate at one hour, matching
