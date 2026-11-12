@@ -51,7 +51,7 @@ targets:
     trigger: launchd com.whitemountain.pattern-gaps — daily at 8:45 AM, after the 8:00 booker and the 8:30 catch-up (installed/reloaded by ./setup.sh)
     source: ts/ops/run-pattern-gaps.sh → ts/src/cli.ts pattern-gaps --fix
     env: PROD
-    url: n/a — asks per SESSION (not per day) whether every standing pattern in courtreserve.fixed_events has its occurrence in today..today+14; books what it can as ONE occurrence with all its courts, posts a Discord embed only when something is still open, heartbeats daemon job scheduler-pattern-gaps on exit 0
+    url: n/a — asks per SESSION (not per day) whether every standing pattern in courtreserve.fixed_events has its occurrence in today..today+14 (rows of kind clinic_slot are skipped — the clinic rota owns them, D-0317); books what it can as ONE occurrence with all its courts, posts a Discord embed only when something is still open, heartbeats daemon job scheduler-pattern-gaps on exit 0
     host: same machine
     config_scope: same ts/.env; reads the standing patterns through courtreserve-api GET /fixed-events (live only — a cached or seeded list books nothing); keeps its memory of what earlier runs saw in state/pattern-gaps-seen.json (daemon D-0315) — a session seen once and later deleted or narrowed by hand is never put back. Deleting that file is safe and deliberate-only: the next run records the calendar as it stands and books nothing
     verify: ~/Library/Logs/court_reserve/launchd_pattern_gaps.log — one line per gap with what was done; "Done: 14 days, N gap(s) — X filled, Y still open" (the first run with no memory adds "[first run with memory: calendar recorded as it stands, nothing booked]")

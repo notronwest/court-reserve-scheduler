@@ -5,6 +5,25 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-12 — the gap sweep no longer alarms on clinic slots (D-0317)
+
+Ron, asked whether to quiet the daily alarm for the clinic rows the check can never book:
+*"Yes, quiet them"*. A `fixed_events` row of kind `clinic_slot` is forbidden an event id by a
+database check, so `scanPatternGaps` could only ever report it as `no_event`, on every date,
+every morning — which is why none of the job's 26 logged runs ended clean. The scan now skips a
+row whose `kind` is `clinic_slot` (`FixedEvent.kind`, new). Keyed on the kind, not the name; an
+ordinary row with no event still alarms. Tests: `ts/tests/patternGaps.test.ts`, 307 passing.
+
+Old vs new on the mini, report-only, Discord blank, against a scratch copy of the memory with
+the clinic entries removed (the baseline of this morning hides them until 11/17, so a run
+against the live memory would have passed on either commit): old `9 gap(s) … 9 still open`,
+exit 1; new `0 gap(s)`, exit 0. Live memory untouched.
+
+Still open from the entry below: no required test check on this repo; catch-up rebuilds a
+completely empty day; the two renamed events' rows keep their old names; the 11/12 10:00
+disappearance.
+
+---
 ## 2026-11-12 — the gap sweep stops re-adding sessions that were renamed, deleted or narrowed by hand (D-0315)
 
 Ron: *"the 'missing' events are re-added. However, they aren't missing -- I've either deleted them
