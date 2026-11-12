@@ -29,7 +29,29 @@
  * | present but short of courts, one free | **widened** to the full court count |
  * | present but short, nothing free | the cap is scaled instead, and it is reported |
  * | present, right courts | silent |
+ * | was on the calendar on an earlier run, gone now | **left alone** — a person removed it |
+ * | was on all its courts on an earlier run, on fewer now | **left alone** — a person narrowed it |
  *
+ * ## It only repairs what has never been whole (daemon D-0315)
+ *
+ * Ron, 2026-11-12: "the 'missing' events are re-added. However, they aren't missing -- I've
+ * either deleted them or altered them (moved them to 1 court instead of 2)". Three faults
+ * were behind that sentence, all measured on the live calendar the same day:
+ *
+ * 1. **A session was recognised by its NAME.** Two Court Reserve events had been renamed
+ *    while their standing rows kept the old name, so a session that was sitting on the
+ *    calendar read as missing and got a SECOND copy every morning (Fri 11/13 11:00 six
+ *    mornings running; duplicates standing on 11/20, 11/23 and 11/24). A session is now
+ *    recognised by its Court Reserve event first — `isSession`.
+ * 2. **A delete leaves nothing behind.** A cancel is visible and already respected; a
+ *    delete is not, so the hole was booked straight back.
+ * 3. **A session cut from two courts to one read as short** and was widened back.
+ *
+ * 2 and 3 cannot be told from real damage by looking at the calendar once, so the job
+ * remembers: `SeenLedger` records, per session per date, whether it has EVER been seen on
+ * the calendar and whether it has EVER held all its courts. It repairs a session the first
+ * time it meets it; after that, whatever happens to it was done by a person and stays.
+  *
  * ## Fail-closed
  *
  * - The pattern set must be a **live** read. `resolveFixedEvents` falls back to a cache and
@@ -46,7 +68,9 @@ import type { ScheduleItem } from '../cr/types'
 import { DiscordRest } from '../discord/rest'
 import { sendPatternGapReport } from '../discord/notify'
 import { NaiveDateTime } from '../datetime'
-import { resolveFixedEvents } from '../fixedEvents'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fixedEventsStateDir, resolveFixedEvents } from '../fixedEvents'
 import { COURTS } from '../recommender'
 import { freeCourts, isCancelled, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
 import { isOnWeek, type FixedEvent, type Policy } from '../policy'
@@ -63,12 +87,12 @@ export type GapStatus =
   | 'duplicate'
   /**
    * The session IS on the calendar for this date, cancelled. A human took the court back
-   * (D-0234). Never re-booked, never alarmed — it is not missing, it is withdrawn.
+   * (D-0315 rule 5). Never re-booked, never alarmed — it is not missing, it is withdrawn.
    */
   | 'withdrawn'
   /**
    * The session IS on the calendar for this date, at a different hour. A human moved it
-   * (D-0249). Never re-booked — a move leaves nothing behind in Court Reserve, so without
+   * (D-0315 rule 5). Never re-booked — a move leaves nothing behind in Court Reserve, so without
    * this the sweep reads the old hour as empty and books the session a SECOND time.
    */
   | 'moved'
@@ -95,6 +119,8 @@ export interface PatternGap {
 export interface PatternGapsResult {
   /** Everything that was not already correct — `ok` sessions are not carried. */
   gaps: PatternGap[]
+  /** True on the run that found no memory and started one: everything was left as found. */
+  baseline?: boolean
   /** True when the pattern set came from a live read; nothing is booked when false. */
   patternsLive: boolean
   patternsSource: 'live' | 'cache' | 'seed'
@@ -122,6 +148,132 @@ export function matchesPattern(itemName: string | undefined, patternName: string
   const b = foldName(patternName)
   if (!a || !b) return false
   return a.includes(b) || b.includes(a)
+}
+
+/**
+ * Is this calendar item an occurrence of THIS standing session?
+ *
+ * The Court Reserve event first, the name second. The name alone is what re-added sessions
+ * every morning in November 2026: event 2316716 was retitled "Co-Ed Advanced Intermediate
+ * Structured Play" while its standing row still said "Co-ed Intermediate Structured Play",
+ * the two no longer contained one another, and a session holding two courts read as absent.
+ * A title is something a person edits; the event behind it is not.
+ *
+ * Either one is enough. Matching MORE is the safe direction here — a false match leaves a
+ * slot alone, a false miss books a duplicate in front of members.
+ */
+export function isSession(item: ScheduleItem, p: Pick<FixedEvent, 'name' | 'event_id'>): boolean {
+  const itemEvent = Number(item.EventId)
+  if (p.event_id && Number.isFinite(itemEvent) && itemEvent > 0 && itemEvent === Number(p.event_id)) {
+    return true
+  }
+  return matchesPattern(item.EventName, p.name)
+}
+
+/** What the job remembers about one session on one date. */
+export interface SeenEntry {
+  /** It has been on the calendar, on at least one court, on some earlier read. */
+  seen: boolean
+  /** It has held every court its pattern asks for, on some earlier read. */
+  whole: boolean
+}
+
+/** Keyed by `ledgerKey`. Only ever written from a calendar READ, never from a booking's reply. */
+export type SeenLedger = Record<string, SeenEntry>
+
+/** Where the memory lives. `load` returns null when there is none yet (or it is unreadable). */
+export interface SeenMemory {
+  load(): SeenLedger | null
+  save(ledger: SeenLedger): void
+}
+
+export function ledgerKey(p: Pick<FixedEvent, 'name' | 'event_id' | 'start_time'>, date: NaiveDateTime): string {
+  return `${date.formatYmd()}|${p.start_time}|${p.event_id ?? foldName(p.name)}`
+}
+
+/** Courts this session holds on this date at its own hour, and how many occurrences hold them. */
+function holding(
+  p: FixedEvent,
+  date: NaiveDateTime,
+  items: readonly ScheduleItem[],
+  knownCourts: ReadonlySet<number>,
+): { instances: number; courts: number } {
+  const ymd = date.formatYmd()
+  const hits = items.filter(
+    (i) =>
+      i.StartDateTime &&
+      !isCancelled(i) &&
+      NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === ymd &&
+      NaiveDateTime.fromISO(i.StartDateTime).formatHm() === p.start_time &&
+      isSession(i, p),
+  )
+  const held = new Set<number>()
+  for (const h of hits) for (const c of parseCourtNums(h.Courts ?? '')) if (knownCourts.has(c)) held.add(c)
+  return { instances: hits.length, courts: held.size }
+}
+
+/**
+ * Fold one calendar read into the memory. Pure: returns a new ledger.
+ *
+ * `baseline` is the first run, when there is no memory at all. Everything in the horizon is
+ * then recorded as already settled — present or not, full or not — because the job cannot
+ * tell which of today's holes a person made, and re-adding a session someone removed is the
+ * expensive mistake (D-0248's asymmetry). Dates that enter the horizon afterwards are
+ * repaired normally, so within a fortnight every date is under the ordinary rule.
+ *
+ * Entries for dates before the horizon's first day are dropped; nothing reads them again.
+ */
+export function recordSeen(
+  ledger: SeenLedger,
+  patterns: readonly FixedEvent[],
+  items: readonly ScheduleItem[],
+  dates: readonly NaiveDateTime[],
+  opts: { baseline?: boolean; knownCourts?: ReadonlySet<number> } = {},
+): SeenLedger {
+  const knownCourts = opts.knownCourts ?? new Set(Object.keys(COURTS).map(Number))
+  const first = dates.length ? dates[0].formatYmd() : ''
+  const out: SeenLedger = {}
+  for (const [k, v] of Object.entries(ledger)) if (k.slice(0, 10) >= first) out[k] = { ...v }
+  for (const date of dates) {
+    for (const p of patterns) {
+      if (!isOnWeek(p, date)) continue
+      const key = ledgerKey(p, date)
+      const prior = out[key] ?? { seen: false, whole: false }
+      if (opts.baseline) {
+        out[key] = { seen: true, whole: true }
+        continue
+      }
+      const now = holding(p, date, items, knownCourts)
+      const seen = prior.seen || now.courts > 0
+      const whole = prior.whole || (now.instances === 1 && now.courts >= (p.courts ?? 1))
+      if (seen || whole) out[key] = { seen, whole }
+    }
+  }
+  return out
+}
+
+/** The memory as a file beside the standing-pattern cache. Written whole, then renamed. */
+export function fileSeenMemory(dir: string = fixedEventsStateDir(), log: (m: string) => void = () => {}): SeenMemory {
+  const path = resolve(dir, 'pattern-gaps-seen.json')
+  return {
+    load() {
+      if (!existsSync(path)) return null
+      try {
+        const data = JSON.parse(readFileSync(path, 'utf8')) as { entries?: SeenLedger }
+        if (data && typeof data.entries === 'object' && data.entries !== null) return data.entries
+      } catch (e) {
+        log(`memory file unreadable (${e instanceof Error ? e.message : String(e)})`)
+      }
+      // Unreadable is treated exactly like absent: a fresh baseline, which books nothing.
+      return null
+    },
+    save(ledger) {
+      mkdirSync(dir, { recursive: true })
+      const tmp = `${path}.tmp`
+      writeFileSync(tmp, JSON.stringify({ version: 1, saved_at: new Date().toISOString(), entries: ledger }, null, 2))
+      renameSync(tmp, path)
+    },
+  }
 }
 
 /** "17:00" → "5:00 PM", the spelling courtreserve-api's forms take. */
@@ -160,12 +312,14 @@ export function scanPatternGaps(
   items: readonly ScheduleItem[],
   dates: readonly NaiveDateTime[],
   knownCourts: ReadonlySet<number> = new Set(Object.keys(COURTS).map(Number)),
+  /** What earlier runs saw. Omitted, the scan has no memory and every hole is a gap. */
+  ledger: SeenLedger = {},
 ): PatternGap[] {
   const out: PatternGap[] = []
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
-    // ⚠️ A cancelled occurrence is NOT an absence to repair (D-0234). Ron, 2026-10-28:
+    // ⚠️ A cancelled occurrence is NOT an absence to repair (D-0315 rule 5). Ron, 2026-10-28:
     // "during the week I may delete an event that is set to recurring because I need the
     // court -- we should not try and fix the missing recurring event." This job used to
     // filter cancellations out and then book the hole straight back, so taking a court
@@ -187,7 +341,7 @@ export function scanPatternGaps(
       const hits = onThisDate.filter(
         (i) =>
           NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
-          matchesPattern(i.EventName, p.name),
+          isSession(i, p),
       )
       // Withdrawn beats missing: if this session is on the calendar for this date and
       // cancelled, a human took the court back and that is the end of it. Checked BEFORE
@@ -197,12 +351,12 @@ export function scanPatternGaps(
         cancelledOnDate.some(
           (i) =>
             NaiveDateTime.fromISO(i.StartDateTime as string).formatHm() === p.start_time &&
-            matchesPattern(i.EventName, p.name),
+            isSession(i, p),
         )
       ) {
         continue
       }
-      // Moved beats missing, for the same reason and a harder one (D-0249). Ron,
+      // Moved beats missing, for the same reason and a harder one (D-0315 rule 5). Ron,
       // 2026-10-28: "Make it so that moves of an event on the same day count -- so its not
       // recreated during the sweep." A Court Reserve MOVE edits the occurrence in place and
       // leaves NOTHING behind at the old hour — no cancellation, no trace — so the rule
@@ -216,11 +370,17 @@ export function scanPatternGaps(
       // present one silence the absent one.
       if (hits.length === 0) {
         const claimedHours = new Set(
-          patterns.filter((q) => q.name === p.name && isOnWeek(q, date)).map((q) => q.start_time),
+          patterns
+            .filter(
+              (q) =>
+                (q.name === p.name || (p.event_id !== undefined && q.event_id === p.event_id)) &&
+                isOnWeek(q, date),
+            )
+            .map((q) => q.start_time),
         )
         const movedTo = onThisDate.find(
           (i) =>
-            matchesPattern(i.EventName, p.name) &&
+            isSession(i, p) &&
             !claimedHours.has(NaiveDateTime.fromISO(i.StartDateTime as string).formatHm()),
         )
         if (movedTo) continue
@@ -234,6 +394,15 @@ export function scanPatternGaps(
       const has = heldCourts.size
       // One occurrence holding its courts is the healthy case and stays silent.
       if (hits.length === 1 && has >= wants) continue
+      // Removed or narrowed by hand (D-0315). Ron, 2026-11-12: "they aren't missing -- I've
+      // either deleted them or altered them (moved them to 1 court instead of 2)". A delete
+      // leaves no cancellation behind and a narrowing looks exactly like a short booking, so
+      // neither can be read off the calendar; what tells them from damage is that an earlier
+      // run SAW this session here (or saw it on all its courts). A duplicate is not covered:
+      // two copies at one hour is still reported.
+      const known = ledger[ledgerKey(p, date)]
+      if (hits.length === 0 && known?.seen) continue
+      if (hits.length === 1 && has > 0 && known?.whole) continue
       out.push({
         date: date.formatDate(),
         day_of_week: dow,
@@ -257,6 +426,11 @@ export interface PatternGapsDeps {
   rest: DiscordRest
   policy: Policy
   log?: (msg: string) => void
+  /**
+   * What earlier runs saw (D-0315). The scheduled job always passes the file-backed one;
+   * without it the run has no memory and repairs every hole, which is only right in a test.
+   */
+  memory?: SeenMemory
 }
 
 export interface PatternGapsOptions {
@@ -282,9 +456,29 @@ export async function runPatternGaps(
     log(`standing patterns came from ${resolved.source}, not a live read — nothing will be booked`)
   }
 
+  // The memory looks ONE day further than the repair does. The 8:00 booker creates a date a
+  // day before this job's horizon reaches it; without the extra day a session booked at 8:00
+  // and deleted or narrowed by hand before the next morning's sweep would never have been
+  // seen, and would be put back once.
+  const seenDates = [...dates, dates[dates.length - 1].addHours(24)]
+  const lastSeen = seenDates[seenDates.length - 1].formatDate()
+
   // One fetch for the whole horizon: 14 single-day calls would be 14 chances to half-fail.
-  const items = await cr.schedule(dates[0].formatDate(), dates[dates.length - 1].formatDate())
-  const gaps = scanPatternGaps(resolved.events, items, dates)
+  const items = await cr.schedule(dates[0].formatDate(), lastSeen)
+  // Memory is only trusted alongside a live pattern set: a cached or seeded set could mark
+  // a retired session's hole as "seen", and nothing is booked on such a run anyway.
+  const prior = deps.memory?.load() ?? null
+  const baseline = Boolean(deps.memory) && prior === null && patternsLive
+  let ledger: SeenLedger = prior ?? {}
+  if (baseline) {
+    ledger = recordSeen({}, resolved.events, items, seenDates, { baseline: true })
+    log(
+      'no memory of earlier runs — recorded the calendar as it stands and left it alone; ' +
+        'dates that come into range from tomorrow are repaired as usual',
+    )
+  }
+  const gaps = scanPatternGaps(resolved.events, items, dates, undefined, ledger)
+  if (deps.memory && patternsLive && !baseline) ledger = recordSeen(ledger, resolved.events, items, seenDates)
 
   const courtOrder = Object.keys(COURTS).map(Number)
   const byDate = new Map<string, OccupiedSlot[]>()
@@ -354,7 +548,7 @@ export async function runPatternGaps(
             i.StartDateTime &&
             NaiveDateTime.fromISO(i.StartDateTime).formatYmd() === date.formatYmd() &&
             NaiveDateTime.fromISO(i.StartDateTime).formatHm() === gap.start_time &&
-            matchesPattern(i.EventName, gap.name) &&
+            isSession(i, pattern) &&
             !isCancelled(i),
         )
         if (!existing?.Id) {
@@ -389,8 +583,27 @@ export async function runPatternGaps(
     }
   }
 
+  if (deps.memory && patternsLive) {
+    // What this run booked or widened is remembered only once the calendar SHOWS it — a
+    // booking's "success" has been wrong before (the occurrence "could not be found
+    // afterwards", 2026-10-29). Without this second read, a session booked at 8:45 and
+    // removed by hand at 9:00 would never have been seen, and would be booked again tomorrow.
+    if (gaps.some((g) => g.status === 'booked' || g.status === 'widened')) {
+      try {
+        const after = await cr.schedule(dates[0].formatDate(), lastSeen)
+        ledger = recordSeen(ledger, resolved.events, after, seenDates)
+      } catch (e) {
+        log(`could not re-read the calendar after booking (${e instanceof Error ? e.message : String(e)}) — today's bookings are not remembered yet`)
+      }
+    }
+    // A memory that cannot be written throws: the run exits non-zero, the heartbeat is
+    // withheld and the watchdog alarms, rather than the job quietly forgetting every day.
+    deps.memory.save(ledger)
+  }
+
   const result: PatternGapsResult = {
     gaps,
+    baseline,
     patternsLive,
     patternsSource: resolved.source,
     patternsAlert: resolved.alert ?? (patternsLive ? undefined : `standing patterns read from ${resolved.source}`),

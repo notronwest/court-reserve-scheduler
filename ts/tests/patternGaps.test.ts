@@ -11,11 +11,16 @@ import {
   clockToAmPm,
   foldName,
   horizonDates,
+  isSession,
+  ledgerKey,
   matchesPattern,
   needsAttention,
+  recordSeen,
+  runPatternGaps,
   scaledCap,
   scanPatternGaps,
   type PatternGapsResult,
+  type SeenLedger,
 } from '../src/jobs/patternGaps'
 import { NaiveDateTime } from '../src/datetime'
 import type { FixedEvent } from '../src/policy'
@@ -223,5 +228,164 @@ describe('needsAttention — what makes the run exit non-zero', () => {
     // A cached or seeded pattern set could book a session the club retired, so the run
     // books nothing and must not pass silently.
     expect(needsAttention({ ...base([]), patternsLive: false, patternsSource: 'cache' })).toBe(true)
+  })
+})
+
+/**
+ * Ron, 2026-11-12: "the 'missing' events are re-added. However, they aren't missing -- I've
+ * either deleted them or altered them (moved them to 1 court instead of 2)". Measured on the
+ * live calendar that day (daemon D-0315).
+ */
+describe('a session a person renamed, removed or narrowed is left alone (D-0315)', () => {
+  // The live case: event 2316716 retitled in Court Reserve, the standing row still on the old name.
+  const renamed = item({ EventName: 'Co-Ed Advanced Intermediate Structured Play', Courts: 'Court #1, Court #2' })
+
+  it('the old name alone no longer matches — which is what booked a second copy every morning', () => {
+    expect(matchesPattern(renamed.EventName, intermediate.name)).toBe(false)
+  })
+
+  it('recognises a renamed session by its Court Reserve event', () => {
+    expect(isSession(renamed, intermediate)).toBe(true)
+    expect(scanPatternGaps([intermediate], [renamed], dates)).toEqual([])
+  })
+
+  it('still recognises a session by name when the event differs or the row has none', () => {
+    expect(isSession(item({ EventId: 99 }), intermediate)).toBe(true)
+    expect(isSession(item({}), { name: intermediate.name, event_id: undefined })).toBe(true)
+    expect(isSession(item({ EventId: 99, EventName: 'Intro to Pickleball' }), intermediate)).toBe(false)
+  })
+
+  it('a renamed session moved to another hour the same day is still a move, not a hole', () => {
+    const moved = { ...renamed, StartDateTime: '2026-10-19T16:00:00', EndDateTime: '2026-10-19T18:00:00' }
+    expect(scanPatternGaps([intermediate], [moved], dates)).toEqual([])
+  })
+
+  it('a session never seen is still booked — the 10/19 case is not weakened', () => {
+    expect(scanPatternGaps([intermediate], [], dates, undefined, {})).toHaveLength(1)
+  })
+
+  it('seen on an earlier run and gone now: a person deleted it, no gap', () => {
+    const ledger = recordSeen({}, [intermediate], [item({})], dates)
+    expect(ledger[ledgerKey(intermediate, MON)]).toEqual({ seen: true, whole: true })
+    expect(scanPatternGaps([intermediate], [], dates, undefined, ledger)).toEqual([])
+  })
+
+  it('on both courts on an earlier run and on one now: a person narrowed it, not widened back', () => {
+    const ledger = recordSeen({}, [intermediate], [item({})], dates)
+    const narrowed = [item({ Courts: 'Court #2' })]
+    expect(scanPatternGaps([intermediate], narrowed, dates, undefined, ledger)).toEqual([])
+  })
+
+  it('booked short by the system and never whole: still widened', () => {
+    const short = [item({ Courts: 'Court #2' })]
+    const ledger = recordSeen({}, [intermediate], short, dates)
+    expect(ledger[ledgerKey(intermediate, MON)]).toEqual({ seen: true, whole: false })
+    const gaps = scanPatternGaps([intermediate], short, dates, undefined, ledger)
+    expect(gaps).toHaveLength(1)
+    expect(gaps[0]).toMatchObject({ wants_courts: 2, has_courts: 1 })
+  })
+
+  it('a deleted session on one date silences nothing on another', () => {
+    const next = NaiveDateTime.parseDate('10/26/2026')
+    const ledger = recordSeen({}, [intermediate], [item({})], [MON, next])
+    const gaps = scanPatternGaps([intermediate], [], [MON, next], undefined, ledger)
+    expect(gaps.map((g) => g.date)).toEqual(['10/26/2026'])
+  })
+
+  it('a duplicate is still reported even when the slot was seen whole', () => {
+    const ledger = recordSeen({}, [intermediate], [item({})], dates)
+    const twice = [item({}), item({ Id: 2, Courts: 'Court #4' })]
+    expect(scanPatternGaps([intermediate], twice, dates, undefined, ledger)[0]).toMatchObject({ status: 'duplicate' })
+  })
+
+  it('two copies never count as whole, so a duplicate cannot teach the memory anything', () => {
+    const twice = [item({ Courts: 'Court #2' }), item({ Id: 2, Courts: 'Court #3' })]
+    expect(recordSeen({}, [intermediate], twice, dates)[ledgerKey(intermediate, MON)]).toEqual({ seen: true, whole: false })
+  })
+
+  it('a cancelled copy is not "seen"', () => {
+    const cancelled = [item({ ReservationType: 'Cancelled' } as Partial<ScheduleItem>)]
+    expect(recordSeen({}, [intermediate], cancelled, dates)).toEqual({})
+  })
+
+  it('forgets dates that have passed', () => {
+    const ledger = recordSeen({}, [intermediate], [item({})], dates)
+    const later = [NaiveDateTime.parseDate('10/26/2026')]
+    expect(Object.keys(recordSeen(ledger, [intermediate], [], later))).toEqual([])
+  })
+
+  describe('the whole job', () => {
+    const memoryOf = (initial: SeenLedger | null) => {
+      let held = initial
+      return { load: () => held, save: (l: SeenLedger) => { held = l }, get: () => held }
+    }
+    const run = async (schedules: ScheduleItem[][], memory: ReturnType<typeof memoryOf>) => {
+      const booked: unknown[] = []
+      const widened: unknown[] = []
+      let read = 0
+      const cr = {
+        fixedEvents: async () => [intermediate],
+        schedule: async () => schedules[Math.min(read++, schedules.length - 1)],
+        book: async (r: unknown) => { booked.push(r); return { success: true } },
+        setCourts: async (r: unknown) => { widened.push(r); return { success: true } },
+      } as never
+      const result = await runPatternGaps(
+        cr,
+        { rest: { postEmbed: async () => 'm1' } as never, policy: { fixed_events: { events: [] } } as never, memory },
+        { fix: true, horizonDays: 1, today: MON },
+      )
+      return { booked, widened, result }
+    }
+
+    it('first run with no memory records the calendar and books NOTHING', async () => {
+      const memory = memoryOf(null)
+      const { booked, result } = await run([[]], memory)
+      expect(booked).toEqual([])
+      expect(result.baseline).toBe(true)
+      expect(memory.get()![ledgerKey(intermediate, MON)]).toEqual({ seen: true, whole: true })
+    })
+
+    it('books a session it has never seen, and remembers it only from the re-read', async () => {
+      const memory = memoryOf({})
+      const { booked } = await run([[], [item({})]], memory)
+      expect(booked).toHaveLength(1)
+      expect(memory.get()![ledgerKey(intermediate, MON)]).toEqual({ seen: true, whole: true })
+      // Next morning it has been deleted by hand: nothing is booked.
+      expect((await run([[]], memory)).booked).toEqual([])
+    })
+
+    it('a booking that never landed is NOT remembered, so it is tried again', async () => {
+      const memory = memoryOf({})
+      await run([[], []], memory)
+      expect(memory.get()).toEqual({})
+      expect((await run([[], []], memory)).booked).toHaveLength(1)
+    })
+
+    it('sees a date the day BEFORE it can repair it, so an edit made in between is kept', async () => {
+      // Monday's run repairs Monday only (horizon 1) but looks at Tuesday too.
+      const tue: FixedEvent = { ...intermediate, day_of_week: 'Tuesday' }
+      const onTue = item({ StartDateTime: '2026-10-20T17:00:00', EndDateTime: '2026-10-20T19:00:00' })
+      let held: SeenLedger | null = {}
+      const memory = { load: () => held, save: (l: SeenLedger) => { held = l } }
+      const mk = (items: ScheduleItem[], booked: unknown[]) => ({
+        fixedEvents: async () => [tue],
+        schedule: async () => items,
+        book: async (r: unknown) => { booked.push(r); return { success: true } },
+      }) as never
+      const deps = { rest: { postEmbed: async () => 'm1' } as never, policy: { fixed_events: { events: [] } } as never, memory }
+      await runPatternGaps(mk([onTue], []), deps, { fix: true, horizonDays: 1, today: MON })
+      expect(held![ledgerKey(tue, NaiveDateTime.parseDate('10/20/2026'))]).toEqual({ seen: true, whole: true })
+      // Deleted by hand overnight; Tuesday's run leaves it deleted.
+      const booked: unknown[] = []
+      await runPatternGaps(mk([], booked), deps, { fix: true, horizonDays: 1, today: NaiveDateTime.parseDate('10/20/2026') })
+      expect(booked).toEqual([])
+    })
+
+    it('leaves a narrowed session on its one court', async () => {
+      const memory = memoryOf({ [ledgerKey(intermediate, MON)]: { seen: true, whole: true } })
+      const { widened, booked } = await run([[item({ Courts: 'Court #2' })]], memory)
+      expect(widened).toEqual([])
+      expect(booked).toEqual([])
+    })
   })
 })

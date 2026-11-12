@@ -5,6 +5,50 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-12 — the gap sweep stops re-adding sessions that were renamed, deleted or narrowed by hand (D-0315)
+
+Ron: *"the 'missing' events are re-added. However, they aren't missing -- I've either deleted them
+or altered them (moved them to 1 court instead of 2)"*. Three faults in `ts/src/jobs/patternGaps.ts`,
+each measured on the live calendar and in `launchd_pattern_gaps.log` before anything was changed:
+
+1. **A session was recognised by NAME only.** Events 2316716 and 1267066 had been retitled in Court
+   Reserve ("Co-Ed Advanced Intermediate Structured Play", "Women's Advanced Open Play") while their
+   `fixed_events` rows kept the old titles. The folded names no longer contained one another, so a
+   session on its courts read `has=0` and a second copy was booked: Fri 11/13 11:00 six mornings
+   running (11/7–11/12), and duplicates left standing on 11/20 11:00, 11/23 17:00 and 11/24 16:00
+   (courtreserve-api's calendar audit lists all three as split sessions, registrants zero).
+   Fix: `isSession` — the Court Reserve event first, the name second, either is enough.
+2. **A delete leaves no trace** (a cancel does, and was already respected). Fix: the sweep keeps a
+   memory, `state/pattern-gaps-seen.json` — seen before and absent now is a person's delete.
+3. **A session cut to one court read as short** and was widened back (11/12 17:00 that morning).
+   Fix: whole before and narrower now is a person's edit.
+
+The memory is written only from a calendar read (one extra `/schedule` after a booking), never from
+a booking's reply. With no memory the run records the calendar as it stands and books nothing.
+
+**Old vs new on the live calendar, same patterns and items, no memory:** 21 gaps → 19. The six that
+went are exactly the renamed sessions (11/13, 11/16, 11/20, 11/23 Co-ed Intermediate Structured Play;
+11/17, 11/24 Women's Advanced Contract Time); three of those slots now read `duplicate`, which is
+what they are. 304 tests green, 17 new.
+
+The memory looks one day further than the repair does, so a date the 8:00 booker has just created
+is seen the same morning, a day before this job may touch it.
+
+**No required check runs these tests.** The repo's checks are the issue link and the capability
+manifest; `npm test` is run by whoever builds the change. Said here because D-0315's
+`enforced-by` leans on the suite.
+
+**Not changed, and worth someone's attention:**
+- Ten of the remaining gaps are "Third Shot Academy Clinic" rows with no Court Reserve event. They
+  alarm on every date, every day: of the 26 runs in `launchd_pattern_gaps.log`, none ended with
+  nothing open, so the job has never sent its heartbeat.
+- The `fixed_events` rows for the two renamed events still carry the old names.
+- The 8:30 catch-up re-books a date with NOTHING on the calendar (`empty`) without consulting this
+  memory. A day thinned by hand is left alone; a day cleared completely would be rebuilt.
+- One disappearance was not explained: "booked 11/12 10:00 Co-Ed Advanced Structured Play on #3, #4"
+  at 8:45 was absent from the 11:00 read. Deleted by hand or never landed — not determined.
+
+---
 ## 2026-11-09 — Discord posts quietly; only a pressable card rings (#116, D-0308)
 
 Every body `discord_notify.py`, `discord_listener.py` and `ts/src/discord/rest.ts` (`postEmbed`,
