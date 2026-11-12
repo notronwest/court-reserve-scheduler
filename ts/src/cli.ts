@@ -6,7 +6,7 @@ import { loadPolicy } from './policy'
 import { recommend, recommendLlm, toDict } from './recommender'
 import { runScheduler } from './scheduler'
 import { runCatchUp } from './jobs/catchUp'
-import { needsAttention, runPatternGaps } from './jobs/patternGaps'
+import { fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -156,9 +156,12 @@ async function main(): Promise<void> {
         channelId: process.env.DISCORD_CHANNEL_ID ?? '',
         webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
       })
+      const log = (m: string): void => console.log(`${new Date().toISOString()}  ${m}`)
       const result = await runPatternGaps(
         makeCr(),
-        { rest, policy: loadPolicy(), log: (m) => console.log(`${new Date().toISOString()}  ${m}`) },
+        // The memory of what earlier runs saw — a session a person removed or narrowed is
+        // never put back (daemon D-0315). Always passed here; only a test runs without it.
+        { rest, policy: loadPolicy(), log, memory: fileSeenMemory(undefined, log) },
         { fix: flags.has('--fix') },
       )
       const filled = result.gaps.filter((g) => g.status === 'booked' || g.status === 'widened').length
@@ -167,7 +170,8 @@ async function main(): Promise<void> {
       ).length
       console.log(
         `Done: ${result.daysScanned} days, ${result.gaps.length} gap(s) — ${filled} filled, ${open} still open` +
-          (result.patternsLive ? '' : `  [patterns from ${result.patternsSource}, nothing booked]`),
+          (result.patternsLive ? '' : `  [patterns from ${result.patternsSource}, nothing booked]`) +
+          (result.baseline ? '  [first run with memory: calendar recorded as it stands, nothing booked]' : ''),
       )
       // Anything a human must deal with exits non-zero: the wrapper withholds the heartbeat
       // and the fleet watchdog alarms even if Discord is never read.
