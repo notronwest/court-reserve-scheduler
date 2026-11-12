@@ -5298,6 +5298,38 @@ return value. Booking or widening on a run that found no memory. Treating a dupl
 Loosening rule 2 to "re-add after N days absent" — a deleted session is deleted on day one and
 day ten.
 
+### D-0317 — A clinic slot is a window the clinic rota fills — the standing-session sweep neither books it nor alarms on it
+
+*2026-11-12 · scope: `ts/src/jobs/patternGaps.ts, ts/src/policy.ts` · source: Ron, 2026-11-12 — asked "Quiet the daily alarm for the clinic rows the check can never book?", answered *"Yes, quiet them"*. Measured the same day on the club Mac mini: five standing rows of kind `clinic_slot`, none with an event; all 26 runs in the sweep's log ended with something open, so the job had never sent its heartbeat.*
+
+**Decision.** The daily sweep that asks "is every standing session on the calendar?" does not
+ask it of a clinic slot. A standing row whose `kind` is `clinic_slot` is skipped: never a gap,
+never booked, never reported, never a reason for the run to exit non-zero.
+
+1. **The row's kind decides, never its name.** D-0315 rule 1 exists because a title is
+   something a person edits.
+2. **Every other row with no event is still an alarm.** A session someone forgot to attach an
+   event to is a fault and keeps saying so daily. Only the marked rows go quiet.
+3. **Who watches the clinics is the clinic rota**, in courtreserve-api — it places each week's
+   clinic and already knows which occurrences have no Court Reserve event. This record moves no
+   duty onto it and removes none.
+
+**Why.** A clinic slot is forbidden an event id by a database check
+(`fixed_events_clinic_slot_has_no_event_check`): the clinic in the window is a different Court
+Reserve event each week. So the sweep could only ever read the row as "no event attached" — on
+every date in the horizon, every morning. The alarm could not be acted on and could not be
+cleared, and because any open item withholds the heartbeat, a job that was otherwise healthy
+had never once reported in. An alarm that fires every day is one nobody reads.
+
+Measured before merging, on the mini, against a scratch copy of the sweep's memory with the
+clinic entries removed, report-only, Discord blank: the old code reported 9 open and exited 1;
+the new code reported 0 and exited 0. The live memory was not touched.
+
+**Forbids.**
+- Quieting a row by matching its name.
+- Treating an ordinary event-less row as a clinic slot, or skipping `no_event` altogether.
+- Reading this as "clinics are checked": the sweep says nothing about them either way.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
