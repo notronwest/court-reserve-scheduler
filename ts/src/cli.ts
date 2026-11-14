@@ -199,7 +199,11 @@ async function main(): Promise<void> {
         log,
         alwaysReport: flags.has('--report'),
       })
-      const drifted = result.rows.filter((r) => r.verdict === 'fixable').length
+      // A row the scan called `fixable` KEEPS that verdict after it is written — the
+      // verdict is the scan's, not the outcome. So "still off the table" is the fixable
+      // rows minus the ones actually put right, or the first --fix run would end by
+      // claiming all 31 of the sessions it had just corrected were still wrong.
+      const drifted = result.rows.filter((r) => r.verdict === 'fixable' && r.fixed !== true).length
       console.log(
         `Done: ${result.rows.length} occurrence(s) over ${result.scannedEvents} event(s) — ` +
           `${result.fixed.length} put right, ${result.failed.length} failed, ` +
