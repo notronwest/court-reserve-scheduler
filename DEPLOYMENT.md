@@ -213,8 +213,9 @@ two committed policy files:
   read, written on every successful fetch (not committed). On a failed read the
   scheduler falls back to this cache, then to `policy.json`'s seed, and posts a
   Discord alert either way. A row whose `until` has passed is dropped on every
-  source, so a stale cache cannot resurrect a retired slot — see `CLAUDE.md` →
-  The standing weekly pattern (D-0056).
+  source, so a stale cache cannot resurrect a retired slot; so is a row whose
+  `place` is set to anything but `lincoln`, an unlabelled row being the club's
+  (D-0323) — see `CLAUDE.md` → The standing weekly pattern (D-0056).
 
 Both JSON files are **committed**, so changing them is a code change and takes
 effect on the next scheduled run — no restart needed for the cron-style jobs, but

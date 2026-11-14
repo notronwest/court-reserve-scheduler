@@ -307,6 +307,18 @@ describe('a Concord row reaches neither Pass 0 nor the gap scan', () => {
     expect(recommendations.some((r) => r.event_name === 'Concord Third Shot Academy')).toBe(false)
     // Not merely skipped — never seen. A Concord slot is not a club gap to report.
     expect(stats.skipped_fixed_events.some((s) => s.event_id === 777001)).toBe(false)
+
+    // And it shifted NOTHING else either. Pass 0's per-level tally counts `fe.level`
+    // for every on-week pattern, so a Concord row carrying a level would nudge which
+    // levels the later passes think still need coverage — a quiet way for Concord to
+    // change what the club books without ever appearing on the calendar. Comparing the
+    // whole run against one with an empty pattern covers the tally and anything else
+    // derived from it, rather than only the fields this test thought to name.
+    const empty = recommend([], MON, { ...basePolicy(), fixed_events: { events: [] } }, {
+      popularity: new Map(),
+    })
+    expect(recommendations).toEqual(empty.recommendations)
+    expect(stats).toEqual(empty.stats)
   })
 
   it('the SAME row with place = lincoln is booked — proving the filter, not a typo', async () => {
@@ -332,11 +344,13 @@ describe('a Concord row reaches neither Pass 0 nor the gap scan', () => {
     serve([concordSlot({ place: 'lincoln' })])
     const lincoln = await resolveFixedEvents(client(), basePolicy(), { dir, today: TODAY })
     const gaps = scanPatternGaps(lincoln.events, [], dates)
-    // One gap reported for the club's twin — the scan saw the slot. (Its exact status
-    // depends on what the empty schedule says about courts; what matters here is that
-    // the Concord row produced NOTHING and this one produced a row.)
+    // `scanPatternGaps` never emits 'missing': it reports "the shape of the problem,
+    // not its fate", which for a row carrying an event id is `no_court` (and `no_event`
+    // for one without). The acting half resolves it.
     expect(gaps).toHaveLength(1)
     expect(gaps[0].name).toBe('Concord Third Shot Academy')
-    expect(gaps[0].status).not.toBe('ok')
+    expect(gaps[0].status).toBe('no_court')
+    expect(gaps[0].wants_courts).toBe(2)
+    expect(gaps[0].has_courts).toBe(0)
   })
 })
