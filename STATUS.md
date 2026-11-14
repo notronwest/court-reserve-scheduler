@@ -89,7 +89,10 @@ still failing after the deliberate change, and hand-editing it would have hidden
 `MaxPeople` only — `browser_automation.form_fields.edit_form` is the whole field list and there is no
 minimum on it. Court Reserve does carry one on the **event** form as `RequireMinRegistrants`, which
 `courtreserve-api` lists as an uncharacterised field (`cr_profile.json` `unmapped.fields`). Writing
-the 4 needs that field mapped first; it is named in D-0319's forbids so the gap stays explicit.
+the 4 needs that field mapped first, and that is filed for Mr. Robot. **Nothing enforces the 4
+today** — the heal prints it in its report so a reader can see the rule, and does not check against it;
+the table could not violate it anyway, its smallest value being 5. D-0319's forbids say so, so the gap
+stays explicit rather than reading as closed.
 
 Open from this: whether the clinics, contract-time rentals, the school group and the town hall should
 follow the same table or keep their own numbers — one ledger line, not decided here. Still open from

@@ -164,7 +164,9 @@ Three rules it will not break:
 edit form exposes `MaxPeople` only. Court Reserve does carry a minimum on the EVENT
 form as `RequireMinRegistrants`, which `courtreserve-api` lists as an
 uncharacterised field (`cr_profile.json` `unmapped.fields`) — writing the 4 needs
-that field mapped first.
+that field mapped first, which is filed for Mr. Robot. **Nothing enforces the 4 today.**
+The heal prints it in its report so a reader can see the rule; it does not check against
+it, and the table could not violate it anyway, its smallest value being 5.
 
 ## Hard Constraints (policy.json)
 

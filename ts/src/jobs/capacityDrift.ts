@@ -254,7 +254,11 @@ export async function runCapacityHeal(
     }
   }
 
-  if (rest && (opts.alwaysReport || fixed.length || failed.length || reported.length)) {
+  // Only when something CHANGED. `reported` rows — a cap under its roster, a session
+  // with people waiting — persist until the session happens, so including them here
+  // posted the same two lines five times a day for as long as they stood. They still
+  // ride along in a report that something else triggered, and `--report` forces one.
+  if (rest && (opts.alwaysReport || fixed.length || failed.length)) {
     await rest.postEmbed(buildCapacityEmbed({ rows, fixed, failed, reported, scannedEvents: eventIds.length }, limits, days))
   }
   return { rows, fixed, failed, reported, scannedEvents: eventIds.length }

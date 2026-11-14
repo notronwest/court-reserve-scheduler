@@ -244,8 +244,13 @@ export async function runCheckWaitlists(
   // cap first means the expansion proposals below are judged against the real ceiling.
   if (!opts.skipCapacity) {
     try {
+      // NO `days` here, deliberately. This job's own window is
+      // `waitlist.scan_days_ahead`, which is **7** — while the capacity rule is about
+      // the 14 days the booker works on, and the 8:00 run creates its sessions at
+      // day 14. Passing this job's 7 would have left the second week of every booking
+      // unhealed until it drifted into range, so the heal keeps its own horizon
+      // (`participant_limits.heal.horizon_days`).
       await runCapacityHeal(cr, rest, {
-        days,
         fix: !opts.dryRun,
         policy,
         log,

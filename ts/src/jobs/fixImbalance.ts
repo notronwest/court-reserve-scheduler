@@ -7,6 +7,7 @@
  * target. Book/cancel go through `courtreserve-api` (no browser).
  */
 import 'dotenv/config'
+import { capForCourts, loadParticipantLimits } from '../capacity'
 import { resolve } from 'node:path'
 import { CourtReserveClient } from '../cr/client'
 import type { ScheduleItem } from '../cr/types'
@@ -316,6 +317,10 @@ export async function executeChanges(
         start_time: c.start_time,
         end_time: c.end_time,
         court_id: String(c.court_id),
+        // One court, so the table's one-court value. This was the last writer in the
+        // repo that booked with no cap at all, leaving the session on whatever default
+        // its Court Reserve event carried (Ron, 2026-11-13).
+        max_people: capForCourts(loadParticipantLimits(), 1),
         dry_run: false,
       })
       log(`  ✅ ${c.description}`)
