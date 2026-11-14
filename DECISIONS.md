@@ -5332,7 +5332,7 @@ the new code reported 0 and exited 0. The live memory was not touched.
 
 ### D-0319 — A play session's size comes from its court count
 
-*2026-11-14 · scope: `policy.json, ts/src/capacity.ts, ts/src/jobs/capacityDrift.ts, ts/src/jobs/checkWaitlists.ts, ts/src/jobs/patternGaps.ts, ts/src/discord/execute.ts, ts/src/recommender.ts, recommender.py` · source: Ron, 2026-11-13, on the club's scheduling — "all single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18 maximum. All have 4 minimum ... make sure this gets fixed and that we add this into the healing process incase something gets accidentally modified that doesn't meet this criteria"*
+*2026-11-14 · scope: `policy.json, ts/src/capacity.ts, ts/src/jobs/capacityDrift.ts, ts/src/jobs/checkWaitlists.ts, ts/src/jobs/patternGaps.ts, ts/src/discord/execute.ts, ts/src/recommender.ts, recommender.py` · source: Ron, 2026-11-13, on the club's scheduling — "all single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18 maximum. All have 4 minimum ... make sure this gets fixed and that we add this into the healing process incase something gets accidentally modified that doesn't meet this criteria"; and, 2026-11-14, asked whether the clinics, contract-time rentals, the school group and the public meeting should follow the same table or keep their own capacities — "Keep their own numbers", which settles rule 5 as his ruling rather than an inference from the first instruction*
 
 **Decision.** How many people a play session holds is a function of **how many courts
 it holds**, and of nothing else: one court 5, two 10, three 14, four 18, with a floor of
@@ -5389,7 +5389,11 @@ courts it holds" has exactly one, which is what makes an unattended sweep safe t
    fine: nobody is promoted by a cap coming down.
 5. **Applying the table outside the play sessions.** A clinic at 4, a rental at 6, a school
    group at 12 and a public meeting at 100 are each deliberate. The sweep names them and
-   changes nothing.
+   changes nothing. **Ruled by Ron on 2026-11-14, asked directly: "Keep their own numbers."**
+   So this is not a conservative reading of the original instruction that a later session may
+   widen — it is the answer to the question, and widening the table over these needs a new
+   ruling from him, not a judgement call. The eighteen such occurrences in the fortnight that
+   was measured stay exactly as the club set them.
 6. **Claiming the floor of 4 is enforced in the booking system.** It is the club's stated
    minimum and the sweep reports against it; until the minimum field on the event form is
    characterised, nothing writes it.
