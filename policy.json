@@ -23,6 +23,31 @@
       "label": "Pickleball-Court #4"
     }
   },
+  "participant_limits": {
+    "note": "RULE set by Ron, 2026-11-13: \"all single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18 maximum. All have 4 minimum.\" The cap a play session carries is a function of HOW MANY COURTS IT HOLDS, not a number stored per event \u2014 so every writer derives it here (capForCourts in ts/src/capacity.ts) and no caller invents one. This SUPERSEDES two older rules: booking.multi_court_workflow.max_participants_per_two_court_event (8 = 4 per court) and the proportional scaling in patternGaps.scaledCap, both of which produced caps that disagreed with each other on the same calendar.",
+    "min_participants": 4,
+    "max_by_courts": {
+      "1": 5,
+      "2": 10,
+      "3": 14,
+      "4": 18
+    },
+    "governs": {
+      "name_patterns": [
+        "open play",
+        "structured play",
+        "level play"
+      ],
+      "note": "WHICH events the table governs, matched case-insensitively against the Court Reserve event name. The club's play sessions, where a court's capacity IS the session's capacity. Deliberately NOT every event on the calendar: a coached clinic, a contract-time rental, a school group and a town hall each carry a capacity set for that event (4 on a clinic, 6 for a rental group, 100 for a meeting), and a court count says nothing about it. An event outside this list is REPORTED by the capacity healer and never changed."
+    },
+    "min_write_status": "RECORDED, NOT WRITTEN TO COURT RESERVE. The occurrence edit form (UpdateReservation) exposes MaxPeople only \u2014 browser_automation.form_fields.edit_form is the full field list, and there is no minimum there. Court Reserve does carry a minimum on the EVENT form as RequireMinRegistrants, which courtreserve-api lists as an uncharacterised field (cr_profile.json unmapped.fields). Writing the 4 needs that field mapped first; until then the 4 is the club's stated floor and the healer reports anything whose cap is below it.",
+    "heal": {
+      "horizon_days": 14,
+      "never_lower_below_registered": true,
+      "never_raise_with_waitlist": true,
+      "note": "Guardrails, each from a real shape on the live calendar. A cap is never lowered below the number already registered \u2014 on 2026-11-13 a four-court session had 20 people in it against a table value of 18, and a cap under the roster is a different problem from a wrong cap. A cap is never RAISED on an occurrence that has a waitlist: Court Reserve notifies waitlisted members itself when room appears (see the Court Expanded message in discord/execute.ts), so that is a member-facing send and belongs to the waitlist expansion path Ron approves by hand, not to an unattended heal."
+    }
+  },
   "approved_events": {
     "1717147": {
       "name": "Co-Ed Beginner Open Play",
@@ -493,7 +518,8 @@
       "step_1": "Book via AddEventOccurrence on the primary court only. Capture the occurrence_id from the URL or occurrences grid after saving.",
       "step_2": "Navigate to UpdateReservation using the captured occurrence_id. Check EditOnlyCurrentOccurrence, set Courts multiselect to all court IDs, set MaxPeople to the configured limit, save.",
       "max_participants_per_two_court_event": 8,
-      "max_participants_note": "MaxPeople = 8 (4 per court) for all 2-court open play events. This field is only available on the edit (UpdateReservation) form, not the add form.",
+      "max_participants_per_two_court_event_superseded": "SUPERSEDED 2026-11-13 by participant_limits. Kept only as the record of what the number used to be \u2014 nothing reads it. Two courts is 10, from participant_limits.max_by_courts.",
+      "max_participants_note": "MaxPeople comes from participant_limits.max_by_courts \u2014 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts (Ron, 2026-11-13). This field is only available on the edit (UpdateReservation) form, not the add form, which is why /book owns both steps.",
       "reason": "Court Reserve does not expose MaxPeople on the AddEventOccurrence form. Editing after booking is the only way to set it."
     },
     "form_fields": {
@@ -531,7 +557,7 @@
         "max_participants": {
           "id": "MaxPeople",
           "type": "number",
-          "note": "Only available on edit form. Set to 8 for 2-court events (4 per court)."
+          "note": "Only available on edit form. The value comes from participant_limits.max_by_courts, keyed on how many courts the occurrence holds."
         },
         "edit_only_current": {
           "id": "EditOnlyCurrentOccurrence",
@@ -648,7 +674,7 @@
     "eventid_whitelist_change_policy": "Approved event IDs may only be added or removed with explicit business approval. Update approved_events in this file; do not hardcode IDs in scheduler logic.",
     "operating_window_change_policy": "Windows are configurable by day-of-week in this file.",
     "fixed_events_change_policy": "Fixed events may only be added or removed with explicit business approval. Update fixed_events.events in this file.",
-    "multi_court_max_participants_change_policy": "MaxPeople limit for 2-court events is set in booking.multi_court_workflow.max_participants_per_two_court_event. Update here; do not hardcode in book_event.py.",
+    "multi_court_max_participants_change_policy": "MaxPeople is a function of the court count, in participant_limits.max_by_courts. Change it THERE \u2014 not in book_event.py, not in ts/src/capacity.ts, and no longer in booking.multi_court_workflow (superseded 2026-11-13).",
     "two_court_priority_change_policy": "Court pair priority order is set in recommendation_rules.two_court_priority_pairs. Update here; do not hardcode in recommender.py.",
     "llm_model_change_policy": "The Claude model used for LLM recommendations is set in recommendation_engine.llm_option.model. Update here and in llm_ranker.py MODEL constant together.",
     "version_control": "This file should be tracked in version control. Git history serves as the audit log for policy changes."

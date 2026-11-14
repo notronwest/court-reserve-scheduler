@@ -143,6 +143,25 @@ def _overlaps(s1: datetime, e1: datetime, s2: datetime, e2: datetime) -> bool:
 
 # ── Main recommender ──────────────────────────────────────────────────────────
 
+def cap_for_courts(policy: dict, courts: int) -> int:
+    """How many people a session on `courts` courts holds.
+
+    `policy.json` `participant_limits.max_by_courts` is the one answer (Ron,
+    2026-11-13: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts). The TypeScript side
+    reads the same block through `ts/src/capacity.ts`, which is what keeps the
+    rollback path and the live path from capping the same session differently.
+
+    Raises on a policy with no table: 0 would read as "leave Court Reserve's own
+    default alone" to every caller, so a missing rule must not look permissive.
+    """
+    limits = policy.get("participant_limits")
+    if not limits or not limits.get("max_by_courts"):
+        raise KeyError(
+            "policy.json has no participant_limits.max_by_courts "
+            "-- the court->capacity rule is missing")
+    return int(limits["max_by_courts"].get(str(courts), 0))
+
+
 def recommend(
     schedule_items: list[dict],
     target_date: str,
@@ -507,9 +526,10 @@ def recommend(
         # courts and set max participants.
         primary = courts_assigned[0]
         extras  = courts_assigned[1:]
-        # max_participants is configured for the full court count; scale it
-        # down when the event settled for fewer courts (10 on 2 -> 5 on 1).
-        max_p   = math.ceil(fe.get("max_participants", 0) * len(courts_assigned) / n_courts_needed)
+        # The cap comes from the court->capacity table, keyed on the courts this
+        # slot ACTUALLY got -- not from the pattern's stored number scaled down.
+        # Ron, 2026-11-13: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts.
+        max_p   = cap_for_courts(policy, len(courts_assigned))
         add(eid, primary, fe_start, fe_end,
             extra_court_nums=extras, max_participants=max_p)
 

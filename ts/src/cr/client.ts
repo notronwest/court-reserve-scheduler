@@ -8,6 +8,7 @@ import type {
   FixCourtRequest,
   WaitlistOccurrence,
   CheckinCandidate,
+  RegistrationOccurrence,
   CheckinResult,
   RosterEntry,
 } from './types'
@@ -63,6 +64,38 @@ export class CourtReserveClient {
     const q = new URLSearchParams({ event_ids: eventIds.join(','), days: String(days) })
     const data = await this.request<{ items: WaitlistOccurrence[] }>('GET', `/waitlists?${q}`)
     return data.items
+  }
+
+  /**
+   * Every in-window occurrence of the given events, with its live cap
+   * (`registered / max_people / open_slots / waitlist`) and its courts.
+   *
+   * One Court Reserve page load PER EVENT, so a 29-event sweep runs for minutes
+   * and holds the service's browser lock the whole time — hence the explicit,
+   * much larger timeout than the client default. The service's window is
+   * `(today, today + days]`: today itself is excluded, which is correct for a
+   * heal (an occurrence starting in an hour is not something to rewrite).
+   */
+  async registrations(
+    eventIds: number[],
+    days: number,
+    timeoutMs = 900_000,
+  ): Promise<RegistrationOccurrence[]> {
+    const q = new URLSearchParams({ event_ids: eventIds.join(','), days: String(days) })
+    const data = await this.request<{ items?: RegistrationOccurrence[] }>(
+      'GET',
+      `/events/registrations?${q}`,
+      undefined,
+      timeoutMs,
+    )
+    const items = data?.items
+    if (!Array.isArray(items)) {
+      throw new Error(
+        'courtreserve-api GET /events/registrations -> no `items` array: ' +
+          `${JSON.stringify(data ?? null).slice(0, 200)}`,
+      )
+    }
+    return items
   }
 
   /** Past occurrences with registrants that may need check-in (read-only). */
@@ -145,9 +178,14 @@ export class CourtReserveClient {
     }
   }
 
-  private async request<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    timeoutMs: number = this.timeoutMs,
+  ): Promise<T> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method,

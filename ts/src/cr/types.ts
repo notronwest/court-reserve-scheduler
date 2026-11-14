@@ -25,6 +25,31 @@ export interface WaitlistOccurrence {
   waitlist: number
 }
 
+/**
+ * One occurrence's capacity, from `GET /events/registrations`.
+ *
+ * The `/schedule` feed does NOT carry MaxPeople — it has `MembersCount` and
+ * nothing else about capacity — so this is the only read that can say what cap
+ * an occurrence is actually carrying. Same occurrences-grid scan the waitlist
+ * read uses, unfiltered: every in-window occurrence rather than only the full
+ * ones with somebody waiting.
+ */
+export interface RegistrationOccurrence {
+  res_id: string
+  event_id: number
+  /** ISO `YYYY-MM-DD`. */
+  date: string
+  date_text: string
+  time_text: string
+  courts_text: string
+  registered: number
+  max_people: number
+  open_slots: number
+  waitlist: number
+  is_full: boolean
+  status: string
+}
+
 /** A past occurrence with registrants (from GET /checkin/scan). */
 export interface CheckinCandidate {
   res_id: string

@@ -1,7 +1,6 @@
 {
   "date": "7/13/2026",
   "schedule": "empty",
-  "history": "history_synth.json",
   "recs": [
     {
       "event_id": 1931656,
@@ -82,7 +81,7 @@
       "court_label": "Pickleball-Court #4",
       "extra_court_ids": [],
       "extra_court_nums": [],
-      "max_participants": 0,
+      "max_participants": 5,
       "date": "7/13/2026",
       "start_time": "5:00 PM",
       "end_time": "7:00 PM"
@@ -117,6 +116,7 @@
       "Advanced Intermediate": 0,
       "Advanced": 1
     },
-    "rec_source": "rule_based"
+    "rec_source": "rule_based",
+    "skipped_fixed_events": []
   }
 }

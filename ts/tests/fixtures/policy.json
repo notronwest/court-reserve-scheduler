@@ -13,6 +13,31 @@
     "52352": { "number": 4, "label": "Pickleball-Court #4" }
   },
 
+  "participant_limits": {
+    "note": "RULE set by Ron, 2026-11-13: \"all single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18 maximum. All have 4 minimum.\" The cap a play session carries is a function of HOW MANY COURTS IT HOLDS, not a number stored per event \u2014 so every writer derives it here (capForCourts in ts/src/capacity.ts) and no caller invents one. This SUPERSEDES two older rules: booking.multi_court_workflow.max_participants_per_two_court_event (8 = 4 per court) and the proportional scaling in patternGaps.scaledCap, both of which produced caps that disagreed with each other on the same calendar.",
+    "min_participants": 4,
+    "max_by_courts": {
+      "1": 5,
+      "2": 10,
+      "3": 14,
+      "4": 18
+    },
+    "governs": {
+      "name_patterns": [
+        "open play",
+        "structured play",
+        "level play"
+      ],
+      "note": "WHICH events the table governs, matched case-insensitively against the Court Reserve event name. The club's play sessions, where a court's capacity IS the session's capacity. Deliberately NOT every event on the calendar: a coached clinic, a contract-time rental, a school group and a town hall each carry a capacity set for that event (4 on a clinic, 6 for a rental group, 100 for a meeting), and a court count says nothing about it. An event outside this list is REPORTED by the capacity healer and never changed."
+    },
+    "min_write_status": "RECORDED, NOT WRITTEN TO COURT RESERVE. The occurrence edit form (UpdateReservation) exposes MaxPeople only \u2014 browser_automation.form_fields.edit_form is the full field list, and there is no minimum there. Court Reserve does carry a minimum on the EVENT form as RequireMinRegistrants, which courtreserve-api lists as an uncharacterised field (cr_profile.json unmapped.fields). Writing the 4 needs that field mapped first; until then the 4 is the club's stated floor and the healer reports anything whose cap is below it.",
+    "heal": {
+      "horizon_days": 14,
+      "never_lower_below_registered": true,
+      "never_raise_with_waitlist": true,
+      "note": "Guardrails, each from a real shape on the live calendar. A cap is never lowered below the number already registered \u2014 on 2026-11-13 a four-court session had 20 people in it against a table value of 18, and a cap under the roster is a different problem from a wrong cap. A cap is never RAISED on an occurrence that has a waitlist: Court Reserve notifies waitlisted members itself when room appears (see the Court Expanded message in discord/execute.ts), so that is a member-facing send and belongs to the waitlist expansion path Ron approves by hand, not to an unattended heal."
+    }
+  },
   "approved_events": {
     "1717147": {
       "name": "Co-Ed Beginner Open Play",
