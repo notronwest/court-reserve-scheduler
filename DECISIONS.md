@@ -5330,6 +5330,70 @@ the new code reported 0 and exited 0. The live memory was not touched.
 - Treating an ordinary event-less row as a clinic slot, or skipping `no_event` altogether.
 - Reading this as "clinics are checked": the sweep says nothing about them either way.
 
+### D-0319 — A play session's size comes from its court count
+
+*2026-11-14 · scope: `policy.json, ts/src/capacity.ts, ts/src/jobs/capacityDrift.ts, ts/src/jobs/checkWaitlists.ts, ts/src/jobs/patternGaps.ts, ts/src/discord/execute.ts, ts/src/recommender.ts, recommender.py` · source: Ron, 2026-11-13, on the club's scheduling — "all single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18 maximum. All have 4 minimum ... make sure this gets fixed and that we add this into the healing process incase something gets accidentally modified that doesn't meet this criteria"*
+
+**Decision.** How many people a play session holds is a function of **how many courts
+it holds**, and of nothing else: one court 5, two 10, three 14, four 18, with a floor of
+4 on every one. The numbers live in one place — `policy.json` `participant_limits` in the
+booking robot's repo — and every writer derives the cap from the court count through one
+function. A cap stored against an individual session is not consulted. A sweep over the
+next fortnight puts back any cap that has drifted, because a limit edited by hand in the
+booking system is invisible to a rule that only runs at booking time.
+
+The table governs the club's **play sessions** — Open Play, Structured Play, Level Play —
+matched on the session's name rather than a list of booking-system event ids, because a
+new level appears under a new id every few months and a list silently stops covering it.
+A coached clinic, a contract-time rental, a school group and a public meeting each carry a
+capacity chosen for that event, and a court count says nothing about it: those are
+reported and left alone.
+
+The floor of 4 is **recorded and reported against, not written**. The occurrence edit form
+in the booking system exposes a maximum only; it carries a minimum on the event form under
+a field the integration has never characterised. Writing the 4 waits on that field being
+mapped, and that is named here so the gap is explicit rather than assumed closed.
+
+**Why.** There was no single answer, so the calendar carried four. The standing-pattern
+rows stored a cap per slot (8 for a pair of courts, "4 per court"); the gap-filler scaled
+that stored number proportionally when a slot landed on fewer courts than it wanted; the
+waitlist expansion divided whatever cap an occurrence was carrying by its court count and
+multiplied back up, so ten on two courts proposed fifteen on three where the club's rule
+says fourteen — and an occurrence already sitting at a wrong cap propagated that wrongness
+into every expansion; and the booker sent a cap only when a recommendation carried one, so
+the bulk of the calendar was booked at whatever default its booking-system event held.
+
+Measured against the live fortnight on 2026-11-13: **51 of 109 occurrences disagreed with
+the table.** Six two-court sessions at 4, eleven two-court sessions at 8, five four-court
+sessions at 20, two one-court sessions at 10. Ron had already corrected two of them by
+hand, which is the shape of the problem: a rule that exists only in a person's head gets
+applied one reservation at a time.
+
+A derived cap is also the only version that can be *healed*. "The stored number, scaled"
+has no single right answer to compare against, so nothing can tell drift from intent. "The
+courts it holds" has exactly one, which is what makes an unattended sweep safe to run.
+
+**Forbids.**
+1. **Reading a cap from anywhere but the table.** No per-session stored maximum, no
+   proportional scaling, no dividing a current cap by its court count, and no second copy
+   of the numbers in code — including in the rollback path, which mirrors the same block.
+2. **Treating a missing table as permissive.** An absent or empty table must raise, never
+   return zero: zero reads as "leave the booking system's own default alone" to the booker
+   and as "already correct" to the sweep.
+3. **Lowering a cap below the people already signed up.** One session held twenty against a
+   table value of eighteen. More people than places is a roster problem; shrinking the cap
+   under them conceals it. Report it.
+4. **Raising a cap on a session with a waitlist.** The booking system notifies waitlisted
+   members itself when room appears, which makes that a send to a member — stop-list row 1,
+   and the business of the court expansion Ron approves by hand. Lowering such a cap is
+   fine: nobody is promoted by a cap coming down.
+5. **Applying the table outside the play sessions.** A clinic at 4, a rental at 6, a school
+   group at 12 and a public meeting at 100 are each deliberate. The sweep names them and
+   changes nothing.
+6. **Claiming the floor of 4 is enforced in the booking system.** It is the club's stated
+   minimum and the sweep reports against it; until the minimum field on the event form is
+   characterised, nothing writes it.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
