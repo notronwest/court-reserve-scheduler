@@ -338,6 +338,17 @@ def build_proposal(alert: dict, page) -> dict | None:
 
 # ── Discord notification ──────────────────────────────────────────────────────
 
+# Suppress-notifications flag (1 << 12 = 4096): only a pressable card rings Ron's phone (D-0308).
+SUPPRESS_NOTIFICATIONS = 4096
+
+
+def quiet_payload(payload: dict) -> dict:
+    """Whisper: OR the suppress flag into any flags already set and block every @mention."""
+    return {**payload,
+            "flags": payload.get("flags", 0) | SUPPRESS_NOTIFICATIONS,
+            "allowed_mentions": {"parse": []}}
+
+
 def post_discord_alert(alert: dict, proposal: dict) -> str | None:
     """Post a waitlist expansion proposal embed to Discord.
 
@@ -379,7 +390,7 @@ def post_discord_alert(alert: dict, proposal: dict) -> str | None:
     }]}
 
     try:
-        r = requests.post(WEBHOOK_URL, json=payload, params={"wait": "true"}, timeout=10)
+        r = requests.post(WEBHOOK_URL, json=quiet_payload(payload), params={"wait": "true"}, timeout=10)
         r.raise_for_status()
         msg_id = r.json().get("id")
         log.info("  Posted Discord alert for %s res_id=%s (msg %s)",
