@@ -101,6 +101,22 @@ Four rules that exist because of real incidents:
 - **`until` is the retirement switch, honoured on every source.** A row whose `until`
   is on or before today is not booked. The service filters it server-side, but the
   cache and the seed do not — so the cutoff is re-applied on each read.
+- **A row belonging to another PLACE is dropped on every source (D-0323).** The clinic
+  programme now runs at two places out of one `courtreserve.fixed_events` table —
+  Lincoln (White Mountain Pickleball, Court Reserve organisation 13268) and Concord
+  (Capital City Pickleballers, organisation 16667) — and `GET /fixed-events` is a
+  `select *`, so a Concord row arrives on this repo's wire. This repo books at Lincoln
+  and nowhere else: no court recommendation, no gap fill, no waitlist sweep, no
+  capacity-drift sweep at Concord (D-0323 rule 7). Only a place that is **present and
+  not `lincoln`** is dropped — **an UNLABELLED row is the club's**, because the filter
+  was taught to the reader BEFORE the column existed (D-0323 rule 9 step a), so every
+  row on the wire carried no place at all, and the migration backfills every existing
+  row to `lincoln`. Reading an absent place as foreign would drop the whole standing
+  pattern and stop the club's own sessions being booked. One function, `dropOtherPlaces`
+  (`ts/src/fixedEvents.ts`), applied once after source selection beside `dropExpired`,
+  so no source can bypass it; a dropped row is logged once per run and deliberately
+  does **not** raise the Discord alert — a Concord row is the table's normal state, not
+  a failure.
 - **`preferred_courts` pins courts by number (1–4).** A pin is an instruction, not a
   hint: the slot takes the free subset of its pins and does **not** spill onto an
   unpinned court. If every pinned court is taken the slot is skipped as `no_court`,

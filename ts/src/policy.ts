@@ -36,6 +36,19 @@ export interface FixedEvent {
   every_weeks?: number | null
   /** A real on-week date on `day_of_week`, `YYYY-MM-DD`. Required when `every_weeks` is 2. */
   anchor_date?: string | null
+  /** `courtreserve.fixed_events.place` (D-0323) — whose premises the slot runs at:
+   *  `'lincoln'` (White Mountain Pickleball, Court Reserve organisation 13268) or
+   *  `'concord'` (Capital City Pickleballers, organisation 16667). This repo books at
+   *  Lincoln and nowhere else (D-0323 rule 7), so a row carrying any other place is
+   *  dropped by the one shared reader.
+   *
+   *  **ABSENT OR NULL IS THE CLUB'S, and must never read as "not Lincoln's".** This
+   *  field was taught to the reader BEFORE the column existed (D-0323 rule 9 step a),
+   *  so at deploy time every row on the wire carries no place at all, and the migration
+   *  that adds the column backfills every existing row to `lincoln`. Reading an absent
+   *  place as foreign would drop the whole standing pattern and stop the club's own
+   *  sessions being booked. Answered ONLY by `dropOtherPlaces` in `fixedEvents.ts`. */
+  place?: string | null
   /** `courtreserve.fixed_events.kind`. `'clinic_slot'` is a standing weekly WINDOW whose
    *  clinic changes every week: by a database check it never carries an event id, and the
    *  clinic rota in courtreserve-api books it — not the standing-session sweep. */

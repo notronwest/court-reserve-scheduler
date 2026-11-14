@@ -462,7 +462,9 @@ export async function runPatternGaps(
   // a fresh booking in the same sweep cannot disagree about what a pair of courts holds.
   const limits = loadParticipantLimits(deps.policy)
 
-  const resolved = await resolveFixedEvents(cr, deps.policy)
+  // `{ log }` so this job's own log carries the reader's lines too — the retired-row
+  // skip and the other-place skip (D-0323) were otherwise written to a no-op logger.
+  const resolved = await resolveFixedEvents(cr, deps.policy, { log })
   const patternsLive = resolved.source === 'live'
   if (!patternsLive) {
     log(`standing patterns came from ${resolved.source}, not a live read — nothing will be booked`)

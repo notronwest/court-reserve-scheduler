@@ -368,6 +368,33 @@ describe('a session a person renamed, removed or narrowed is left alone (D-0315)
       return { booked, widened, result }
     }
 
+    // The job used to call `resolveFixedEvents` with no `log`, so every line the reader
+    // writes — the retired-row skip, and now the other-place skip (D-0323) — went to a
+    // no-op logger and never reached this job's own log. Proven here through the real
+    // job, not by reading the call site.
+    it("carries the reader's own log lines into the job's log", async () => {
+      const lines: string[] = []
+      const concord: FixedEvent = { ...intermediate, name: 'Concord Clinic', place: 'concord' }
+      const cr = {
+        fixedEvents: async () => [intermediate, concord],
+        schedule: async () => [item({})],
+        book: async () => ({ success: true }),
+        setCourts: async () => ({ success: true }),
+      } as never
+      await runPatternGaps(
+        cr,
+        {
+          rest: { postEmbed: async () => 'm1' } as never,
+          policy: { fixed_events: { events: [] } } as never,
+          log: (m: string) => void lines.push(m),
+        },
+        { fix: false, horizonDays: 1, today: MON },
+      )
+      const placeLines = lines.filter((l) => l.includes('another place'))
+      expect(placeLines).toHaveLength(1)
+      expect(placeLines[0]).toContain('Concord Clinic')
+    })
+
     it('first run with no memory records the calendar and books NOTHING', async () => {
       const memory = memoryOf(null)
       const { booked, result } = await run([[]], memory)

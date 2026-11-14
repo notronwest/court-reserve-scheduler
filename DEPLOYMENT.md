@@ -33,7 +33,7 @@ targets:
     env: PROD
     url: n/a — books directly (auto-book), then posts a confirmation embed to Discord
     host: the machine ./setup.sh was run on (single install; not fleet-replicated)
-    config_scope: ts/.env on that machine (CRAPI_URL/KEY, Discord webhook + bot token, Anthropic API key) + policy.json + courts.json; reads the standing patterns through courtreserve-api GET /fixed-events (live only when booking — a cached or seeded list books no standing slot and alerts; --dry-run still shows it)
+    config_scope: ts/.env on that machine (CRAPI_URL/KEY, Discord webhook + bot token, Anthropic API key) + policy.json + courts.json; reads the standing patterns through courtreserve-api GET /fixed-events (live only when booking — a cached or seeded list books no standing slot and alerts; --dry-run still shows it); a pattern row whose place is set to anything but lincoln is dropped on every source, an unlabelled row being the club's (D-0323)
     verify: ./check.sh, and the logs under ~/Library/Logs/court_reserve/
     rollback: git checkout an earlier commit and re-run ./setup.sh
   - name: catch-up
@@ -213,8 +213,9 @@ two committed policy files:
   read, written on every successful fetch (not committed). On a failed read the
   scheduler falls back to this cache, then to `policy.json`'s seed, and posts a
   Discord alert either way. A row whose `until` has passed is dropped on every
-  source, so a stale cache cannot resurrect a retired slot — see `CLAUDE.md` →
-  The standing weekly pattern (D-0056).
+  source, so a stale cache cannot resurrect a retired slot; so is a row whose
+  `place` is set to anything but `lincoln`, an unlabelled row being the club's
+  (D-0323) — see `CLAUDE.md` → The standing weekly pattern (D-0056).
 
 Both JSON files are **committed**, so changing them is a code change and takes
 effect on the next scheduled run — no restart needed for the cron-style jobs, but

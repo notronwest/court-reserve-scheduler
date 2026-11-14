@@ -5,6 +5,64 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-14 — the standing-slot reader learns about PLACE, before the column exists (D-0323)
+
+Ron teaches the same Third Shot Academy clinics at a second club — Concord (Capital City
+Pickleballers, Court Reserve organisation 16667) — beside Lincoln (White Mountain Pickleball,
+organisation 13268). Both places' standing slots will live in ONE `courtreserve.fixed_events`
+table, and `GET /fixed-events` is a `select *` over it, so the moment a Concord row exists this
+repo would read it as the club's and book it onto a club court. This is **step (a) of D-0323
+rule 9** — the reader learns about the place BEFORE any writer emits one — and it must be
+deployed on the mini before step (c), the migration that adds the column.
+
+**Nothing changes behaviour today**, and that is the design: no row carries a place yet, so the
+filter keeps everything it is given.
+
+### ✅ Done ([#125](https://github.com/notronwest/CourtReserve-Scheduler/issues/125), PR #126)
+
+- `FixedEvent` (`ts/src/policy.ts`) carries an optional `place`.
+- `dropOtherPlaces` (`ts/src/fixedEvents.ts`) is the one answer to "whose slot is this?",
+  applied **once in `finish()`**, beside `dropExpired`, after source selection — so the live
+  read, the `state/fixed-events.json` cache and the `policy.json` seed cannot disagree. Grepped:
+  `cr.fixedEvents()` has exactly one caller, so there is no bypass.
+- **The rule is asymmetric on purpose. A place that is PRESENT and not `lincoln` is dropped; a
+  row carrying NO place — missing key, `null`, or blank — is KEPT, because it is the club's.**
+  The card's first draft said to drop a place that is "absent or unknown", which would have
+  dropped every row on the wire at deploy time and silently stopped the club's own standing
+  weekly sessions being booked. It was corrected before any code was written. A `select *` taken
+  between the column being added and the backfill landing also serves `place: null` on every
+  row — same hazard, different spelling, also kept.
+- Applied **before** the `until` cutoff and the cadence check, so a Concord row never shows up in
+  the retired-row log or the unusable-cadence alert.
+- A dropped row is **logged once per resolve** and deliberately does **NOT** raise the Discord
+  failure alert: a Concord row is the table's normal state, not a failure, and alerting would
+  post every morning. The 8:45 gap job now passes `{ log }` into the reader, which it never did
+  — its retired-row and other-place lines were going to a no-op logger.
+- 12 new tests (`ts/tests/fixedEventsPlace.test.ts`) push **raw wire rows** through the real
+  chain: a JSON string off a stubbed `fetch` → the real `CourtReserveClient.fixedEvents()` →
+  the real `resolveFixedEvents` → the real `recommend()` and `scanPatternGaps`. A hand-built
+  `FixedEvent` would have proved nothing about the hazard, which lives in what the wire carries.
+  `request()` is a bare `JSON.parse` and `fixedEvents()` returns `items` under a cast, so an
+  unknown `place` key survives to the filter — no parser change was needed.
+- **The Python tree needed no filter.** `DEPLOYMENT.md` says it is the rollback path, not the
+  live one, and `recommender.py` reads fixed events only from `policy.json`'s committed seed
+  (`policy.get("fixed_events", {}).get("events", [])`) — it never calls `/fixed-events` or the
+  database, so a Concord row cannot reach it.
+- `npm test` 335 passing across 24 files; `tsc --noEmit` clean.
+
+### 🔜 Next (not this change)
+
+- **Step (c): the migration** that adds `place` to `courtreserve.fixed_events`, NOT NULL under a
+  check constraint, every existing row backfilled to `lincoln`. It must not land until this is
+  deployed on the mini.
+- Step (b) is already green in the booking service (its PR #673): it resolves the organisation
+  from a `place` parameter and leaves an un-placed call exactly as it was, so this repo's
+  outbound calls keep working untouched. **Adding a `place` parameter to this repo's calls is a
+  later step, deliberately not done here.**
+- Once the service emits a place on every row, an absent place becomes a fault to log rather
+  than a row to keep. A later card.
+
+---
 ## 2026-11-14 — a play session's size comes from its court count, and the calendar is healed to it (D-0319)
 
 Ron, 2026-11-13: *"we either have too few or too many courts for the maximum participants ... all

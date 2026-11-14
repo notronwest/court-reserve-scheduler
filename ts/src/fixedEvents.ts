@@ -16,6 +16,21 @@
  * 2. **An empty pattern alerts.** "Zero standing events" and "the read quietly
  *    returned nothing" look identical to the recommender, and the second one has
  *    already happened (see `CourtReserveClient.fixedEvents`). Never silent.
+ * 3. **A row belonging to another place is dropped on every source (D-0323).** The
+ *    clinic programme now runs at two places — Lincoln (White Mountain Pickleball,
+ *    Court Reserve organisation 13268) and Concord (Capital City Pickleballers,
+ *    organisation 16667) — out of ONE `courtreserve.fixed_events` table. This repo
+ *    books at Lincoln and nowhere else (D-0323 rule 7), and `GET /fixed-events` is
+ *    `select *` over the whole table, so a Concord row arrives here on the wire and
+ *    would otherwise be read as the club's and booked onto a club court.
+ *
+ *    **An UNLABELLED row is the club's.** This filter lands BEFORE the migration that
+ *    adds the column (D-0323 rule 9 step a), so at deploy time every row carries no
+ *    place at all; reading that absence as foreign would drop the entire standing
+ *    pattern and stop the club's own sessions being booked. Only a place that is
+ *    PRESENT and not `lincoln` is dropped. Once the service emits a place on every
+ *    row, an absent place becomes a fault to log rather than a row to keep — a later
+ *    card, not this one.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -27,6 +42,10 @@ export interface FixedEventsResult {
   source: 'live' | 'cache' | 'seed'
   /** Patterns dropped because their `until` is on or before today. */
   expired: FixedEvent[]
+  /** Patterns dropped because they belong to another place (D-0323). Optional so a
+   *  hand-built `FixedEventsResult` in a test or a `deps.resolveFixedEvents` override
+   *  still typechecks. */
+  elsewhere?: FixedEvent[]
   alert?: string
 }
 
@@ -45,6 +64,35 @@ export function fixedEventsStateDir(): string {
 export function localTodayIso(now: Date = new Date()): string {
   const pad = (n: number): string => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/** The one place this repo books. D-0323 rule 7: no Concord court is ever booked here. */
+export const BOOKS_AT_PLACE = 'lincoln'
+
+/**
+ * Split patterns into the club's and the ones that belong to another place (D-0323).
+ *
+ * The rule is deliberately asymmetric, and the asymmetry is the whole point: a place
+ * that is PRESENT and not `lincoln` is dropped, and a row carrying NO place — missing
+ * key, `null`, or blank — is KEPT, because it is the club's. This filter is deployed
+ * before the column exists, so every row on the wire is unlabelled on day one; and a
+ * `select *` taken between the column being added and the backfill landing returns
+ * `place: null` on every row. Either way, reading absence as foreign would drop the
+ * club's entire standing pattern. Comparison is trimmed and case-insensitive so a
+ * hand-entered `"Concord"` is still foreign.
+ */
+export function dropOtherPlaces(events: FixedEvent[]): {
+  kept: FixedEvent[]
+  elsewhere: FixedEvent[]
+} {
+  const kept: FixedEvent[] = []
+  const elsewhere: FixedEvent[] = []
+  for (const fe of events) {
+    const place = fe.place == null ? '' : String(fe.place).trim().toLowerCase()
+    if (place === '' || place === BOOKS_AT_PLACE) kept.push(fe)
+    else elsewhere.push(fe)
+  }
+  return { kept, elsewhere }
 }
 
 /**
@@ -71,13 +119,25 @@ export function dropExpired(
 
 /** Shared tail: apply the `until` cutoff and describe what came back. */
 function finish(
-  events: FixedEvent[],
+  allEvents: FixedEvent[],
   source: FixedEventsResult['source'],
   today: string,
   readAlert: string | undefined,
   log: (m: string) => void,
 ): FixedEventsResult {
-  const { kept, expired } = dropExpired(events, today)
+  // Another place's rows go first, so nothing downstream ever sees one: not the
+  // `until` log, not the unusable-cadence alert, not the recommender. One line per
+  // resolve, and deliberately NOT in `alert` — a Concord row is the normal state of
+  // the table, not a failure, and alerting on it would post to Discord every morning.
+  const { kept: ours, elsewhere } = dropOtherPlaces(allEvents)
+  if (elsewhere.length > 0) {
+    log(
+      `fixed-events: ${elsewhere.length} pattern(s) at another place skipped ` +
+        `(place set and not ${BOOKS_AT_PLACE}): ` +
+        elsewhere.map((e) => `${e.name} ${e.day_of_week} ${e.start_time} [${e.place}]`).join(', '),
+    )
+  }
+  const { kept, expired } = dropExpired(ours, today)
   if (expired.length > 0) {
     log(
       `fixed-events: ${expired.length} retired pattern(s) skipped (until <= ${today}): ` +
@@ -104,7 +164,7 @@ function finish(
       : undefined
 
   const alert = [readAlert, emptyAlert, cadenceAlert].filter(Boolean).join(' · ') || undefined
-  return { events: kept, source, expired, alert }
+  return { events: kept, source, expired, elsewhere, alert }
 }
 
 export async function resolveFixedEvents(
@@ -120,8 +180,9 @@ export async function resolveFixedEvents(
   try {
     const events = await cr.fixedEvents()
     mkdirSync(dir, { recursive: true })
-    // Cache the rows as fetched, unfiltered: the `until` cutoff is re-applied on
-    // every read, so tomorrow's fallback judges them against tomorrow's date.
+    // Cache the rows as fetched, unfiltered: the `until` cutoff and the place filter
+    // are both re-applied on every read, so tomorrow's fallback judges them against
+    // tomorrow's date and a cached Concord row is dropped exactly as a live one is.
     const cache: FixedEventsCache = { fetched_at: new Date().toISOString(), events }
     writeFileSync(cachePath, JSON.stringify(cache, null, 2))
     return finish(events, 'live', today, undefined, log)
