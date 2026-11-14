@@ -17,11 +17,12 @@ import {
   needsAttention,
   recordSeen,
   runPatternGaps,
-  scaledCap,
+  capFor,
   scanPatternGaps,
   type PatternGapsResult,
   type SeenLedger,
 } from '../src/jobs/patternGaps'
+import { loadParticipantLimits } from '../src/capacity'
 import { NaiveDateTime } from '../src/datetime'
 import type { FixedEvent } from '../src/policy'
 import type { ScheduleItem } from '../src/cr/types'
@@ -198,14 +199,21 @@ describe('a clinic slot is a window the clinic rota fills, not a standing sessio
 })
 
 describe('the rules the gaps are judged by', () => {
-  it('scales the cap when a session gets fewer courts than it wants', () => {
-    // Ron: "we can't have 13 people on one court. The max would be 5."
-    expect(scaledCap({ ...intermediate, max_participants: 10 }, 1)).toBe(5)
-    expect(scaledCap({ ...intermediate, max_participants: 10 }, 2)).toBe(10)
+  it('takes the cap from the courts the session got, not from its stored number', () => {
+    // Ron, 2026-10-13: "we can't have 13 people on one court. The max would be 5."
+    // Ron, 2026-11-13, the whole table: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts.
+    expect(capFor(1)).toBe(5)
+    expect(capFor(2)).toBe(10)
+    expect(capFor(3)).toBe(14)
+    expect(capFor(4)).toBe(18)
   })
 
-  it('never invents a cap for a pattern that has none', () => {
-    expect(scaledCap(intermediate, 1)).toBe(0)
+  it('ignores whatever cap the pattern row happens to carry', () => {
+    // The stored number is what used to make the same pair of courts read as 4, 5, 8
+    // or 10 depending on which code path last wrote it. It is no longer consulted.
+    const limits = loadParticipantLimits()
+    expect(capFor(2, limits)).toBe(10)
+    expect(intermediate.max_participants).toBeUndefined()
   })
 
   it('writes the clock the way Court Reserve\'s forms take it', () => {

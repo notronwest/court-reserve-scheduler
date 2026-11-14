@@ -519,7 +519,7 @@ describe('executeBookings', () => {
     expect(setCourtsCalls).toHaveLength(0)
   })
 
-  it('books a single-court session with a one-element court list and no cap', async () => {
+  it('books a single-court session with a one-element court list, capped from the table', async () => {
     const posted: Posted = { embeds: [], messages: [] }
     const bookCalls: unknown[] = []
     const cr = {
@@ -544,7 +544,10 @@ describe('executeBookings', () => {
     expect(bookCalls).toHaveLength(1)
     const req = bookCalls[0] as { court_ids: string[]; max_people?: number }
     expect(req.court_ids).toEqual(['52351'])
-    expect(req.max_people).toBeUndefined()
+    // A recommendation with no cap of its own is no longer booked uncapped: one court
+    // holds 5 (Ron, 2026-11-13). Leaving it undefined is what left most of the calendar
+    // on whatever default the Court Reserve event carried.
+    expect(req.max_people).toBe(5)
   })
 })
 

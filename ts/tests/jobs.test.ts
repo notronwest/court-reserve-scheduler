@@ -139,8 +139,8 @@ describe('buildProposal', () => {
     expect(p).not.toBeNull()
     expect(p!.new_court_num).toBe(4) // court 4 preferred + free
     expect(p!.all_court_nums).toEqual([3, 4])
+    expect(p!.new_max).toBe(10) // two courts hold 10 (Ron, 2026-11-13)
     expect(p!.per_court).toBe(5)
-    expect(p!.new_max).toBe(10)
   })
 
   it('returns null when the occurrence already spans the max courts', () => {

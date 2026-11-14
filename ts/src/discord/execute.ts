@@ -1,3 +1,4 @@
+import { capForCourts, loadParticipantLimits } from '../capacity'
 /**
  * Booking / move / expand execution — the layer that was Playwright automation
  * in `discord_listener.py`, now HTTP calls to `courtreserve-api` via
@@ -73,8 +74,13 @@ function isMulti(rec: RecommendationDict): boolean {
  * as a gap to the 8:45 pattern-gaps job. `/book` owns both steps now and returns
  * a failure rather than a partial success when it cannot get every court asked
  * for (courtreserve-api #409, daemon D-0166) — the same call `patternGaps.ts`
- * already makes. `max_people` is sent only when the recommendation carries one,
- * so a Pass 1/2 slot with no cap is left uncapped exactly as before.
+ * `max_people` is ALWAYS sent now, derived from how many courts the occurrence will
+ * hold (Ron, 2026-11-13: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts). It used to be sent
+ * only when the recommendation carried a cap of its own, which meant every Pass 1 and
+ * Pass 2 session — the bulk of the calendar — was booked at whatever default the Court
+ * Reserve event happened to hold, and the capacity heal then had to put each one right
+ * the next time it swept. A recommendation that still carries its own cap wins, so a
+ * deliberate one-off is not overwritten by the table.
  */
 async function bookOne(cr: CourtReserveClient, rec: RecommendationDict): Promise<CrActionResult> {
   return callCr(() =>
@@ -84,7 +90,11 @@ async function bookOne(cr: CourtReserveClient, rec: RecommendationDict): Promise
       start_time: rec.start_time,
       end_time: rec.end_time,
       court_ids: [rec.court_id, ...(rec.extra_court_ids ?? [])].map(String),
-      ...(rec.max_participants ? { max_people: rec.max_participants } : {}),
+      ...(() => {
+        const courts = 1 + (rec.extra_court_ids?.length ?? 0)
+        const cap = rec.max_participants || capForCourts(loadParticipantLimits(), courts)
+        return cap ? { max_people: cap } : {}
+      })(),
       dry_run: false,
     }),
   )

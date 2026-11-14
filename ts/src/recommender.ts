@@ -8,6 +8,7 @@
 import { NaiveDateTime, overlaps, pyRound } from './datetime'
 import { occupiedSlots, type OccupiedSlot } from './availability'
 import { isOnWeek, onWeekStatus, type Policy } from './policy'
+import { capForCourts, loadParticipantLimits } from './capacity'
 import { loadPopularity, popularityScore, type PopularityScores } from './history'
 // Type-only import — no runtime cycle (ranker.ts imports values from here).
 import type { LlmRankerInput } from './llm/ranker'
@@ -217,6 +218,8 @@ function buildContext(
   const td = NaiveDateTime.parseDate(targetDate)
   const dateStr = td.formatYmd()
   const dayName = td.weekdayName()
+  // The court→capacity table, read once per run (policy.json participant_limits).
+  const limits = loadParticipantLimits(policy)
 
   // Operating window
   const weekdays = policy.operating_windows.weekday.days
@@ -562,9 +565,11 @@ function buildContext(
 
     const primary = courtsAssigned[0]
     const extras = courtsAssigned.slice(1)
-    // max_participants is configured for the full court count; scale it down
-    // when the event had to settle for fewer courts (10 on 2 courts -> 5 on 1).
-    const maxP = Math.ceil((fe.max_participants ?? 0) * (courtsAssigned.length / nCourtsNeeded))
+    // The cap comes from the court→capacity table, keyed on the courts this slot
+    // ACTUALLY got — not from the pattern's stored number scaled down. Scaling the
+    // stored number is what let a two-court session be booked at 4, 5 or 8 while the
+    // club's rule said 10 (Ron, 2026-11-13: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts).
+    const maxP = capForCourts(limits, courtsAssigned.length)
     const override = distinctId !== undefined ? { name: fe.name, level: feLevel } : undefined
     add(eid, primary, feStart, feEnd, extras, maxP, override)
   }

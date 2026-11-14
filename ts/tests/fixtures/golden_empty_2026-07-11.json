@@ -11,7 +11,7 @@
       "court_label": "Pickleball-Court #4",
       "extra_court_ids": [],
       "extra_court_nums": [],
-      "max_participants": 0,
+      "max_participants": 5,
       "date": "7/11/2026",
       "start_time": "10:00 AM",
       "end_time": "12:00 PM"
@@ -85,7 +85,7 @@
       "extra_court_nums": [
         3
       ],
-      "max_participants": 8,
+      "max_participants": 10,
       "date": "7/11/2026",
       "start_time": "4:00 PM",
       "end_time": "6:00 PM"

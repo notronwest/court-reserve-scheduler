@@ -26,7 +26,7 @@ path (`ts/ops/rollback.sh`), kept working but not what runs.
 | `com.whitemountain.pattern-gaps` | Daily 8:45 AM | Asks per SESSION whether every standing pattern has its occurrence in the next 14 days; books what it can from a **live** read, alarms on the rest |
 | `com.whitemountain.listener` | Always-on | Polls Discord every 3s — handles `!book`/`!move`/`!schedule`/`!help` and waitlist expansions |
 | `com.whitemountain.fetch-history` | Mondays 7:00 AM | Fetches 3 months of attendance history |
-| `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | Alerts on waitlists that can be expanded to another court **and removes duplicate sessions** (see below) |
+| `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | **Heals session sizes** (every play session's cap matches its court count — see below), alerts on waitlists that can be expanded to another court, **and removes duplicate sessions** (see below) |
 | `com.whitemountain.checkin` | Mondays 6:00 AM | Checks in players on past events so history stays accurate |
 
 The daily job **no longer waits for Discord approval**. `pending_approval.json`
@@ -105,6 +105,68 @@ Four rules that exist because of real incidents:
   hint: the slot takes the free subset of its pins and does **not** spill onto an
   unpinned court. If every pinned court is taken the slot is skipped as `no_court`,
   logged, and recorded in `logs/booking_log_<date>.json` under `fixed_events.skipped`.
+
+## How many people fit — the court→capacity table
+
+**One court holds 5, two hold 10, three hold 14, four hold 18. Every session has a
+minimum of 4.** Ron, 2026-11-13. The table lives in `policy.json`
+`participant_limits` and is read through ONE function, `capForCourts`
+(`ts/src/capacity.ts`, mirrored by `cap_for_courts` in `recommender.py` so the
+rollback path cannot disagree).
+
+**The cap is DERIVED from the court count, never stored.** A session that holds two
+courts is 10 whatever number sits in its `fixed_events` row. Before this, four code
+paths each had their own answer: the pattern rows stored a cap per slot (8 for a
+pair of courts), the pattern-gap fixer scaled that proportionally when a slot landed
+on fewer courts, the waitlist expansion divided it by the court count and multiplied
+back up (so 10 on two courts proposed 15 on three, not 14), and the booker sent no
+cap at all for a Pass 1/2 session — leaving it on whatever default the Court Reserve
+event carried. Measured on the live 14-day calendar on 2026-11-13: **51 of 109
+occurrences disagreed with the table.**
+
+A policy file with no `participant_limits` block makes `loadParticipantLimits`
+THROW. 0 would read as "leave Court Reserve's default alone" to `/book` and as
+"compliant" to the heal, so a missing rule must never look permissive.
+
+### The heal (`ts/src/jobs/capacityDrift.ts`)
+
+A booking-time rule cannot see a cap edited by hand in Court Reserve, so the rule is
+also a sweep — Ron: *"add this into the healing process in case something gets
+accidentally modified that doesn't meet this criteria."* It runs inside the
+five-times-a-day waitlist job, **before** the waitlist scan, because `/waitlists`
+returns only occurrences that are FULL and a session wrongly capped at 4 reads as
+full while it has room for 10. `npx tsx src/cli.ts capacity` is the same sweep
+read-only; `--fix` writes.
+
+It reads the cap from `GET /events/registrations` — the `/schedule` feed carries
+`MembersCount` and nothing about MaxPeople, so it is the only read that can say what
+a session is actually carrying — and writes with `POST /events/courts`, the same
+courts it already has plus the right cap. That endpoint ticks
+`EditOnlyCurrentOccurrence`, so a heal rewrites one occurrence and never the series.
+
+Three rules it will not break:
+
+- **A cap is never lowered below the people already signed up.** A four-court session
+  held 20 against a table value of 18 on the day this was written. Twenty people in an
+  eighteen-person session is a roster problem, and shrinking the cap under them hides it.
+- **A cap is never RAISED on an occurrence with a waitlist.** Court Reserve notifies
+  waitlisted members itself when room appears, so that is a send to a member — the
+  ✅ expansion path Ron approves by hand, not an unattended job. Lowering one is fine:
+  nobody is promoted by a cap coming down.
+- **It governs the club's play sessions only.** Open Play, Structured Play, Level Play,
+  matched on the event name (`participant_limits.governs.name_patterns`) rather than a
+  list of event ids, because a new level appears under a new Court Reserve event id
+  every few months and a list would silently stop covering it. A coached clinic at 4, a
+  contract-time rental at 6, a school group at 12 and a town hall at 100 each carry a
+  number chosen for that event; those are named in the report and never changed.
+
+**The minimum of 4 is recorded, not yet written to Court Reserve.** The occurrence
+edit form exposes `MaxPeople` only. Court Reserve does carry a minimum on the EVENT
+form as `RequireMinRegistrants`, which `courtreserve-api` lists as an
+uncharacterised field (`cr_profile.json` `unmapped.fields`) — writing the 4 needs
+that field mapped first, which is filed for Mr. Robot. **Nothing enforces the 4 today.**
+The heal prints it in its report so a reader can see the rule; it does not check against
+it, and the table could not violate it anyway, its smallest value being 5.
 
 ## Hard Constraints (policy.json)
 

@@ -18,10 +18,12 @@ import { resolve } from 'node:path'
 import { CourtReserveClient } from '../cr/client'
 import type { ScheduleItem, WaitlistOccurrence } from '../cr/types'
 import { loadPolicy, type Policy } from '../policy'
+import { capForCourts, loadParticipantLimits, type ParticipantLimits } from '../capacity'
 import { NaiveDateTime } from '../datetime'
 import { DiscordRest } from '../discord/rest'
 import { loadPendingWaitlist, savePendingWaitlist, type WaitlistProposal } from '../discord/state'
 import { runDuplicateCleanup } from './duplicateEvents'
+import { runCapacityHeal } from './capacityDrift'
 
 interface CourtsCfg {
   [id: string]: { number: number; label?: string }
@@ -36,6 +38,8 @@ interface WaitlistCtx {
   courtIdsByPref: number[] // court 4 first, then 1,2,3
   maxCourts: number
   scanDays: number
+  /** The court→capacity table (Ron, 2026-11-13) — what the session holds after the expansion. */
+  limits: ParticipantLimits
 }
 
 export function buildWaitlistCtx(policy: Policy): WaitlistCtx {
@@ -55,6 +59,7 @@ export function buildWaitlistCtx(policy: Policy): WaitlistCtx {
     courtIdsByPref,
     maxCourts: wl.max_courts ?? Object.keys(courts).length,
     scanDays: wl.scan_days_ahead ?? 7,
+    limits: loadParticipantLimits(policy),
   }
 }
 
@@ -93,6 +98,7 @@ export interface Proposal {
   new_court_num: number
   all_court_ids: number[]
   all_court_nums: number[]
+  /** The new cap divided by the courts it now holds — for the alert's wording only. */
   per_court: number
   new_max: number
   num_courts_before: number
@@ -138,8 +144,13 @@ export function buildProposal(
   }
   if (newCourtId === null) return null
 
-  const perCourt = Math.floor(occ.max_people / Math.max(numCourts, 1)) || 4
-  const newMax = perCourt * (numCourts + 1)
+  // The new cap comes from the court→capacity table, NOT from dividing the cap it
+  // carries now. Dividing was how a session at 10 on two courts proposed 15 on three
+  // while the table says 14, and how an occurrence sitting at a wrong cap propagated
+  // that wrongness into the expansion (Ron, 2026-11-13).
+  const newMax = capForCourts(ctx.limits, numCourts + 1)
+  if (!newMax) return null
+  const perCourt = Math.floor(newMax / (numCourts + 1))
   const newNum = ctx.courts[String(newCourtId)].number
   return {
     new_court_id: newCourtId,
@@ -177,7 +188,7 @@ export function buildAlertEmbed(
           `📅  ${occ.date_text}  ·  ${occ.time_text}\n` +
           `🎾  ${occ.courts_text} → **${courtsAfter}** after expansion\n` +
           `👥  ${occ.registered}/${occ.max_people} registered  +  **${occ.waitlist} on waitlist**\n` +
-          `📈  New max: **${prop.new_max}** (${prop.num_courts_after} courts × ${prop.per_court} per court)` +
+          `📈  New max: **${prop.new_max}** — what ${prop.num_courts_after} courts hold` +
           `${risk}\n\n` +
           `✅  **Tap the checkmark below to approve**  ·  or reply \`!expand ${occ.res_id}\``,
         footer: { text: 'White Mountain Pickleball • Court Reserve Scheduler' },
@@ -197,6 +208,8 @@ export async function runCheckWaitlists(
     log?: (m: string) => void
     /** Skip the duplicate-session cleanup half (default: run it). */
     skipDuplicates?: boolean
+    /** Skip the capacity heal half (default: run it). */
+    skipCapacity?: boolean
   },
 ): Promise<Array<{ occ: WaitlistOccurrence; proposal: Proposal }>> {
   const log = opts.log ?? (() => {})
@@ -220,6 +233,32 @@ export async function runCheckWaitlists(
       // A failed cleanup must not cost the club its court expansions, which are
       // time-sensitive and the reason this job runs five times a day.
       log(`Duplicate cleanup failed — continuing with waitlists: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  // Then the caps. This is the healing half of Ron's 2026-11-13 ask — "add this into
+  // the healing process in case something gets accidentally modified that doesn't meet
+  // this criteria" — and it runs BEFORE the waitlist scan for the same reason the
+  // duplicate cleanup does: `/waitlists` returns only occurrences that are FULL, and
+  // a session wrongly capped at 4 reads as full when it has room for 10. Healing the
+  // cap first means the expansion proposals below are judged against the real ceiling.
+  if (!opts.skipCapacity) {
+    try {
+      // NO `days` here, deliberately. This job's own window is
+      // `waitlist.scan_days_ahead`, which is **7** — while the capacity rule is about
+      // the 14 days the booker works on, and the 8:00 run creates its sessions at
+      // day 14. Passing this job's 7 would have left the second week of every booking
+      // unhealed until it drifted into range, so the heal keeps its own horizon
+      // (`participant_limits.heal.horizon_days`).
+      await runCapacityHeal(cr, rest, {
+        fix: !opts.dryRun,
+        policy,
+        log,
+      })
+    } catch (e) {
+      // Same rule as the duplicate half: a failed heal must not cost the club its court
+      // expansions, which are time-sensitive and the reason this job runs five times a day.
+      log(`Capacity heal failed — continuing with waitlists: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -281,6 +320,7 @@ if (isMain) {
     days: daysIdx >= 0 ? Number(argv[daysIdx + 1]) : undefined,
     dryRun: argv.includes('--dry-run'),
     skipDuplicates: argv.includes('--no-dedupe'),
+    skipCapacity: argv.includes('--no-capacity'),
     pendingPath: resolve(logsDir, 'pending_waitlist.json'),
     log: (m) => console.log(m),
   })

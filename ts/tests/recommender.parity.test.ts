@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { recommend, toDict, type ScheduleItem } from '../src/recommender'
+import { loadPopularity } from '../src/history'
 import type { Policy } from '../src/policy'
 
 const FX = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -22,6 +23,8 @@ interface ManifestEntry {
   label: string
   date: string
   schedule?: string
+  /** A history fixture to score against, when this golden was made with one. */
+  popularity?: string
   n_recs: number
 }
 
@@ -47,10 +50,12 @@ describe('recommender parity with Python (rule-based)', () => {
     it(`${entry.label} (${entry.date}) matches the Python golden`, () => {
       const golden = readJson<Golden>(`golden_${entry.label}.json`)
       const items = entry.schedule === 'empty' ? [] : schedule
-      // No history fixture → empty popularity, matching the golden's environment.
-      const { recommendations, stats } = recommend(items, entry.date, policy, {
-        popularity: new Map(),
-      })
+      // The golden's own environment: a manifest entry naming a history fixture is
+      // scored against it, everything else against an empty popularity map.
+      const popularity = entry.popularity
+        ? loadPopularity(resolve(FX, entry.popularity))
+        : new Map<string, number>()
+      const { recommendations, stats } = recommend(items, entry.date, policy, { popularity })
 
       expect(recommendations.map(toDict)).toEqual(golden.recs)
       expectStatsMatch(stats as unknown as Record<string, unknown>, golden.stats)

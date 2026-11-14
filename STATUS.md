@@ -5,6 +5,101 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-14 — a play session's size comes from its court count, and the calendar is healed to it (D-0319)
+
+Ron, 2026-11-13: *"we either have too few or too many courts for the maximum participants ... all
+single courts have 5 maximum, 2 courts has 10 maximum, 3 courts has 14 maximum and 4 courts has 18
+maximum. All have 4 minimum ... I just fixed two reservations within the next 2 weeks -- make sure
+this gets fixed and that we add this into the healing process incase something gets accidentally
+modified that doesn't meet this criteria."*
+
+**Measured before anything was changed.** `/events/registrations` over the 29 events on the live
+14-day calendar: **51 of 109 occurrences disagreed with the table.** Six two-court Advanced Open
+Plays at 4, eleven two-court Structured Plays at 8, five four-court Open Play Unleashed at 20, two
+one-court Women's Intermediate at 10, and the rest clinics / rentals / a town hall carrying their own
+deliberate numbers. The two Ron had fixed by hand came back **compliant**, which is what established
+the reader was right: a two-court Advanced Intermediate Open Play on 11/15 and a two-court Mens
+Advanced Plus on 11/26, both at 10. Fifty single-court Open Plays were already at 5, so 5-on-one-court
+was the house rule before this; nothing else was.
+
+**The cause: there was no single answer, so the calendar carried four.**
+
+1. The standing-pattern rows stored a cap per slot — `booking.multi_court_workflow.max_participants_per_two_court_event` was **8**, "4 per court".
+2. `patternGaps.scaledCap` scaled that stored number proportionally when a slot landed on fewer courts than it wanted.
+3. `checkWaitlists.buildProposal` divided whatever cap an occurrence was **carrying** by its court count and multiplied back up — so 10 on two courts proposed **15** on three where the rule says 14, and an occurrence already at a wrong cap propagated that wrongness into every expansion.
+4. `execute.bookOne` sent `max_people` **only when the recommendation carried one**, so every Pass 1 and Pass 2 session — the bulk of the calendar — was booked at whatever default its Court Reserve event held.
+
+**The fix.** `policy.json` `participant_limits` holds the table; `ts/src/capacity.ts` `capForCourts` is
+the one reader, mirrored by `cap_for_courts` in `recommender.py` so the rollback path cannot disagree
+with the live one. The cap is **derived from the courts an occurrence actually holds** and the stored
+`max_participants` is no longer consulted anywhere. All four call sites above now ask the same
+function. `loadParticipantLimits` **throws** on a policy with no table: 0 reads as "leave Court
+Reserve's default alone" to `/book` and as "compliant" to the heal, so a missing rule must not look
+permissive — which is exactly what the test fixtures proved when they first ran without the block.
+
+**The healing half** is `ts/src/jobs/capacityDrift.ts`, inside the five-times-a-day waitlist job,
+**before** the waitlist scan: `/waitlists` returns only occurrences that are FULL, and a session
+wrongly capped at 4 reads as full while it has room for 10. Caps are read from
+`GET /events/registrations` (the `/schedule` feed carries `MembersCount` and nothing about MaxPeople)
+and written with `POST /events/courts` — the same courts it already has plus the right cap, which
+ticks `EditOnlyCurrentOccurrence`, so a heal rewrites one occurrence and never the series.
+`npx tsx src/cli.ts capacity` is the same sweep read-only; `--fix` writes; `--no-capacity` on the
+waitlist wrapper disables it.
+
+Three limits it will not cross, each from a shape on that live calendar:
+
+- **Never lower a cap below the people already signed up** — 11/16 10:00 Open Play Unleashed held
+  **20** against a table value of 18. More people than places is a roster problem; shrinking the cap
+  under them conceals it.
+- **Never RAISE a cap on an occurrence with a waitlist** — 11/16 17:00 Co-ed Advanced Open Play, 4 of
+  4 with **3 waiting**. Court Reserve notifies those members itself when room appears, so that is a
+  send to a member: the ✅ expansion Ron approves by hand, which the same job proposes two steps later.
+  Lowering such a cap is fine; nobody is promoted by a cap coming down.
+- **Play sessions only**, matched on the event name (`participant_limits.governs.name_patterns`) rather
+  than a list of event ids, because a new level appears under a new id every few months and a list
+  silently stops covering it. The 18 clinics / rentals / school group / town hall are named in the
+  report and never touched.
+
+**Proved live on the mini, in this order** — read-only sweep, `--fix`, then a fresh read:
+
+```
+dry   104 occurrence(s) — 18 not_governed, 1 below_roster, 31 fixable, 1 waitlist_holds, 53 compliant
+fix   31 put right, 0 failed, 2 held back        (every write logged, 05:08–05:21Z)
+read  103 occurrence(s) — 18 not_governed, 1 below_roster, 1 waitlist_holds, 83 compliant
+      0 put right, 0 failed, 2 held back, 0 still off the table
+```
+
+The 104 → 103 is one occurrence passing out of the window as the clock moved, not a loss.
+
+**Two bugs the work turned up and fixed in the same change.** `eventNamesFromSchedule` used `??`
+where Court Reserve sends an **empty** `EventName` and the name is on `ReservationType` — such an
+event would have been dropped from the name map, leaving every one of its occurrences permanently
+`courts_unknown` and unhealable; the test caught it before it ran live. And the first `--fix` run
+ended *"31 put right … 31 still off the table"* and **exited non-zero** on that count: a row the scan
+called `fixable` keeps that verdict after it is written, so the summary was counting the scan's
+judgement rather than the outcome, and a completely successful run would have withheld the wrapper's
+heartbeat and alarmed the watchdog. Both held by `ts/tests/capacity.test.ts` (15 new tests; 323
+passing).
+
+Also here: `scripts/regen_goldens.py` now covers `golden_history_2026-07-13`, which was produced by
+hand and so had no way to be re-baselined when behaviour changed on purpose — it was the last test
+still failing after the deliberate change, and hand-editing it would have hidden the next one.
+
+**The minimum of 4 is recorded and reported against, not written.** The occurrence edit form exposes
+`MaxPeople` only — `browser_automation.form_fields.edit_form` is the whole field list and there is no
+minimum on it. Court Reserve does carry one on the **event** form as `RequireMinRegistrants`, which
+`courtreserve-api` lists as an uncharacterised field (`cr_profile.json` `unmapped.fields`). Writing
+the 4 needs that field mapped first, and that is filed for Mr. Robot. **Nothing enforces the 4
+today** — the heal prints it in its report so a reader can see the rule, and does not check against it;
+the table could not violate it anyway, its smallest value being 5. D-0319's forbids say so, so the gap
+stays explicit rather than reading as closed.
+
+Open from this: whether the clinics, contract-time rentals, the school group and the town hall should
+follow the same table or keep their own numbers — one ledger line, not decided here. Still open from
+the entries below: no required test check on this repo; catch-up rebuilds a completely empty day; the
+two renamed events' rows keep their old names.
+
+---
 ## 2026-11-12 — the gap sweep no longer alarms on clinic slots (D-0317)
 
 Ron, asked whether to quiet the daily alarm for the clinic rows the check can never book:

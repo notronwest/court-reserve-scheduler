@@ -7,6 +7,7 @@ import { recommend, recommendLlm, toDict } from './recommender'
 import { runScheduler } from './scheduler'
 import { runCatchUp } from './jobs/catchUp'
 import { fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
+import { runCapacityHeal } from './jobs/capacityDrift'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -179,6 +180,41 @@ async function main(): Promise<void> {
       break
     }
 
+    case 'capacity': {
+      // Does every play session's cap match the courts it holds? (Ron, 2026-11-13:
+      // 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts, minimum 4.) Reads only unless
+      // --fix is given. The scheduled home of this is the five-times-a-day waitlist
+      // job; this command is for a one-off sweep and for proving a change.
+      const rest = new DiscordRest({
+        botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+        channelId: process.env.DISCORD_CHANNEL_ID ?? '',
+        webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
+      })
+      const log = (m: string): void => console.log(`${new Date().toISOString()}  ${m}`)
+      const daysIdx = args.indexOf('--days')
+      const result = await runCapacityHeal(makeCr(), flags.has('--quiet') ? null : rest, {
+        fix: flags.has('--fix'),
+        days: daysIdx >= 0 ? Number(args[daysIdx + 1]) : undefined,
+        policy: loadPolicy(),
+        log,
+        alwaysReport: flags.has('--report'),
+      })
+      // A row the scan called `fixable` KEEPS that verdict after it is written — the
+      // verdict is the scan's, not the outcome. So "still off the table" is the fixable
+      // rows minus the ones actually put right, or the first --fix run would end by
+      // claiming all 31 of the sessions it had just corrected were still wrong.
+      const drifted = result.rows.filter((r) => r.verdict === 'fixable' && r.fixed !== true).length
+      console.log(
+        `Done: ${result.rows.length} occurrence(s) over ${result.scannedEvents} event(s) — ` +
+          `${result.fixed.length} put right, ${result.failed.length} failed, ` +
+          `${result.reported.length} held back, ${drifted} still off the table`,
+      )
+      // A failed write, or drift left in place without --fix, is something a human
+      // must deal with — the wrapper withholds the heartbeat and the watchdog alarms.
+      if (result.failed.length || (!flags.has('--fix') && drifted)) process.exit(1)
+      break
+    }
+
     default:
       console.error('commands:')
       console.error('  health                      — is the courtreserve-api service up?')
@@ -187,6 +223,7 @@ async function main(): Promise<void> {
       console.error('  schedule <date> [--dry-run] — generate, post to Discord, save pending approval')
       console.error('  catch-up [--book] [--book-thin] — flag/re-book empty or missed dates in the 14-day horizon')
       console.error('  pattern-gaps [--fix]        — is every STANDING session on the calendar? (--fix books what it can)')
+      console.error('  capacity [--fix] [--days N] — does every play session hold the right number of people? (--fix writes the table back)')
       process.exit(1)
   }
 }

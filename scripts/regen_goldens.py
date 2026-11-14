@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FX = ROOT / "ts" / "tests" / "fixtures"
 sys.path.insert(0, str(ROOT))
 
+import recommender  # noqa: E402
+from history_analysis import load_popularity  # noqa: E402
 from recommender import recommend  # noqa: E402
 
 
@@ -29,6 +31,17 @@ def main() -> int:
     stale = []
     for entry in manifest:
         items = [] if entry.get("schedule") == "empty" else schedule
+        # A `popularity` entry runs the engine over a history fixture instead of
+        # whatever history happens to sit on the machine. `recommend` reads the
+        # popularity map through the module-level `load_popularity`, so this is
+        # patched rather than passed. golden_history_2026-07-13 used to be made
+        # by hand, which meant a deliberate behaviour change (the court->capacity
+        # table, 2026-11-13) left it stale with no script able to re-baseline it.
+        if entry.get("popularity"):
+            fixture = FX / entry["popularity"]
+            recommender.load_popularity = lambda _=None, _f=fixture: load_popularity(_f)
+        else:
+            recommender.load_popularity = load_popularity
         recs, stats = recommend(items, entry["date"], policy, llm=False)
         golden = {
             "date": entry["date"],

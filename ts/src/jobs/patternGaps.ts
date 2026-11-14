@@ -74,6 +74,7 @@ import { fixedEventsStateDir, resolveFixedEvents } from '../fixedEvents'
 import { COURTS } from '../recommender'
 import { freeCourts, isCancelled, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
 import { isOnWeek, type FixedEvent, type Policy } from '../policy'
+import { capForCourts, loadParticipantLimits, type ParticipantLimits } from '../capacity'
 
 export type GapStatus =
   | 'ok'
@@ -285,17 +286,18 @@ export function clockToAmPm(hhmm: string): string {
 }
 
 /**
- * A cap for a session that got fewer courts than it wanted.
+ * The cap for a session, from the courts it actually got.
  *
  * Ron, 2026-10-13, looking at a two-court session that landed on one: "we can't have 13
- * people on one court. The max would be 5." A pattern with no cap of its own stays
- * uncapped — inventing one would be deciding something nobody asked for.
+ * people on one court. The max would be 5." That first answer scaled the pattern's own
+ * stored number proportionally, which left the cap depending on what was in the row —
+ * so a two-court session was 4, 5, 8 or 10 on the same calendar depending on which code
+ * path last wrote it. Ron, 2026-11-13, gave the table instead: 5 / 10 / 14 / 18 for
+ * 1 / 2 / 3 / 4 courts. The pattern's stored `max_participants` is no longer consulted;
+ * `policy.json` `participant_limits` is the one answer, read through `capForCourts`.
  */
-export function scaledCap(pattern: FixedEvent, courtsObtained: number): number {
-  const full = pattern.max_participants ?? 0
-  const wants = pattern.courts ?? 1
-  if (!full || courtsObtained >= wants) return full
-  return Math.max(1, Math.round((full * courtsObtained) / wants))
+export function capFor(courtsObtained: number, limits?: ParticipantLimits): number {
+  return capForCourts(limits ?? loadParticipantLimits(), courtsObtained)
 }
 
 /** The dates in the horizon, as M/D/YYYY, starting today. */
@@ -456,6 +458,9 @@ export async function runPatternGaps(
   const horizon = opts.horizonDays ?? 14
   const today = opts.today ?? NaiveDateTime.parseDate(new Date().toLocaleDateString('en-US'))
   const dates = horizonDates(today, horizon)
+  // The court→capacity table (Ron, 2026-11-13). Read once per run so a widening and
+  // a fresh booking in the same sweep cannot disagree about what a pair of courts holds.
+  const limits = loadParticipantLimits(deps.policy)
 
   const resolved = await resolveFixedEvents(cr, deps.policy)
   const patternsLive = resolved.source === 'live'
@@ -529,7 +534,7 @@ export async function runPatternGaps(
       continue
     }
 
-    const cap = scaledCap(pattern, gap.has_courts + take.length)
+    const cap = capFor(gap.has_courts + take.length, limits)
     const courtIds = take.map((n) => String(COURTS[n].id))
     try {
       if (gap.has_courts === 0) {
