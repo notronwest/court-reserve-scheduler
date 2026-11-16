@@ -5398,103 +5398,166 @@ courts it holds" has exactly one, which is what makes an unattended sweep safe t
    minimum and the sweep reports against it; until the minimum field on the event form is
    characterised, nothing writes it.
 
-### D-0323 — A clinic slot belongs to a place, and Concord is the second one
+### D-0328 — Publishing an Academy clinic at the second club is this service's job, on Ron's agreement
 
-*2026-11-14 · scope: `courtreserve_api/clinic_rota.py, courtreserve_api/migrations/**, courtreserve_api/cr_profile.json, courtreserve_api/client.py, web/src/lib/clinic*.ts, web/src/views/ClinicsLessons.tsx, ts/src/policy.ts, ts/src/jobs/**` · source: Ron, 2026-11-14 — "I will be teaching lessons and clinics in Concord @ Capital City Pickleballers -- the same Third Shot Academy clinics I do in Lincoln at WMPC. I want the scheduling process we have created also manage and maintain clinics for me at that location", and, asked whether the publishing half had to be handed to their staff, "I already have access to add clinics". His own mail of 2026-11-01 to that club names Wednesday as the day and the four clinics by name and size. Table run per PROCESS.md: four voices, four concerns, no veto.*
+*2026-11-15 · scope: `courtreserve_api/clinic_rota.py, courtreserve_api/events_create.py, courtreserve_api/service.py, courtreserve_api/migrations/**, courtreserve_api/cr_profile.json, courtreserve_api/places.py, courtreserve_api/client.py, web/src/lib/clinic*.ts, web/src/views/ClinicsLessons.tsx, ts/src/policy.ts, ts/src/jobs/**` · source: Ron, 2026-11-15 — "You make it public after we agree", on the Academy clinics at Capital City, in the same message as "Pro +3 are 1.5 hrs always". D-0323 rule 5 said no agent publishes there at all, so his instruction is a supersession rather than an exception, and it is recorded as one. Everything else in D-0323 is carried forward unchanged. Table run per PROCESS.md.*
 
-**Decision.** A clinic slot is held at a **place**. `lincoln` is the club; `concord` is Capital
-City Pickleballers, a different Court Reserve organisation the Academy teaches at. The clinic
-programme gains the place as a fact on the row and keeps one set of code, rather than growing a
-second deployment or a second grid maintained by hand.
+**Decision.** D-0323 stands in every respect but one. A clinic slot is held at a **place**;
+`lincoln` is the club and `concord` is Capital City Pickleballers. What changes is **rule 5**:
+publishing a clinic at the second club is a thing **this service does**, once Ron has agreed
+that clinic. Cancelling and messaging there stay forbidden.
 
 1. **`courtreserve.fixed_events` carries `place`**, NOT NULL under a check constraint, existing
    rows backfilled to `lincoln`. The place decides, never the row's name (D-0315 rule 1).
-2. **`clinic_settings` is per place.** It is a key/value table today, so it is re-keyed
-   `(key, place)`: the per-day cap, the template event each week's clinic is copied from, its
-   Court Reserve category and the season all differ by place, and Concord's template event lives
-   in **their** Court Reserve. The rota refuses a slot whose place has no settings row rather
-   than falling back to the club's.
-3. **`club_holidays` carries a nullable place** — a row with no place means every place, so one
-   away week takes both places' clinics out at once.
+   A clinic at a non-club place is created by COPY, so its membership tiers and prices are
+   that club's and **we have never read them**. Making it public opens every tier the grid
+   holds, live — and in Court Reserve a blank tier is UNSET, not $0.00. So the tiers of the
+   event being copied are read before the first one is made public, not after.
+2. **`clinic_settings` is per place**, re-keyed `(key, place)`. The rota refuses a slot whose
+   place has no settings row rather than falling back to the club's.
+3. **`club_holidays` carries a nullable place** — a row with no place means every place.
 4. **A place carries its own Court Reserve identity, and the two sign-ins are different
-   accounts.** Ron, 2026-11-14: *"I have a separate username/password for that account."* So the
-   booking service's organisation binding becomes per place — its own credential pair
-   (`CR_CONCORD_USERNAME` / `CR_CONCORD_PASSWORD` in the club machine's `.env`, Lincoln's
-   unchanged), its own browser profile directory, its own organisation profile beside the
-   committed club one. A place whose credential is absent **refuses by name**; it never falls
-   back to the other's. Two accounts on one serialized Chrome (D-0060) must not leave one club's
-   session in the other's profile. Every write still goes through courtreserve-api (D-0282).
-5. **Publishing is a press at both places, and Concord's press is heavier.** The weekly job
-   creates hidden and prices nothing, exactly as it does for the club. A Concord clinic reaches
-   **another club's members on their public calendar**, so stop-list row 1 binds in full: no
-   agent publishes, cancels or messages there.
-6. **Concord is the Academy's teaching, never a club event.** Every club revenue, occupancy, P&L
-   and member-facing read filters to `lincoln`. This is the scheduling side of D-0009, and it is
-   wider than the clinic screens: any query that joins `fixed_events` or the Court Reserve
-   mirrors must carry the filter.
-7. **The club's booking robot never books at Concord.** Its courts, policy, horizon, gap fill,
-   waitlist sweep and capacity sweep are the club's. The clinic rota is the only thing in the
-   fleet that reaches a second place, and the club's play-session capacity table stays the
-   club's (D-0319 rule 5 already leaves a coached clinic its own numbers).
-8. **His away day is stored, not drawn.** Wednesday belongs to Concord, so the rota refuses a
-   `lincoln` clinic on it with that reason instead of relying on the grid having no Wednesday
-   row. **The lesson side is not covered by this record** — nothing yet refuses a club lesson
-   booked into a Concord day, and saying so is better than implying it.
-9. **Readers learn the place before the writer emits one.** The order is a clause, because every
-   code voice raised it and nothing in the fleet deploys on a merge — a person runs the deploy on
-   the club Mac mini, so each step lands AND is applied before the next:
-   (a) the scheduler's shared reader drops a row whose place is **present and not** `lincoln`,
-       cached path included — an unlabelled row is still the club's, because until (c) lands the
-       field does not exist and reading its absence as "not Lincoln's" would stop the club's own
-       standing sessions being booked;
-   (b) the booking service's organisation binding becomes per place;
-   (c) the migration adds `place` and re-keys the settings;
-   (d) the drain reads the place and refuses a request row without one;
-   (e) the Clinics tab sends it.
-   Out of order, step (c) hands the scheduler rows it reads as the club's and books a Concord
-   slot onto a club court, or a write lands in the wrong club's Court Reserve.
-10. **A WRITER may never omit the place; a READER of a row written before this record treats it
-    as the club's.** The two are different, and conflating them breaks something: a clinic-action
-    row carrying no place is refused, so a stale screen cannot act on the wrong club, while an
-    unlabelled `fixed_events` row predates the column and is Lincoln's by the same backfill the
-    migration applies. Once the booking service emits the place on every row, an absent place on
-    the wire is a fault to report, not a row to guess at.
+   accounts** (`CR_CONCORD_USERNAME` / `CR_CONCORD_PASSWORD`, its own browser profile, its own
+   committed organisation profile). A place whose credential is absent **refuses by name**; it
+   never falls back to the other's. Every write goes through courtreserve-api (D-0282).
+5. **Creating is hidden everywhere; MAKING A CLINIC PUBLIC at a non-club place is this
+   service's job and runs only on his agreement for that clinic.** This replaces D-0323's
+   *"no agent publishes, cancels or messages there"*.
+   **The verb matters and is fixed here.** On the dashboard's clinics screen, "publish the next block"
+   already means *create the next run of dates, hidden*. The act this rule governs is
+   **making a clinic public**. Two acts, one tab; they do not share a word, in this record,
+   in a button or in anything Ron reads. Where this record says "publish" of a Court Reserve
+   call it means `publish_event`, and nothing else.
+   (a) a clinic at a non-club place is still **created hidden and prices nothing of ours** —
+       unchanged, and the create path hard-codes it rather than trusting a caller;
+   (b) **making it public is a service call**, because by hand it is not one switch: Court
+       Reserve renders a visibility and an online-registration column **per membership tier**,
+       the event-wide checkbox does not gate them, and 7 of 16 default to on — so a create
+       turns both off on every row and only `publish_event` reverses all of them and reads
+       each back. Ticking the event alone yields a clinic everyone can see and nobody can book;
+   (c) **his agreement is per clinic, never standing.** In the session he is typing in, his
+       instruction is the agreement (D-0204). For any other actor it is an approval row he
+       pressed (D-0236), and that row's shape is named rather than left open: a **pending**
+       row raised by a proposer in the dashboard's own migrations, in D-0300 / D-0309's shape,
+       carrying `scope.stop_rule: 1` — which `cos_stop_rule_listed` already admits without a
+       new kind in the stop-list index — executed by the mini drain through courtreserve-api
+       (D-0282). Its kind must be listed in the dashboard's approval-kind tables, or the card
+       reads as a build and its outcome never shows. That screen's existing clinic-action
+       row is written **already approved**, client-side — the press is the ask — so it is
+       not that evidence. **No schedule, sweep, drain or job makes a clinic public at a non-club
+       place on its own**, and this record grants no blanket permission for the place.
+   (e) **The unattended rail must not acquire this power by a column.** The events drain
+       makes events public on a five-minute tick from a queue row's status, through the
+       un-placed club session. That queue table has no `place` column, and that absence —
+       not a gate — is the only reason the drain cannot reach Concord today. So **steps (d)
+       and (e) of rule 9 must not add a place to that rail before rule 5(c)'s gate exists**:
+       doing so hands an unattended job the power this record gives only to his agreement.
+       This ordering is a forbid, not a preference.
+   (d) **ORDER: rule 6's filter lands before the first non-club clinic is made public.** A
+       public Concord clinic is the first thing that can put another club's registrations and
+       seats into the club's reads; shipping this without the filter ships the gap with it.
+   **Cancelling and messaging there remain forbidden to an agent**, with one reading stated so
+   it is not argued each time: an event that is **hidden AND has zero registrants** holds
+   nothing a member can receive and is an artefact of ours, so removing it is an act with
+   nothing attached (D-0302) rather than destroying history. **Both conditions, read live,
+   not one:** today's cancel refuses on registrants alone and never on public state. And it
+   is the one mutating tool exposed to a connector session, so giving it a `place` would put
+   one-click cancel at another club in front of every such session — a place-aware cancel
+   must be withheld from that surface. That capability does not exist and is filed, not built.
+6. **Concord is the Academy's teaching, never a club event.** Every club revenue, occupancy,
+   P&L and member-facing read filters to `lincoln`. Unchanged, still ungated, and now ORDERED
+   by rule 5(d). The reads at risk are named so the work is not scoped by guesswork:
+   `cr_fixed_events`, `cr_schedule`, `cr_event_registrations` and `cr_clinic_block_v`. None of
+   those views is defined in the dashboard's own migrations, so the filter belongs with
+   whichever repo owns them, not with the screens that read them.
+7. **The club's booking robot never books at Concord.** Unchanged.
+8. **His away day is stored, not drawn.** Unchanged — and **the lesson side is still not
+   covered**: nothing refuses a club lesson booked into a Concord day.
+9. **Readers learn the place before the writer emits one.** Unchanged. Steps (a) the scheduler's
+   reader, (b) the per-place organisation binding and (c) the migration are applied; **(d) the
+   clinic-action drain reading the place and (e) the clinics tab sending it are still owed.**
+   Until (e) ships, no row written from the dashboard can NAME a Concord clinic — so rule
+   5(c)'s "that clinic" has nothing to identify it with there, and his agreement for one
+   reaches the service only through the session he is typing in.
+10. **A WRITER may never omit the place; a READER of a row written before D-0323 treats it as
+    the club's.** Unchanged.
+11. **An event may be RETIMED at any place, and only retimed — with two limits the table
+    found.** The programme could create at the second club and never correct what it created,
+    so a clinic put on at the wrong hour could only be fixed by a human inside that club's
+    Court Reserve. `POST /events/retime` is deliberately narrow — the two time fields and
+    nothing else. Price, category, restriction and courts are unreachable through it, so a
+    mistyped field cannot reprice an event at a club that is not ours. A general edit route at
+    a non-club place is **not** granted by this record.
+    (a) **It is not "two fields" on a recurring parent.** The edit path turns recurrence off
+        and rebuilds the series (D-0305). On a recurring event a retime is a bigger act than
+        its name, and a caller that does not want that must not use it.
+    (b) **At a NON-CLUB place it is for a clinic that is hidden with no registrants.** The
+        time fields are not restricted fields, so the public-event refusal never runs and no
+        registrant check exists. While every Concord event was hidden that cost nothing;
+        making them public changes it, and a retime would move a session another club's
+        members have booked. Until a guard exists, a public Concord clinic is moved by Ron on
+        their screen, not by this service.
+    (c) **At the CLUB it can desynchronise a standing slot from its pattern.** The booking
+        robot's first pass guards a standing slot only by an occurrence cap and a two-hour
+        window on the event id; it has no "moved beats missing" predicate. A standing Lincoln
+        occurrence retimed more than two hours from its pattern hour can therefore be booked
+        again at the pattern hour by the catch-up run — the duplicate D-0315 was written
+        about, now machine-reachable. Either that pass gains the gap filler's predicate or a
+        retime of a standing occurrence restamps its pattern row; until one of them exists, a
+        standing club slot is not retimed through this endpoint.
+    (d) **The weekday guard is the caller's, and it is optional.** It refuses only when the
+        caller names a day. Every clinic retime at a place that runs on set days names one.
+    (e) **The un-placed default stays the club, for every caller.** A call that names no place
+        is Lincoln's, byte for byte, and that is a guarantee of this record rather than an
+        implementation detail of the service.
 
-**Why.** The programme is single-club in five independent places at once — one organisation id in
-a committed profile, one login in the service's module globals, no place on the slot row, a
-key/value settings table with one row per key, and a holiday table with one row per date. Each of
-those would have produced a different wrong answer: a hidden clinic created in the wrong club, a
-Concord slot booked onto a club court, Concord seats counted as club revenue, or a week away that
-only clears one place. Making the place a fact on the row is the smallest change that closes all
-five, and it keeps one set of code under test instead of a second grid kept in step by hand.
+**Why.** D-0323 wrote rule 5 as an absolute because the risk it names is real: a clinic going
+visible reaches another club's members on their public calendar, and nothing an agent decides
+should put it there. What it did not separate is **deciding** from **doing**. Ron agreeing a
+clinic and the service rendering that agreement is not an agent deciding — it is the same shape
+as every other press in the fleet. Leaving it absolute had a cost that was about to be paid
+weekly: six hand-ticks per clinic, on a screen whose obvious single switch produces a clinic
+nobody can book, with no read-back. That is a worse guarantee than a service call that proves
+each tier.
 
-**What this record does NOT decide, deliberately.** That the Academy teaches at a second club, on
-what terms, at what rates, and under whose brand is **Academy** scope and belongs in Third Shot
-Academy's own register (D-0134: a record belongs to the register of the operation that owns the
-enforcing side). What is recorded here is only the WMPC-owned enforcement — the column, the
-per-place settings, the second credential on the club's machine, the filters that keep the money
-apart, and the stop-list binding.
+**What this record does NOT decide, deliberately.** That the Academy teaches at a second club,
+on what terms and at what rates, is **Academy** scope and belongs in Third Shot Academy's own
+register (D-0134). What is recorded here is the WMPC-owned enforcement.
 
-
-**The one tradeoff the table raised and this record does not close.** The register's own voice
-noted that Concord's rows will live in the club's database and on the club's machine, which is
-Academy work hosted by WMPC and sits against D-0009's "separate from day one". This record answers
-it with filters and forbids rather than with separation, because the alternative — the Academy's own
-instance holding its own schedule — is a far larger build than the one he asked for. **It is his
-call and it is put to him**; if he chooses separation this record is superseded, and the two cards
-already filed hold either way, since both are about never confusing one club's rows or one club's
-Court Reserve with the other's.
+**The tradeoff D-0323 raised and this record still does not close.** Concord's rows live in the
+club's database and on the club's machine — Academy work hosted by WMPC, against D-0009's
+"separate from day one". This record answers it with filters and forbids rather than separation,
+because the alternative is a far larger build than the one he asked for. It remains his call.
 
 **Forbids.**
-- A Concord row reaching a club revenue, occupancy or P&L read, or any member-facing club surface.
-- A writer omitting the place, or any write path defaulting a missing one to `lincoln`. (Reading
-  an unlabelled pre-existing row as the club's is rule 10 and is not this forbid.)
+- Making a clinic public at a non-club place **without his agreement for that clinic** — no
+  standing permission, no schedule, no sweep, no drain. This rewrites D-0323's forbid on "any
+  publish, cancel or message to that club's members without his press": the press is now his
+  agreement rendered by this service, and everything else in that forbid stands.
+- Adding a `place` to the events queue the unattended drain reads, before rule 5(c)'s gate
+  exists.
+- Making a clinic public at a non-club place before rule 6's filter lands (rule 5(d)).
+- Retiming a clinic at a non-club place that is public or has a registrant, and retiming a
+  standing club slot, until rule 11(b) and 11(c) have their guards.
+- Cancelling or messaging at a non-club place, except removing an event that is hidden **and**
+  has zero registrants — a capability that does not exist, and must not be exposed to a
+  connector session when it does.
+- A Concord row reaching a club revenue, occupancy or P&L read, or any member-facing club
+  surface; and the duplicate-event sweep ever seeing a multi-place feed.
+- A writer omitting the place, or any write path defaulting a missing one to `lincoln`.
+- A general edit route at a non-club place in place of the narrow retime.
 - A second deployment, a second database or a hand-kept second grid in place of the place column.
-- Any Court Reserve write to the second organisation from outside courtreserve-api, and any
-  publish, cancel or message to that club's members without his press.
-- Quieting the club's own alarms, sweeps or caps for Concord's sake: the club's rules stay the
-  club's.
+- Quieting the club's own alarms, sweeps or caps for Concord's sake.
 - Reading rule 8 as covering lessons.
+
+**The table.** Three voices, run per PROCESS.md against `origin/main`, and **no veto**. The
+booking service and the dashboard each returned a concern; the booking robot returned a concern
+on rule 11 at the CLUB, not on Concord at all. Every one of them is written into the rules
+above rather than noted and lost: the unenforced gate, the drain one column away, the retime
+with no registrant check, the first pass with no "moved beats missing" predicate, the word
+"publish" already meaning something else on the screen Ron presses, the approval row's shape,
+and the ordering of rule 6's filter. The documentation of places in the booking service is
+updated in the same change, as its voice asked.
 
 ## Proposed (not binding yet)
 
@@ -5509,3 +5572,4 @@ Court Reserve with the other's.
 - D-0177 — Every reply is a short summary; a question or an action for Ron is unmistakable (2026-10-14) → superseded by D-0189
 - D-0233 — A recurring event Ron deletes stays deleted — the fleet never recreates it, and the pattern behind it is retired, not re-alarmed (2026-10-26) → superseded by D-0248
 - D-0248 — A cancelled occurrence of a standing session is withdrawn, not missing — the sweep never books it back (2026-10-28) → superseded by D-0315
+- D-0323 — A clinic slot belongs to a place, and Concord is the second one (2026-11-14) → superseded by D-0328
