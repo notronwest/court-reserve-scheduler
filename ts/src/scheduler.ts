@@ -22,6 +22,7 @@ import type { AutoBookResult } from './discord/execute'
 import type { DiscordRest } from './discord/rest'
 import { resolvePolicyProvenance, type PolicyProvenance } from './policyProvenance'
 import { withRetry } from './retry'
+import { mixedMorningCrewSeries } from './windowRules'
 import { resolveFixedEvents as resolveFixedEventsDefault, type FixedEventsResult } from './fixedEvents'
 
 export interface SchedulerDeps {
@@ -206,6 +207,10 @@ export async function runScheduler(
       `Fixed event NOT booked: ${s.name} ${s.day_of_week ?? '?'} ${s.start_time ?? '?'} ` +
         `(event ${s.event_id}) — reason=${s.reason}`,
     )
+  }
+
+  for (const name of mixedMorningCrewSeries(policy, policy.fixed_events?.events ?? [])) {
+    log(`Fixed event series mixes the Morning Crew window: ${name} — needs splitting into separate events`)
   }
 
   if (recommendations.length === 0 && opts.autoBook && !opts.dryRun) {

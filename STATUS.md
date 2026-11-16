@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-16 — no noon starts Mon–Thu, and no series mixes the Morning Crew window ([#129](https://github.com/notronwest/CourtReserve-Scheduler/issues/129))
+
+Two hard rules agreed with Ron, in `policy.json` `hard_constraints` (7 and 8), mirrored in
+`ts/src/windowRules.ts` + `recommender.py`. 7: nothing starts 12:00 Mon–Thu — free-slot generation
+skips it and Pass 0 skips a fixed event asking for it as `noon_start` (flagged, never moved).
+8: a series is split by START time into inside (Mon–Thu 08:00–11:59) and outside; a mixed standing
+series is logged by the 8 AM run, never rewritten. Tests: `ts/tests/windowRules.test.ts`.
+Live pattern has no noon Mon–Thu rows.
+
+---
 ## 2026-11-14 — the standing-slot reader learns about PLACE, before the column exists (D-0323)
 
 Ron teaches the same Third Shot Academy clinics at a second club — Concord (Capital City

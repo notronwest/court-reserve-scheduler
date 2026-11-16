@@ -143,6 +143,29 @@ def _overlaps(s1: datetime, e1: datetime, s2: datetime, e2: datetime) -> bool:
 
 # ── Main recommender ──────────────────────────────────────────────────────────
 
+def starts_at_forbidden_noon(policy: dict, day: str, start_time: str) -> bool:
+    """Hard constraint 7: no event starts at 12:00 Mon-Thu (mirrors windowRules.ts)."""
+    r = policy.get("hard_constraints", {}).get("7_no_noon_start_mon_thu")
+    if not r or r.get("enabled") is False:
+        return False
+    return day in r["days"] and start_time[:5] == r["start_time"]
+
+
+def in_morning_crew_window(policy: dict, day: str, start_time: str) -> bool:
+    """Hard constraint 8: a Mon-Thu session STARTING 08:00-11:59 is inside the free window."""
+    r = policy.get("hard_constraints", {}).get("8_morning_crew_window_not_mixed")
+    if not r or r.get("enabled") is False or day not in r["days"]:
+        return False
+    return r["window_start"] <= start_time[:5] <= r["window_end"]
+
+
+def split_by_morning_crew_window(policy: dict, rows: list[dict]) -> list[list[dict]]:
+    """Split one series' occurrences into separate events: [inside, outside], empties dropped."""
+    inside = [r for r in rows if in_morning_crew_window(policy, r.get("day_of_week", ""), r["start_time"])]
+    outside = [r for r in rows if r not in inside]
+    return [g for g in (inside, outside) if g]
+
+
 def cap_for_courts(policy: dict, courts: int) -> int:
     """How many people a session on `courts` courts holds.
 
@@ -317,6 +340,9 @@ def recommend(
     t = win_start
     while t + block <= win_end:
         se = t + block
+        if starts_at_forbidden_noon(policy, t.strftime("%A"), t.strftime("%H:%M")):
+            t += block
+            continue
         existing_at = courts_occupied_at(t, se)
         available_slots = max_concurrent - existing_at  # how many new courts we can offer
         added = 0
@@ -469,6 +495,11 @@ def recommend(
                 "start_time": _fe.get("start_time"), "event_id": _eid,
                 "reason": reason,
             })
+
+        # Hard constraint 7: nothing starts at noon Mon-Thu. Flagged, never moved.
+        if starts_at_forbidden_noon(policy, day_name, fe["start_time"]):
+            _skip("noon_start")
+            continue
 
         # Hard constraint 3 (max occurrences) and 3b (min gap between occurrences
         # of the same event) apply to fixed events too. Pass 0 used to check only
