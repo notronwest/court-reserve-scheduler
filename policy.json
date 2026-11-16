@@ -375,6 +375,19 @@
     "6_max_concurrent_courts": {
       "limit": 3,
       "description": "No more than 3 of the 4 courts may be occupied by recommended events at the same time. At least one court must always remain free at every time slot."
+    },
+    "7_no_noon_start_mon_thu": {
+      "enabled": true,
+      "days": ["Monday", "Tuesday", "Wednesday", "Thursday"],
+      "start_time": "12:00",
+      "description": "No event of any type starts at 12:00 Monday-Thursday (Friday-Sunday are unaffected). The recommender never proposes one; a fixed event that asks for one is skipped with reason noon_start, never silently moved. Ron, 2026-11-16."
+    },
+    "8_morning_crew_window_not_mixed": {
+      "enabled": true,
+      "days": ["Monday", "Tuesday", "Wednesday", "Thursday"],
+      "window_start": "08:00",
+      "window_end": "11:59",
+      "description": "Court Reserve holds one Morning Crew price per event ($0 for a session starting Mon-Thu 08:00-11:59, $12 outside), so a recurring Open Play series never mixes sessions inside and outside that window; they are proposed as separate events. Membership is decided by START time alone (an 11:00 session running to 13:00 is inside). Ron, 2026-11-16."
     }
   },
   "waitlist": {

@@ -8,6 +8,7 @@
 import { NaiveDateTime, overlaps, pyRound } from './datetime'
 import { occupiedSlots, type OccupiedSlot } from './availability'
 import { isOnWeek, onWeekStatus, type Policy } from './policy'
+import { startsAtForbiddenNoon } from './windowRules'
 import { capForCourts, loadParticipantLimits } from './capacity'
 import { loadPopularity, popularityScore, type PopularityScores } from './history'
 // Type-only import — no runtime cycle (ranker.ts imports values from here).
@@ -116,8 +117,10 @@ export interface SkippedFixedEvent {
   event_id: number
   /** `min_gap` = hard constraint 3b; `max_occurrences` = hard constraint 3;
    *  `no_court` = every court it could use is already taken at that hour;
-   *  `bad_anchor` = a two-week row with no usable anchor date (D-0202). */
-  reason: 'min_gap' | 'max_occurrences' | 'no_court' | 'bad_anchor'
+   *  `bad_anchor` = a two-week row with no usable anchor date (D-0202);
+   *  `noon_start` = hard constraint 7 (no 12:00 start Mon–Thu); a series that
+   *  straddles the Morning Crew window (constraint 8) is reported by `mixedMorningCrewSeries`. */
+  reason: 'min_gap' | 'max_occurrences' | 'no_court' | 'bad_anchor' | 'noon_start'
 }
 
 export interface Stats {
@@ -346,6 +349,10 @@ function buildContext(
   let t = winStart
   while (t.addHours(BLOCK_H).ms <= winEnd.ms) {
     const se = t.addHours(BLOCK_H)
+    if (startsAtForbiddenNoon(policy, dayName, t.formatHm())) {
+      t = t.addHours(BLOCK_H)
+      continue
+    }
     const availableSlots = maxConcurrent - courtsOccupiedAt(t, se)
     let added = 0
     for (const cn of courtOrder) {
@@ -499,6 +506,12 @@ function buildContext(
       skippedFixedEvents.push({
         name: fe.name, day_of_week: fe.day_of_week, start_time: fe.start_time, event_id: eid, reason,
       })
+    }
+
+    // Hard constraint 7: nothing starts at noon Mon–Thu. Flagged, never silently moved.
+    if (startsAtForbiddenNoon(policy, dayName, fe.start_time)) {
+      skip('noon_start')
+      continue
     }
 
     // A two-week row with no usable anchor is never booked weekly (D-0202).
