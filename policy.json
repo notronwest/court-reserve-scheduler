@@ -32,6 +32,18 @@
       "3": 14,
       "4": 18
     },
+    "by_name": [
+      {
+        "name_pattern": "structured play",
+        "max_by_courts": {
+          "1": 4,
+          "2": 8,
+          "3": 12,
+          "4": 16
+        },
+        "note": "RULE set by Ron, 2026-11-14: \"change all Structured Play events to be 4 max on 1 court, 8 max on 2 courts, 12 max on 3 courts and 16 max on 4 courts\". Overrides max_by_courts for any event whose name contains the pattern (case-insensitive); first match wins. Mirrors courtreserve-api capacity_rules.json's Structured Play category (crapi#674, #718). Without it the capacity heal reset every Structured Play session to the general 10 on two courts, undoing the rule."
+      }
+    ],
     "governs": {
       "name_patterns": [
         "open play",

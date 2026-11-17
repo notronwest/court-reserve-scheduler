@@ -91,7 +91,7 @@ export function scanCapacityDrift(
   for (const occ of occurrences) {
     const courts = countCourts(occ.courts_text)
     const name = names.get(occ.event_id) ?? ''
-    const wanted = capForCourts(limits, courts)
+    const wanted = capForCourts(limits, courts, name)
     const row: DriftRow = {
       res_id: occ.res_id,
       event_id: occ.event_id,

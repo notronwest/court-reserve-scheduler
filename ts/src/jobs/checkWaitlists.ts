@@ -148,7 +148,7 @@ export function buildProposal(
   // carries now. Dividing was how a session at 10 on two courts proposed 15 on three
   // while the table says 14, and how an occurrence sitting at a wrong cap propagated
   // that wrongness into the expansion (Ron, 2026-11-13).
-  const newMax = capForCourts(ctx.limits, numCourts + 1)
+  const newMax = capForCourts(ctx.limits, numCourts + 1, ctx.approved[String(occ.event_id)]?.name ?? '')
   if (!newMax) return null
   const perCourt = Math.floor(newMax / (numCourts + 1))
   const newNum = ctx.courts[String(newCourtId)].number

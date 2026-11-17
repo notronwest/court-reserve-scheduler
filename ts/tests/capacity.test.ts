@@ -187,3 +187,33 @@ describe('the report', () => {
     expect(text).not.toContain('participant_limits')
   })
 })
+
+describe('Structured Play has its own table (Ron, 2026-11-14: 4 / 8 / 12 / 16)', () => {
+  it('reads the per-name table for a Structured Play session, the general table otherwise', () => {
+    for (const name of ['Co-Ed Advanced Structured Play', 'Co-ed Intermediate Structured Play']) {
+      expect(capForCourts(limits, 1, name)).toBe(4)
+      expect(capForCourts(limits, 2, name)).toBe(8)
+      expect(capForCourts(limits, 3, name)).toBe(12)
+      expect(capForCourts(limits, 4, name)).toBe(16)
+    }
+    expect(capForCourts(limits, 2, 'Co-ed Advanced Open Play')).toBe(10)
+    expect(capForCourts(limits, 2)).toBe(10)
+  })
+
+  it('the shipped policy carries the same rule', () => {
+    const live = loadParticipantLimits()
+    expect(capForCourts(live, 2, 'Co-Ed Advanced Structured Play')).toBe(8)
+    expect(capForCourts(live, 2, 'Co-ed Advanced Open Play')).toBe(10)
+  })
+
+  it('the heal leaves a two-court Structured Play at 8 and corrects one at 10 back to 8', () => {
+    const rows = scanCapacityDrift(
+      limits,
+      [occ({ event_id: 2, max_people: 8, res_id: 'a' }), occ({ event_id: 2, max_people: 10, res_id: 'b', registered: 1 })],
+      names,
+    )
+    expect(rows[0].verdict).toBe('compliant')
+    expect(rows[1].verdict).toBe('fixable')
+    expect(rows[1].wanted_max).toBe(8)
+  })
+})

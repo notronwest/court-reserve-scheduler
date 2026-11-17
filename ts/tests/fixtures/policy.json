@@ -22,6 +22,12 @@
       "3": 14,
       "4": 18
     },
+    "by_name": [
+      {
+        "name_pattern": "structured play",
+        "max_by_courts": { "1": 4, "2": 8, "3": 12, "4": 16 }
+      }
+    ],
     "governs": {
       "name_patterns": [
         "open play",
