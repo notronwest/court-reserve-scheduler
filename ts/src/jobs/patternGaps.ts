@@ -296,8 +296,8 @@ export function clockToAmPm(hhmm: string): string {
  * 1 / 2 / 3 / 4 courts. The pattern's stored `max_participants` is no longer consulted;
  * `policy.json` `participant_limits` is the one answer, read through `capForCourts`.
  */
-export function capFor(courtsObtained: number, limits?: ParticipantLimits): number {
-  return capForCourts(limits ?? loadParticipantLimits(), courtsObtained)
+export function capFor(courtsObtained: number, limits?: ParticipantLimits, eventName = ''): number {
+  return capForCourts(limits ?? loadParticipantLimits(), courtsObtained, eventName)
 }
 
 /** The dates in the horizon, as M/D/YYYY, starting today. */
@@ -536,7 +536,7 @@ export async function runPatternGaps(
       continue
     }
 
-    const cap = capFor(gap.has_courts + take.length, limits)
+    const cap = capFor(gap.has_courts + take.length, limits, gap.name)
     const courtIds = take.map((n) => String(COURTS[n].id))
     try {
       if (gap.has_courts === 0) {

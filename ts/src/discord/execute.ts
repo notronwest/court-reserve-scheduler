@@ -92,7 +92,7 @@ async function bookOne(cr: CourtReserveClient, rec: RecommendationDict): Promise
       court_ids: [rec.court_id, ...(rec.extra_court_ids ?? [])].map(String),
       ...(() => {
         const courts = 1 + (rec.extra_court_ids?.length ?? 0)
-        const cap = rec.max_participants || capForCourts(loadParticipantLimits(), courts)
+        const cap = rec.max_participants || capForCourts(loadParticipantLimits(), courts, rec.event_name)
         return cap ? { max_people: cap } : {}
       })(),
       dry_run: false,

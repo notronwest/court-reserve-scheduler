@@ -22,6 +22,11 @@ export interface ParticipantLimits {
   min: number
   /** Court count → max people. */
   maxByCourts: Map<number, number>
+  /**
+   * Per-name overrides of `maxByCourts`, first match wins. Structured Play is 4 per
+   * court (Ron, 2026-11-14) while every other play session follows the general table.
+   */
+  byName: { pattern: string; maxByCourts: Map<number, number> }[]
   /** Lower-cased substrings of the event name the table governs. */
   namePatterns: string[]
   horizonDays: number
@@ -32,6 +37,7 @@ export interface ParticipantLimits {
 interface RawLimits {
   min_participants?: number
   max_by_courts?: Record<string, number>
+  by_name?: { name_pattern?: string; max_by_courts?: Record<string, number> }[]
   governs?: { name_patterns?: string[] }
   heal?: {
     horizon_days?: number
@@ -60,20 +66,18 @@ export function loadParticipantLimits(policy?: Policy): ParticipantLimits {
   let raw = (policy as { participant_limits?: RawLimits } | undefined)?.participant_limits
   if (!raw) raw = (loadPolicy() as { participant_limits?: RawLimits }).participant_limits
   if (!raw) throw new Error('policy.json has no participant_limits block — the court→capacity rule is missing')
-  const entries = Object.entries(raw.max_by_courts ?? {})
-  if (!entries.length) throw new Error('policy.json participant_limits.max_by_courts is empty')
-  const maxByCourts = new Map<number, number>()
-  for (const [courts, max] of entries) {
-    const n = Number(courts)
-    if (!Number.isInteger(n) || n < 1) throw new Error(`participant_limits.max_by_courts has a non-court key: ${courts}`)
-    if (!Number.isInteger(max) || max < 1) throw new Error(`participant_limits.max_by_courts[${courts}] is not a count: ${max}`)
-    maxByCourts.set(n, max)
-  }
+  const maxByCourts = parseTable(raw.max_by_courts, 'max_by_courts')
+  const byName = (raw.by_name ?? []).map((o, i) => {
+    const pattern = String(o.name_pattern ?? '').trim().toLowerCase()
+    if (!pattern) throw new Error(`participant_limits.by_name[${i}] has no name_pattern`)
+    return { pattern, maxByCourts: parseTable(o.max_by_courts, `by_name[${i}].max_by_courts`) }
+  })
   const min = raw.min_participants ?? 0
   const heal = raw.heal ?? {}
   return {
     min,
     maxByCourts,
+    byName,
     namePatterns: (raw.governs?.name_patterns ?? []).map((p) => p.toLowerCase()),
     horizonDays: heal.horizon_days ?? 14,
     neverLowerBelowRegistered: heal.never_lower_below_registered !== false,
@@ -81,17 +85,41 @@ export function loadParticipantLimits(policy?: Policy): ParticipantLimits {
   }
 }
 
+function parseTable(table: Record<string, number> | undefined, label: string): Map<number, number> {
+  const entries = Object.entries(table ?? {})
+  if (!entries.length) throw new Error(`policy.json participant_limits.${label} is empty`)
+  const out = new Map<number, number>()
+  for (const [courts, max] of entries) {
+    const n = Number(courts)
+    if (!Number.isInteger(n) || n < 1) throw new Error(`participant_limits.${label} has a non-court key: ${courts}`)
+    if (!Number.isInteger(max) || max < 1) throw new Error(`participant_limits.${label}[${courts}] is not a count: ${max}`)
+    out.set(n, max)
+  }
+  return out
+}
+
 /**
  * The cap for a session on `courts` courts, or 0 when the table has nothing to
  * say about that many.
+ *
+ * `eventName` selects a per-name table (`by_name`) when one matches — Structured
+ * Play is 4 / 8 / 12 / 16, not the general 5 / 10 / 14 / 18. A caller that does not
+ * know the name gets the general table, which is what every caller got before.
  *
  * 0 means "the table does not cover this", and every caller treats it the same
  * way it always has: `/book` omits MaxPeople and Court Reserve's own default
  * stands. The club has four courts, so in practice only a 0-court call — a
  * booking that got no court at all, which is already a failure — lands here.
  */
-export function capForCourts(limits: ParticipantLimits, courts: number): number {
-  return limits.maxByCourts.get(courts) ?? 0
+export function capForCourts(limits: ParticipantLimits, courts: number, eventName = ''): number {
+  return tableFor(limits, eventName).get(courts) ?? 0
+}
+
+/** The court→cap table that applies to an event name. */
+export function tableFor(limits: ParticipantLimits, eventName = ''): Map<number, number> {
+  const name = (eventName ?? '').toLowerCase()
+  if (name) for (const o of limits.byName ?? []) if (name.includes(o.pattern)) return o.maxByCourts
+  return limits.maxByCourts
 }
 
 /**

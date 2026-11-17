@@ -582,7 +582,7 @@ function buildContext(
     // ACTUALLY got — not from the pattern's stored number scaled down. Scaling the
     // stored number is what let a two-court session be booked at 4, 5 or 8 while the
     // club's rule said 10 (Ron, 2026-11-13: 5 / 10 / 14 / 18 for 1 / 2 / 3 / 4 courts).
-    const maxP = capForCourts(limits, courtsAssigned.length)
+    const maxP = capForCourts(limits, courtsAssigned.length, fe.name)
     const override = distinctId !== undefined ? { name: fe.name, level: feLevel } : undefined
     add(eid, primary, feStart, feEnd, extras, maxP, override)
   }
