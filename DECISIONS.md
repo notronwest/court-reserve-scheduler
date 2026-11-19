@@ -5634,6 +5634,61 @@ its work keeps reaching the club board through a daemon session, as it has so fa
 - Running the gate twice for one stop (registering `stop-gate.sh` globally as well as through
   the wrapper).
 
+### D-0337 — The session-size sweep sets a play session's size once per court count — a size a person changed afterwards stays
+
+*2026-11-19 · scope: `ts/src/jobs/capacityDrift.ts, ts/src/jobs/checkWaitlists.ts, ts/src/capacity.ts, ts/src/cli.ts` · source: Ron, 2026-11-19 — *"We updated the cr scheduler to stop replacing recurring events that were deleted. Do the same thing for modified. I keep updating today's mens advanced plus to 4 max and it keeps getting updated back to 5"*. Read the same day in the scheduler's code: the session-size sweep (D-0319) runs five times a day and writes the table's number onto any play session carrying a different one, so a one-court session set to 4 by hand is 5 again at the next run.*
+
+**Decision.** D-0319 stands: a play session's size is derived from its court count, and a
+sweep writes that number where it is missing. This record narrows **when the sweep may
+write**. It amends D-0319's sweep and supersedes nothing; it is D-0315's rule — repair what
+has never been right, leave what a person changed — applied to a session's size.
+
+1. **The sweep settles a session once per court count.** Per occurrence it remembers the
+   court count at which it has seen that occurrence carrying the table's number. Remembered at
+   this court count and carrying a different number now → **a person changed it. Left alone,
+   nothing written, nothing posted.** The run's log line counts it under its own verdict so
+   the choice is visible to whoever reads the log.
+
+2. **A changed court count is a new question.** Narrow a two-court session to one court and
+   leave its size at 10, and the sweep has never settled it on one court: it is set to 5, once.
+   This keeps what D-0319 was written for — "too few or too many courts for the maximum
+   participants" — while a size set by hand on an unchanged session stays.
+
+3. **The memory is written only from a read, never from a write's reply.** After the sweep
+   writes anything it reads the sizes again and remembers only occurrences that now carry the
+   table's number. A write that "succeeded" and did not land is tried again next run.
+
+4. **With no memory, the sweep records the calendar as it stands and writes nothing.** The
+   first run after this ships, and any run that finds the memory missing or unreadable, treats
+   every occurrence in range as settled at its current court count. Occurrences that enter the
+   range later are judged normally. A memory that cannot be WRITTEN fails the run rather than
+   forgetting in silence (D-0315 rule 4, same reason).
+
+5. **D-0319's guardrails are unchanged.** Never lowered below the people signed up, never
+   raised on a session with a waitlist, play sessions only. An occurrence held back by either
+   guardrail is not remembered, so it is still corrected when the guardrail clears.
+
+6. **The memory lives beside the standing-session sweep's**, on the one machine that runs the
+   job, pruned of dates that have passed.
+
+**Why.** D-0319 asked the sweep to undo a size "accidentally modified", and a sweep cannot tell
+an accident from a choice: both are a number that differs from the table. The club's owner set
+one session to 4 several times in a day and each run put back 5. The asymmetry is D-0315's:
+overwriting a size a person chose happens in front of members and silently; leaving a genuine
+accident costs one hand correction. The table still reaches every session the first time, and
+again whenever its courts change, which is where the 51 wrong sizes of 2026-11-13 came from.
+
+**What this costs, said plainly.** A size changed by mistake on a session the sweep has
+already settled is no longer put back. And a size set by hand BEFORE the sweep's first look at
+a newly booked occurrence is overwritten once — the booker already sends the table's number, so
+the sweep's first look normally finds nothing to change, but the window exists.
+
+**Forbids.**
+1. Writing a size onto an occurrence the memory holds at its current court count.
+2. Remembering an occurrence from a write's reply, or while a guardrail is holding it back.
+3. Treating a missing or unreadable memory as "nothing is settled" and rewriting the calendar.
+4. Reading rule 1 as licence to stop deriving sizes at booking time — D-0319 rule 1 stands.
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
