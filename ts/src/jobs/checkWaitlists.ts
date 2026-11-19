@@ -23,7 +23,7 @@ import { NaiveDateTime } from '../datetime'
 import { DiscordRest } from '../discord/rest'
 import { loadPendingWaitlist, savePendingWaitlist, type WaitlistProposal } from '../discord/state'
 import { runDuplicateCleanup } from './duplicateEvents'
-import { runCapacityHeal } from './capacityDrift'
+import { CapacityMemoryError, runCapacityHeal } from './capacityDrift'
 
 interface CourtsCfg {
   [id: string]: { number: number; label?: string }
@@ -242,6 +242,7 @@ export async function runCheckWaitlists(
   // duplicate cleanup does: `/waitlists` returns only occurrences that are FULL, and
   // a session wrongly capped at 4 reads as full when it has room for 10. Healing the
   // cap first means the expansion proposals below are judged against the real ceiling.
+  let memoryError: Error | null = null
   if (!opts.skipCapacity) {
     try {
       // NO `days` here, deliberately. This job's own window is
@@ -256,6 +257,9 @@ export async function runCheckWaitlists(
         log,
       })
     } catch (e) {
+      // A memory that cannot be written fails the run — after the waitlists are done —
+      // so the heartbeat is withheld and the watchdog alarms (D-0337).
+      if (e instanceof CapacityMemoryError) memoryError = e
       // Same rule as the duplicate half: a failed heal must not cost the club its court
       // expansions, which are time-sensitive and the reason this job runs five times a day.
       log(`Capacity heal failed — continuing with waitlists: ${e instanceof Error ? e.message : String(e)}`)
@@ -281,6 +285,7 @@ export async function runCheckWaitlists(
 
   if (opts.dryRun || proposals.length === 0) {
     log(opts.dryRun ? 'Dry run — nothing posted.' : 'No expansions to propose.')
+    if (memoryError) throw memoryError
     return proposals
   }
 
@@ -302,6 +307,7 @@ export async function runCheckWaitlists(
   }
   savePendingWaitlist(opts.pendingPath, pending)
   log(`Saved ${proposals.length} pending proposal(s).`)
+  if (memoryError) throw memoryError
   return proposals
 }
 
