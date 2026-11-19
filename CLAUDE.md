@@ -169,6 +169,17 @@ Three rules it will not break:
   waitlisted members itself when room appears, so that is a send to a member — the
   ✅ expansion path Ron approves by hand, not an unattended job. Lowering one is fine:
   nobody is promoted by a cap coming down.
+- **A size a person set by hand is left alone (D-0337).** Ron, 2026-11-19: *"I keep
+  updating today's mens advanced plus to 4 max and it keeps getting updated back to 5."*
+  The sweep remembers, per occurrence, the court count at which it has seen it carrying the
+  table's number (`state/capacity-seen.json`, beside the pattern-gap memory). Remembered at
+  its current court count but carrying a different number now → verdict `hand_set`: not
+  written, not posted, counted in the log line. A different court count (or never remembered)
+  is judged afresh. The memory is written only from a READ — after any write the sweep re-reads
+  `/events/registrations` and remembers only what now equals the table. No memory (first run,
+  file missing/unreadable) → `--fix` records every occurrence as settled and writes nothing.
+  `below_roster` / `waitlist_holds` are never remembered. A memory that cannot be written fails
+  the run (no heartbeat). The `capacity` dry run neither baselines nor saves.
 - **It governs the club's play sessions only.** Open Play, Structured Play, Level Play,
   matched on the event name (`participant_limits.governs.name_patterns`) rather than a
   list of event ids, because a new level appears under a new Court Reserve event id

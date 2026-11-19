@@ -13,8 +13,14 @@ import {
   eventNamesFromSchedule,
   scanCapacityDrift,
   buildCapacityEmbed,
+  runCapacityHeal,
+  CapacityMemoryError,
+  type CapacityLedger,
+  type CapacityMemory,
   type DriftRow,
 } from '../src/jobs/capacityDrift'
+import type { CourtReserveClient } from '../src/cr/client'
+import type { DiscordRest } from '../src/discord/rest'
 import type { RegistrationOccurrence, ScheduleItem } from '../src/cr/types'
 import type { Policy } from '../src/policy'
 
@@ -215,5 +221,112 @@ describe('Structured Play has its own table (Ron, 2026-11-14: 4 / 8 / 12 / 16)',
     expect(rows[0].verdict).toBe('compliant')
     expect(rows[1].verdict).toBe('fixable')
     expect(rows[1].wanted_max).toBe(8)
+  })
+})
+
+describe('the sweep leaves a size set by hand (D-0337)', () => {
+  const future = '2999-01-01'
+  type Mem = { ledger: CapacityLedger | null; saves: number }
+  const memory = (m: Mem, failSave = false): CapacityMemory => ({
+    load: () => m.ledger,
+    save: (l) => {
+      if (failSave) throw new Error('disk full')
+      m.ledger = l
+      m.saves++
+    },
+  })
+  const schedule = [{ IsEvent: true, EventId: 1, EventName: 'Co-ed Advanced Open Play' }] as unknown as ScheduleItem[]
+  function fakeCr(reads: RegistrationOccurrence[][]) {
+    const calls = { setCourts: [] as unknown[] }
+    let i = 0
+    const cr = {
+      schedule: async () => schedule,
+      registrations: async () => reads[Math.min(i++, reads.length - 1)],
+      setCourts: async (req: unknown) => {
+        calls.setCourts.push(req)
+        return { success: true }
+      },
+    }
+    return { cr: cr as unknown as CourtReserveClient, calls }
+  }
+  const one = (over: Partial<RegistrationOccurrence> = {}) =>
+    occ({ date: future, courts_text: 'Court #1', max_people: 4, res_id: '9', ...over })
+  const run = (cr: CourtReserveClient, mem: CapacityMemory, fix = true) =>
+    runCapacityHeal(cr, null, { fix, policy, memory: mem, log: () => {} })
+
+  it('calls a remembered one-court session carrying 4 hand_set and does not write it', async () => {
+    const m: Mem = { ledger: { '9': { date: future, courts: 1 } }, saves: 0 }
+    const { cr, calls } = fakeCr([[one()]])
+    const res = await run(cr, memory(m))
+    expect(res.rows[0].verdict).toBe('hand_set')
+    expect(calls.setCourts).toHaveLength(0)
+    expect(res.fixed).toHaveLength(0)
+  })
+
+  it('judges it afresh when the court count changed (two courts → one, still 10)', async () => {
+    const m: Mem = { ledger: { '9': { date: future, courts: 2 } }, saves: 0 }
+    const { cr, calls } = fakeCr([[one({ max_people: 10 })], [one({ max_people: 5 })]])
+    const res = await run(cr, memory(m))
+    expect(res.rows[0].verdict).toBe('fixable')
+    expect(calls.setCourts).toHaveLength(1)
+    expect((calls.setCourts[0] as { max_people: number }).max_people).toBe(5)
+  })
+
+  it('with no memory, --fix writes nothing and records every occurrence at its court count', async () => {
+    const m: Mem = { ledger: null, saves: 0 }
+    const { cr, calls } = fakeCr([[one(), one({ res_id: '10', courts_text: 'Court #1, Court #2', max_people: 7 })]])
+    await run(cr, memory(m))
+    expect(calls.setCourts).toHaveLength(0)
+    expect(m.ledger).toEqual({ '9': { date: future, courts: 1 }, '10': { date: future, courts: 2 } })
+  })
+
+  it('a dry run neither baselines nor writes the memory, and reports hand_set rows', async () => {
+    const m: Mem = { ledger: null, saves: 0 }
+    const { cr, calls } = fakeCr([[one()]])
+    const res = await run(cr, memory(m), false)
+    expect(m.saves).toBe(0)
+    expect(calls.setCourts).toHaveLength(0)
+    expect(res.rows[0].verdict).toBe('fixable')
+    const m2: Mem = { ledger: { '9': { date: future, courts: 1 } }, saves: 0 }
+    expect((await run(fakeCr([[one()]]).cr, memory(m2), false)).rows[0].verdict).toBe('hand_set')
+    expect(m2.saves).toBe(0)
+  })
+
+  it('does not remember a write whose follow-up read still shows the old number', async () => {
+    const m: Mem = { ledger: {}, saves: 0 }
+    const { cr } = fakeCr([[one()], [one()]])
+    const res = await run(cr, memory(m))
+    expect(res.fixed).toHaveLength(1)
+    expect(m.ledger).toEqual({})
+  })
+
+  it('remembers a write that landed', async () => {
+    const m: Mem = { ledger: {}, saves: 0 }
+    const { cr } = fakeCr([[one()], [one({ max_people: 5 })]])
+    await run(cr, memory(m))
+    expect(m.ledger).toEqual({ '9': { date: future, courts: 1 } })
+  })
+
+  it('does not remember below_roster or waitlist_holds occurrences', async () => {
+    const m: Mem = { ledger: null, saves: 0 }
+    const { cr } = fakeCr([[
+      one({ res_id: '1', courts_text: 'Court #1', max_people: 6, registered: 6 }),
+      one({ res_id: '2', waitlist: 2 }),
+    ]])
+    await run(cr, memory(m))
+    expect(m.ledger).toEqual({})
+  })
+
+  it('fails the run when the memory cannot be written', async () => {
+    const m: Mem = { ledger: {}, saves: 0 }
+    await expect(run(fakeCr([[one({ max_people: 5 })]]).cr, memory(m, true))).rejects.toThrow(CapacityMemoryError)
+  })
+
+  it('a hand_set occurrence does not post to Discord', async () => {
+    const m: Mem = { ledger: { '9': { date: future, courts: 1 } }, saves: 0 }
+    const posts: unknown[] = []
+    const rest = { postEmbed: async (e: unknown) => void posts.push(e) } as unknown as DiscordRest
+    await runCapacityHeal(fakeCr([[one()]]).cr, rest, { fix: true, policy, memory: memory(m), log: () => {} })
+    expect(posts).toHaveLength(0)
   })
 })

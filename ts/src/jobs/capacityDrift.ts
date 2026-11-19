@@ -45,6 +45,27 @@ import {
   loadParticipantLimits,
   type ParticipantLimits,
 } from '../capacity'
+import { fileLedgerMemory } from './patternGaps'
+import { fixedEventsStateDir } from '../fixedEvents'
+
+/**
+ * The sweep's memory (D-0337): per occurrence, the court count at which it has been seen
+ * carrying the table's number. A different number at that same court count is a person's
+ * choice, not drift. Written only from a calendar READ.
+ */
+export type CapacityLedger = Record<string, { date: string; courts: number }>
+
+export interface CapacityMemory {
+  load(): CapacityLedger | null
+  save(ledger: CapacityLedger): void
+}
+
+export function fileCapacityMemory(dir: string = fixedEventsStateDir(), log: (m: string) => void = () => {}): CapacityMemory {
+  return fileLedgerMemory<CapacityLedger>('capacity-seen.json', dir, log)
+}
+
+/** The memory could not be written. The run must fail loudly, never complete silently (D-0315 rule 4). */
+export class CapacityMemoryError extends Error {}
 
 export type DriftVerdict =
   | 'compliant'
@@ -53,6 +74,8 @@ export type DriftVerdict =
   | 'below_roster'
   | 'waitlist_holds'
   | 'courts_unknown'
+  /** Carrying a number other than the table's at a court count the sweep has already seen it settled at (D-0337). */
+  | 'hand_set'
 
 export interface DriftRow {
   res_id: string
@@ -86,6 +109,7 @@ export function scanCapacityDrift(
   limits: ParticipantLimits,
   occurrences: RegistrationOccurrence[],
   names: Map<number, string>,
+  ledger: CapacityLedger = {},
 ): DriftRow[] {
   const rows: DriftRow[] = []
   for (const occ of occurrences) {
@@ -115,6 +139,7 @@ export function scanCapacityDrift(
     else if (limits.neverLowerBelowRegistered && wanted < occ.registered) row.verdict = 'below_roster'
     else if (limits.neverRaiseWithWaitlist && wanted > occ.max_people && occ.waitlist > 0)
       row.verdict = 'waitlist_holds'
+    else if (ledger[occ.res_id]?.courts === courts) row.verdict = 'hand_set'
     else row.verdict = 'fixable'
     rows.push(row)
   }
@@ -171,6 +196,8 @@ export async function runCapacityHeal(
     log?: (m: string) => void
     /** Post the Discord report even when nothing drifted (default: only when something did). */
     alwaysReport?: boolean
+    /** The sweep's memory (D-0337). Defaults to the file beside the pattern-gap memory. */
+    memory?: CapacityMemory
   } = {},
 ): Promise<CapacityHealResult> {
   const log = opts.log ?? (() => {})
@@ -191,7 +218,13 @@ export async function runCapacityHeal(
   log(`Capacity: ${eventIds.length} event(s) on the next ${days} days; reading their caps…`)
 
   const occurrences = await cr.registrations(eventIds, days)
-  const rows = scanCapacityDrift(limits, occurrences, names)
+  const memory = opts.memory ?? fileCapacityMemory(undefined, log)
+  const prior = memory.load()
+  // No memory (first run after deploy, or the file is missing/unreadable): the job cannot tell
+  // which of today's sizes a person chose, so under --fix it records the calendar as it stands
+  // and writes nothing. A dry run neither baselines nor saves — it only reports.
+  const baseline = Boolean(opts.fix) && prior === null
+  const rows = scanCapacityDrift(limits, occurrences, names, prior ?? {})
   const counts = rows.reduce<Record<string, number>>((acc, r) => {
     acc[r.verdict] = (acc[r.verdict] ?? 0) + 1
     return acc
@@ -204,6 +237,8 @@ export async function runCapacityHeal(
   )
 
   const fixable = rows.filter((r) => r.verdict === 'fixable')
+  const handSet = rows.filter((r) => r.verdict === 'hand_set')
+  if (handSet.length) log(`Capacity: ${handSet.length} hand-set size(s) left as they are`)
   const reported = rows.filter((r) => r.verdict === 'below_roster' || r.verdict === 'waitlist_holds')
 
   if (!opts.fix) {
@@ -211,11 +246,18 @@ export async function runCapacityHeal(
       log(`  would set ${r.date} ${r.time_text} ${r.event_name}: ${r.current_max} → ${r.wanted_max} (${r.courts} court(s))`)
     }
     for (const r of reported) log(`  held back (${r.verdict}) ${r.date} ${r.time_text} ${r.event_name}`)
+    for (const r of handSet) log(`  would leave (hand_set) ${r.date} ${r.time_text} ${r.event_name}: ${r.current_max}`)
     return { rows, fixed: [], failed: [], reported, scannedEvents: eventIds.length }
   }
 
   const fixed: DriftRow[] = []
   const failed: DriftRow[] = []
+  if (baseline) {
+    log('Capacity: no memory of earlier runs — recorded the calendar as it stands and wrote nothing')
+    const settled = settledEntries(rows, (r) => r.verdict !== 'not_governed' && r.verdict !== 'courts_unknown')
+    saveMemory(memory, settled)
+    return { rows, fixed, failed, reported, scannedEvents: eventIds.length }
+  }
   for (const r of fixable) {
     const courtIds = courtIdsFor(policy, r.courts_text)
     // The write is the SAME courts plus the right cap. `/events/courts` is the
@@ -254,6 +296,28 @@ export async function runCapacityHeal(
     }
   }
 
+  // Remember only what a READ shows at the table's number. A write whose reply said success
+  // but did not land is not remembered, so it is retried on the next run.
+  let readBack: DriftRow[] = rows
+  if (fixed.length) {
+    try {
+      readBack = scanCapacityDrift(limits, await cr.registrations(eventIds, days), names, prior ?? {})
+    } catch (e) {
+      log(`Capacity: re-read after writing failed (${e instanceof Error ? e.message : String(e)}) — remembering only what was not written`)
+      const written = new Set(fixed.map((r) => r.res_id))
+      readBack = rows.filter((r) => !written.has(r.res_id))
+    }
+  }
+  const next: CapacityLedger = {}
+  const todayYmd = ymdLocal(new Date())
+  // Entries for occurrences this read did not return are kept while still in the future.
+  for (const [id, e] of Object.entries(prior ?? {})) if (e.date >= todayYmd) next[id] = e
+  for (const r of readBack) delete next[r.res_id]
+  Object.assign(next, settledEntries(readBack, (r) => r.verdict === 'compliant'))
+  // A hand-set size stays remembered at the court count it was judged at.
+  for (const r of readBack) if (r.verdict === 'hand_set' && prior?.[r.res_id]) next[r.res_id] = prior[r.res_id]
+  saveMemory(memory, next)
+
   // Only when something CHANGED. `reported` rows — a cap under its roster, a session
   // with people waiting — persist until the session happens, so including them here
   // posted the same two lines five times a day for as long as they stood. They still
@@ -262,6 +326,28 @@ export async function runCapacityHeal(
     await rest.postEmbed(buildCapacityEmbed({ rows, fixed, failed, reported, scannedEvents: eventIds.length }, limits, days))
   }
   return { rows, fixed, failed, reported, scannedEvents: eventIds.length }
+}
+
+function ymdLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Rows to remember: each at its current court count. `below_roster` and `waitlist_holds` never are. */
+function settledEntries(rows: DriftRow[], pick: (r: DriftRow) => boolean): CapacityLedger {
+  const out: CapacityLedger = {}
+  for (const r of rows) {
+    if (r.verdict === 'below_roster' || r.verdict === 'waitlist_holds') continue
+    if (pick(r)) out[r.res_id] = { date: r.date, courts: r.courts }
+  }
+  return out
+}
+
+function saveMemory(memory: CapacityMemory, ledger: CapacityLedger): void {
+  try {
+    memory.save(ledger)
+  } catch (e) {
+    throw new CapacityMemoryError(`capacity memory could not be written: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 /** The Discord report. Plain language: what a session now holds, not a field name. */

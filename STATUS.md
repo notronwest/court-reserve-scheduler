@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-19 — the session-size sweep leaves a size set by hand ([#133](https://github.com/notronwest/CourtReserve-Scheduler/issues/133), D-0337)
+
+`ts/src/jobs/capacityDrift.ts` now remembers, per occurrence, the court count at which it saw the
+session carrying the table's number (`state/capacity-seen.json`; file handling shared with the
+pattern-gap memory via `fileLedgerMemory`). Same court count + different number → `hand_set`: not
+written, not posted. First run with no memory records the calendar and writes nothing. Memory is
+written only from a re-read; an unwritable memory fails the run (after the waitlist scan). Tests in
+`ts/tests/capacity.test.ts`. **Not live until `./setup.sh` runs on the club Mac mini.**
+
+---
 ## 2026-11-16 — no noon starts Mon–Thu, and no series mixes the Morning Crew window ([#129](https://github.com/notronwest/CourtReserve-Scheduler/issues/129))
 
 Two hard rules agreed with Ron, in `policy.json` `hard_constraints` (7 and 8), mirrored in

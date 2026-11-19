@@ -253,19 +253,26 @@ export function recordSeen(
   return out
 }
 
-/** The memory as a file beside the standing-pattern cache. Written whole, then renamed. */
-export function fileSeenMemory(dir: string = fixedEventsStateDir(), log: (m: string) => void = () => {}): SeenMemory {
-  const path = resolve(dir, 'pattern-gaps-seen.json')
+/**
+ * A memory as a file beside the standing-pattern cache. Written whole, then renamed.
+ * Shared by every sweep that remembers what it has seen (D-0315, D-0337).
+ */
+export function fileLedgerMemory<L extends object>(
+  filename: string,
+  dir: string = fixedEventsStateDir(),
+  log: (m: string) => void = () => {},
+): { load(): L | null; save(ledger: L): void } {
+  const path = resolve(dir, filename)
   return {
     load() {
       if (!existsSync(path)) return null
       try {
-        const data = JSON.parse(readFileSync(path, 'utf8')) as { entries?: SeenLedger }
+        const data = JSON.parse(readFileSync(path, 'utf8')) as { entries?: L }
         if (data && typeof data.entries === 'object' && data.entries !== null) return data.entries
       } catch (e) {
         log(`memory file unreadable (${e instanceof Error ? e.message : String(e)})`)
       }
-      // Unreadable is treated exactly like absent: a fresh baseline, which books nothing.
+      // Unreadable is treated exactly like absent: a fresh baseline, which writes nothing.
       return null
     },
     save(ledger) {
@@ -275,6 +282,11 @@ export function fileSeenMemory(dir: string = fixedEventsStateDir(), log: (m: str
       renameSync(tmp, path)
     },
   }
+}
+
+/** The pattern-gap memory. */
+export function fileSeenMemory(dir: string = fixedEventsStateDir(), log: (m: string) => void = () => {}): SeenMemory {
+  return fileLedgerMemory<SeenLedger>('pattern-gaps-seen.json', dir, log)
 }
 
 /** "17:00" → "5:00 PM", the spelling courtreserve-api's forms take. */
