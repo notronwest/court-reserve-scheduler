@@ -26,6 +26,8 @@ async function bookRequests(slot: FixedEvent, today: string, tz: string) {
     const cr = {
       fixedEvents: async () => [slot],
       schedule: async () => [],
+      standingLedger: async () => ({ items: [], ledger_started_on: '2020-01-01' }),
+      recordStandingBooking: async () => ({}),
       book: async (req: { date: string; start_time: string; end_time: string }) => {
         booked.push(req)
         return { success: true }

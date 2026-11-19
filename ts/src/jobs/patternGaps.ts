@@ -75,6 +75,13 @@ import { COURTS } from '../recommender'
 import { freeCourts, isCancelled, occupiedSlots, parseCourtNums, type OccupiedSlot } from '../availability'
 import { isOnWeek, type FixedEvent, type Policy } from '../policy'
 import { capForCourts, loadParticipantLimits, type ParticipantLimits } from '../capacity'
+import {
+  beforeLedger,
+  readStandingLedger,
+  recordStandingBooking,
+  wasBooked,
+  type StandingLedgerView,
+} from '../standingLedger'
 
 export type GapStatus =
   | 'ok'
@@ -97,6 +104,18 @@ export type GapStatus =
    * this the sweep reads the old hour as empty and books the session a SECOND time.
    */
   | 'moved'
+  /**
+   * The booking ledger shows this session was booked for this date (or the ledger cannot vouch
+   * for the date) and it is not on the calendar now: a person took it off. Never re-booked,
+   * never widened, never alarmed; reported once ("you took this off").
+   */
+  | 'removed'
+  /** Never booked, and every court at that hour is held by another event. Reported once. */
+  | 'made_way'
+  /** Today or tomorrow: reported, never booked or widened. */
+  | 'too_soon'
+  /** The ledger could not be read, so an absent session cannot be told from a deleted one. */
+  | 'ledger_down'
 
 export interface PatternGap {
   date: string // M/D/YYYY
@@ -115,6 +134,8 @@ export interface PatternGap {
   /** The cap written, when fewer courts than the pattern wanted forced one. */
   max_people?: number
   error?: string
+  /** `removed` only: true when no ledger row exists and the date predates the ledger. */
+  before_ledger?: boolean
 }
 
 export interface PatternGapsResult {
@@ -328,8 +349,15 @@ export function scanPatternGaps(
   knownCourts: ReadonlySet<number> = new Set(Object.keys(COURTS).map(Number)),
   /** What earlier runs saw. Omitted, the scan has no memory and every hole is a gap. */
   ledger: SeenLedger = {},
+  /**
+   * The booking ledger and today's date (#118). Omitted, the scan applies none of the
+   * removed / too-soon rules — only a unit test of the older rules runs without it.
+   */
+  standing?: { view: StandingLedgerView | null; today: NaiveDateTime },
 ): PatternGap[] {
   const out: PatternGap[] = []
+  // The first date a session may be booked or widened: never today or tomorrow (#118 rule 4).
+  const firstBookable = standing ? standing.today.addHours(48).formatYmd() : ''
   for (const date of dates) {
     const ymd = date.formatYmd()
     const dow = date.weekdayName()
@@ -415,6 +443,20 @@ export function scanPatternGaps(
       const has = heldCourts.size
       // One occurrence holding its courts is the healthy case and stays silent.
       if (hits.length === 1 && has >= wants) continue
+      // A person's call, read off the booking ledger (#118). Checked BEFORE the file memory
+      // below so the removal is reported once instead of vanishing silently. Absent proves
+      // nothing on a date the ledger cannot vouch for, so that reads as removed too.
+      let ledgerStatus: GapStatus | undefined
+      let beforeLedgerDate = false
+      if (standing && hits.length === 0) {
+        if (!standing.view) ledgerStatus = 'ledger_down'
+        else if (wasBooked(standing.view, p, ymd)) ledgerStatus = 'removed'
+        else if (beforeLedger(standing.view, ymd)) {
+          ledgerStatus = 'removed'
+          beforeLedgerDate = true
+        }
+      }
+      if (standing && !ledgerStatus && hits.length <= 1 && ymd < firstBookable) ledgerStatus = 'too_soon'
       // Removed or narrowed by hand (D-0315). Ron, 2026-11-12: "they aren't missing -- I've
       // either deleted them or altered them (moved them to 1 court instead of 2)". A delete
       // leaves no cancellation behind and a narrowing looks exactly like a short booking, so
@@ -422,7 +464,7 @@ export function scanPatternGaps(
       // run SAW this session here (or saw it on all its courts). A duplicate is not covered:
       // two copies at one hour is still reported.
       const known = ledger[ledgerKey(p, date)]
-      if (hits.length === 0 && known?.seen) continue
+      if (!ledgerStatus && hits.length === 0 && known?.seen) continue
       if (hits.length === 1 && has > 0 && known?.whole) continue
       out.push({
         date: date.formatDate(),
@@ -436,7 +478,8 @@ export function scanPatternGaps(
         instances: hits.length,
         // Resolved by the acting half below; this is the shape of the problem, not its
         // fate — except a duplicate, which is decided here because nothing may act on it.
-        status: hits.length > 1 ? 'duplicate' : p.event_id ? 'no_court' : 'no_event',
+        status: ledgerStatus ?? (hits.length > 1 ? 'duplicate' : p.event_id ? 'no_court' : 'no_event'),
+        ...(beforeLedgerDate ? { before_ledger: true } : {}),
       })
     }
   }
@@ -452,6 +495,19 @@ export interface PatternGapsDeps {
    * without it the run has no memory and repairs every hole, which is only right in a test.
    */
   memory?: SeenMemory
+  /**
+   * Which `removed` / `made_way` lines have already been shown, so each is reported once and
+   * then silent (#118). A report-only run reads it and never writes it.
+   */
+  reported?: ReportedMemory
+}
+
+/** Keyed `<ledgerKey>|<status>`, so the date prefix lets a stale entry be dropped. */
+export type ReportedLedger = Record<string, true>
+export type ReportedMemory = { load(): ReportedLedger | null; save(l: ReportedLedger): void }
+
+export function fileReportedMemory(dir: string = fixedEventsStateDir(), log: (m: string) => void = () => {}): ReportedMemory {
+  return fileLedgerMemory<ReportedLedger>('pattern-gaps-reported.json', dir, log)
 }
 
 export interface PatternGapsOptions {
@@ -503,7 +559,10 @@ export async function runPatternGaps(
         'dates that come into range from tomorrow are repaired as usual',
     )
   }
-  const gaps = scanPatternGaps(resolved.events, items, dates, undefined, ledger)
+  // The booking ledger (#118): what the robot itself put on the calendar. Unreadable is null —
+  // the scan then books nothing absent, because absent cannot be told from deleted.
+  const standingView = await readStandingLedger(cr, dates[0].formatYmd(), seenDates[seenDates.length - 1].formatYmd(), log)
+  const gaps = scanPatternGaps(resolved.events, items, dates, undefined, ledger, { view: standingView, today: dates[0] })
   if (deps.memory && patternsLive && !baseline) ledger = recordSeen(ledger, resolved.events, items, seenDates)
 
   const courtOrder = Object.keys(COURTS).map(Number)
@@ -522,6 +581,21 @@ export async function runPatternGaps(
       (p) => p.name === gap.name && isOnWeek(p, date) && p.start_time === gap.start_time,
     )!
     const free = freeCourts(occupiedOn(date), courtOrder, start, end)
+
+    // Decided by the scan: reported, never booked or widened (#118).
+    if (
+      gap.status === 'removed' ||
+      gap.status === 'too_soon' ||
+      gap.status === 'ledger_down' ||
+      gap.status === 'made_way'
+    ) {
+      continue
+    }
+    // Never booked and every court at that hour is held by another event: Ron made way for it.
+    if (gap.has_courts === 0 && gap.status === 'no_court' && gap.event_id && free.length === 0) {
+      gap.status = 'made_way'
+      continue
+    }
 
     if (!gap.event_id) continue // no_event — nothing to book against, and that is the alarm
     // A session booked twice at one hour is not a court shortage, and widening one of
@@ -567,6 +641,14 @@ export async function runPatternGaps(
           continue
         }
         gap.status = 'booked'
+        await recordStandingBooking(
+          cr,
+          pattern,
+          date.formatYmd(),
+          (res as { occurrence_id?: number | string }).occurrence_id,
+          'gap_sweep',
+          log,
+        )
       } else {
         // Already there on too few courts: widen the occurrence, never book a second one.
         const existing = items.find(
@@ -627,8 +709,23 @@ export async function runPatternGaps(
     deps.memory.save(ledger)
   }
 
+  // `removed` and `made_way` are shown on the first sweep that sees them, then silent (#118).
+  const reported = deps.reported?.load() ?? {}
+  const firstDay = dates[0].formatYmd()
+  const nextReported: ReportedLedger = {}
+  for (const [k, v] of Object.entries(reported)) if (k.slice(0, 10) >= firstDay) nextReported[k] = v
+  const shown = gaps.filter((g) => {
+    if (g.status !== 'removed' && g.status !== 'made_way') return true
+    const date = NaiveDateTime.parseDate(g.date)
+    const key = `${date.formatYmd()}|${g.start_time}|${g.event_id ?? foldName(g.name)}|${g.status}`
+    if (nextReported[key]) return false
+    nextReported[key] = true
+    return true
+  })
+  if (deps.reported && patternsLive && opts.fix) deps.reported.save(nextReported)
+
   const result: PatternGapsResult = {
-    gaps,
+    gaps: shown,
     baseline,
     patternsLive,
     patternsSource: resolved.source,
@@ -647,6 +744,7 @@ export function needsAttention(result: PatternGapsResult): boolean {
       g.status === 'no_event' ||
       g.status === 'no_court' ||
       g.status === 'failed' ||
-      g.status === 'duplicate',
+      g.status === 'duplicate' ||
+      g.status === 'ledger_down',
   )
 }

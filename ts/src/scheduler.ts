@@ -10,7 +10,10 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { CourtReserveClient } from './cr/client'
-import type { Policy } from './policy'
+import { isOnWeek, type Policy } from './policy'
+import { NaiveDateTime } from './datetime'
+import { clockToAmPm } from './jobs/patternGaps'
+import { recordStandingBooking } from './standingLedger'
 import { recommendLlm, recommend, toDict, type Recommendation, type Stats } from './recommender'
 import {
   sendRecommendations,
@@ -109,6 +112,8 @@ export async function runScheduler(
     dryRun?: boolean
     llm?: boolean
     autoBook?: boolean
+    /** Which booking path this is, for the standing-bookings ledger (#118). */
+    bookedBy?: 'daily' | 'catch_up'
     /** Retry delays for the live schedule fetch (default 20 s, 60 s); tests pass []. */
     fetchRetryDelaysMs?: number[]
     sleep?: (ms: number) => Promise<void>
@@ -236,6 +241,25 @@ export async function runScheduler(
     const results = await bookAll(deps.cr, recommendations.map(toDict), log)
     const booked = results.filter((r) => r.success).length
     const failed = results.length - booked
+
+    // Remember every STANDING session this run put on the calendar, so the 8:45 sweep can tell a
+    // session a person deleted from one nobody ever booked (#118). Only a live pattern books a
+    // standing slot (patternEvents is empty otherwise), so only a live pattern is recorded.
+    const target = NaiveDateTime.parseDate(targetDate)
+    for (const r of results) {
+      if (!r.success) continue
+      const rec = r.recommendation
+      const pattern = patternEvents.find(
+        (p) =>
+          p.event_id === rec.event_id &&
+          p.day_of_week === target.weekdayName() &&
+          isOnWeek(p, target) &&
+          clockToAmPm(p.start_time) === rec.start_time,
+      )
+      if (pattern) {
+        await recordStandingBooking(deps.cr, pattern, target.formatYmd(), r.occurrence_id, opts.bookedBy ?? 'daily', log)
+      }
+    }
 
     const logPath = resolve(
       dirname(deps.pendingPath),

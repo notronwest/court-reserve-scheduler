@@ -11,6 +11,8 @@ import type {
   RegistrationOccurrence,
   CheckinResult,
   RosterEntry,
+  StandingLedgerPayload,
+  RecordStandingBookingRequest,
 } from './types'
 import type { FixedEvent } from '../policy'
 
@@ -57,6 +59,26 @@ export class CourtReserveClient {
       )
     }
     return items
+  }
+
+  /** What the booking robot recorded for the standing pattern in `[from, to]` (YYYY-MM-DD),
+   *  plus `ledger_started_on` — the sweep's fail-closed cutoff (courtreserve-api #714). A payload
+   *  without an `items` array is a FAILED read and throws: an unreadable ledger must never look
+   *  like an empty one, because an empty one means "nothing was ever booked". */
+  async standingLedger(from: string, to: string): Promise<StandingLedgerPayload> {
+    const q = new URLSearchParams({ from, to })
+    const data = await this.request<StandingLedgerPayload>('GET', `/standing-bookings/ledger?${q}`)
+    if (!Array.isArray(data?.items)) {
+      throw new Error(
+        `courtreserve-api GET /standing-bookings/ledger -> no \`items\` array: ${JSON.stringify(data ?? null).slice(0, 200)}`,
+      )
+    }
+    return data
+  }
+
+  /** Record one booking the robot made for a standing pattern. Idempotent on the service side. */
+  recordStandingBooking(req: RecordStandingBookingRequest): Promise<unknown> {
+    return this.request('POST', '/standing-bookings/ledger', req)
   }
 
   /** Full occurrences with a waitlist in the next `days` days, for the given events. */

@@ -183,3 +183,30 @@ export interface CrActionResult {
   occurrence_id?: number
   error?: string
 }
+
+/** One booking the robot recorded for a standing pattern (courtreserve-api #714). */
+export interface StandingBookingRow {
+  pattern_key: string
+  occurrence_date: string // YYYY-MM-DD
+  start_time: string // "HH:MM:SS"
+  cr_event_id: string | null
+  cr_occurrence_id: string | null
+  booked_by: 'daily' | 'catch_up' | 'gap_sweep'
+  booked_at?: string
+}
+
+/** `GET /standing-bookings/ledger` — the window's rows plus when the ledger began. */
+export interface StandingLedgerPayload {
+  items: StandingBookingRow[]
+  /** YYYY-MM-DD of the earliest recorded booking; null while the ledger is empty. */
+  ledger_started_on: string | null
+}
+
+export interface RecordStandingBookingRequest {
+  pattern_key: string
+  occurrence_date: string // YYYY-MM-DD
+  start_time: string // "HH:MM"
+  cr_event_id?: string | null
+  cr_occurrence_id?: string | null
+  booked_by: 'daily' | 'catch_up' | 'gap_sweep'
+}
