@@ -357,13 +357,15 @@ describe('a session a person renamed, removed or narrowed is left alone (D-0315)
       const cr = {
         fixedEvents: async () => [intermediate],
         schedule: async () => schedules[Math.min(read++, schedules.length - 1)],
+        standingLedger: async () => ({ items: [], ledger_started_on: '2020-01-01' }),
+        recordStandingBooking: async () => ({}),
         book: async (r: unknown) => { booked.push(r); return { success: true } },
         setCourts: async (r: unknown) => { widened.push(r); return { success: true } },
       } as never
       const result = await runPatternGaps(
         cr,
         { rest: { postEmbed: async () => 'm1' } as never, policy: { fixed_events: { events: [] } } as never, memory },
-        { fix: true, horizonDays: 1, today: MON },
+        { fix: true, horizonDays: 4, today: MON.addHours(-72) },
       )
       return { booked, widened, result }
     }
@@ -428,6 +430,8 @@ describe('a session a person renamed, removed or narrowed is left alone (D-0315)
       const mk = (items: ScheduleItem[], booked: unknown[]) => ({
         fixedEvents: async () => [tue],
         schedule: async () => items,
+        standingLedger: async () => ({ items: [], ledger_started_on: '2020-01-01' }),
+        recordStandingBooking: async () => ({}),
         book: async (r: unknown) => { booked.push(r); return { success: true } },
       }) as never
       const deps = { rest: { postEmbed: async () => 'm1' } as never, policy: { fixed_events: { events: [] } } as never, memory }

@@ -5,6 +5,21 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-19 — the gap sweep stops booking back sessions you deleted ([#118](https://github.com/notronwest/CourtReserve-Scheduler/issues/118))
+
+The daily run, catch-up and the 8:45 sweep record every standing session they book in
+`courtreserve.standing_bookings_ledger` (courtreserve-api #717, applied on the mini); the sweep reads it
+back (`ts/src/standingLedger.ts`, `scanPatternGaps`). Booked-then-gone → `removed` (never re-booked,
+shown once); never booked + every court held → `made_way` (shown once; "once" lives in
+`state/pattern-gaps-reported.json`, written only by `--fix` runs); today/tomorrow → `too_soon` (never
+booked or widened); ledger unreadable → `ledger_down` (nothing absent is booked, run exits non-zero).
+**Cutoff is `ledger_started_on` + 14 days**, not `ledger_started_on` itself: the daily run books 14 days
+ahead, so a date inside that lead may have been booked before the ledger existed. Until ~2 weeks of
+bookings accrue, absent sessions read as removed (fail-closed, as ruled). Report ends with the
+five-count line. Catch-up re-running Pass 0 on an empty day is NOT ledger-aware yet. **Not live until
+`./setup.sh` runs on the club Mac mini.**
+
+---
 ## 2026-11-19 — the session-size sweep leaves a size set by hand ([#133](https://github.com/notronwest/CourtReserve-Scheduler/issues/133), D-0337)
 
 `ts/src/jobs/capacityDrift.ts` now remembers, per occurrence, the court count at which it saw the

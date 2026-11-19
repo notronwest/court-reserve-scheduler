@@ -476,6 +476,7 @@ export interface PatternGapLine {
   courts?: number[]
   max_people?: number
   error?: string
+  before_ledger?: boolean
 }
 
 const GAP_WHY: Record<string, string> = {
@@ -483,6 +484,17 @@ const GAP_WHY: Record<string, string> = {
   no_court: 'every court is already taken at that hour',
   failed: 'the booking was attempted and did not land',
   duplicate: 'booked TWICE at this hour — one copy needs cancelling, which is a human call',
+  ledger_down:
+    'the booking record could not be read, so a deleted session cannot be told from a never-booked one — nothing was booked',
+}
+
+/** The sweep's closing tally (#118): booked / removed by you / made way / too soon / could not book. */
+export function gapCounts(gaps: readonly { status: string }[]): string {
+  const n = (...st: string[]): number => gaps.filter((g) => st.includes(g.status)).length
+  return (
+    `${n('booked', 'widened')} booked · ${n('removed')} removed by you · ${n('made_way')} made way · ` +
+    `${n('too_soon')} too soon · ${n('no_event', 'no_court', 'failed', 'ledger_down')} could not book`
+  )
 }
 
 export function buildPatternGapsEmbed(
@@ -490,7 +502,14 @@ export function buildPatternGapsEmbed(
   opts: { daysScanned: number; patternsLive: boolean; patternsAlert?: string },
 ): unknown {
   const fixed = gaps.filter((g) => g.status === 'booked' || g.status === 'widened')
-  const open = gaps.filter((g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed')
+  const open = gaps.filter(
+    (g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed' || g.status === 'ledger_down',
+  )
+  const removed = gaps.filter((g) => g.status === 'removed')
+  const madeWay = gaps.filter((g) => g.status === 'made_way')
+  const tooSoon = gaps.filter((g) => g.status === 'too_soon')
+  const line = (g: PatternGapLine, tail: string): string =>
+    `• **${g.day_of_week.slice(0, 3)} ${g.date} ${g.start_time}** ${g.name} — ${tail}`
   // A duplicate is the opposite of missing, so it gets its own line rather than being
   // counted into "still missing" — a title saying a session is missing when it is in
   // fact there twice sends whoever reads it looking for the wrong thing.
@@ -537,6 +556,21 @@ export function buildPatternGapsEmbed(
     }
     if (fixed.length > 15) lines.push(`• …and ${fixed.length - 15} more`)
   }
+
+  const notes: Array<[PatternGapLine[], string, (g: PatternGapLine) => string]> = [
+    [removed, 'You took these off — left alone', (g) => (g.before_ledger ? 'gone, and older than the booking record' : 'you took this off')],
+    [madeWay, 'Another event holds every court — left alone', () => 'every court is taken by another event; reported once'],
+    [tooSoon, 'Too close to book (today or tomorrow)', () => 'reported, not booked'],
+  ]
+  for (const [list, head, tail] of notes) {
+    if (!list.length) continue
+    if (lines.length) lines.push('')
+    lines.push(`**${head} (${list.length}):**`)
+    for (const g of list.slice(0, 10)) lines.push(line(g, tail(g)))
+    if (list.length > 10) lines.push(`• …and ${list.length - 10} more`)
+  }
+  if (lines.length) lines.push('')
+  lines.push(gapCounts(gaps))
 
   const title = dupes.length
     ? `📅 ${dupes.length} standing session${dupes.length === 1 ? '' : 's'} booked twice at one hour` +

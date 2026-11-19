@@ -6,7 +6,8 @@ import { loadPolicy } from './policy'
 import { recommend, recommendLlm, toDict } from './recommender'
 import { runScheduler } from './scheduler'
 import { runCatchUp } from './jobs/catchUp'
-import { fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
+import { fileReportedMemory, fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
+import { gapCounts } from './discord/notify'
 import { runCapacityHeal } from './jobs/capacityDrift'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
@@ -162,7 +163,7 @@ async function main(): Promise<void> {
         makeCr(),
         // The memory of what earlier runs saw — a session a person removed or narrowed is
         // never put back (daemon D-0315). Always passed here; only a test runs without it.
-        { rest, policy: loadPolicy(), log, memory: fileSeenMemory(undefined, log) },
+        { rest, policy: loadPolicy(), log, memory: fileSeenMemory(undefined, log), reported: fileReportedMemory(undefined, log) },
         { fix: flags.has('--fix') },
       )
       const filled = result.gaps.filter((g) => g.status === 'booked' || g.status === 'widened').length
@@ -170,7 +171,7 @@ async function main(): Promise<void> {
         (g) => g.status === 'no_event' || g.status === 'no_court' || g.status === 'failed',
       ).length
       console.log(
-        `Done: ${result.daysScanned} days, ${result.gaps.length} gap(s) — ${filled} filled, ${open} still open` +
+        `Done: ${result.daysScanned} days, ${result.gaps.length} gap(s) — ${filled} filled, ${open} still open (${gapCounts(result.gaps)})` +
           (result.patternsLive ? '' : `  [patterns from ${result.patternsSource}, nothing booked]`) +
           (result.baseline ? '  [first run with memory: calendar recorded as it stands, nothing booked]' : ''),
       )

@@ -122,6 +122,15 @@ Four rules that exist because of real incidents:
   unpinned court. If every pinned court is taken the slot is skipped as `no_court`,
   logged, and recorded in `logs/booking_log_<date>.json` under `fixed_events.skipped`.
 
+## What a real "missing" standing session is (#118)
+
+The 8:45 sweep only books a session **nothing ever put on the calendar**, ≥2 days out. The
+booking paths record what they book in `courtreserve.standing_bookings_ledger` (via
+`courtreserve-api /standing-bookings/ledger`; `ts/src/standingLedger.ts`). Booked-then-gone =
+`removed`; never booked with every court held = `made_way`; today/tomorrow = `too_soon`; ledger
+unreadable = `ledger_down` (books nothing absent). Dates inside `ledger_started_on` + 14 days read
+absent as `removed`. `removed`/`made_way` are shown once (`state/pattern-gaps-reported.json`).
+
 ## How many people fit — the court→capacity table
 
 **One court holds 5, two hold 10, three hold 14, four hold 18. Every session has a

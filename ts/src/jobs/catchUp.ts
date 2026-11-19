@@ -235,7 +235,7 @@ export async function runCatchUp(
     for (const d of toBook) {
       log(`Booking ${d.date} (${d.status})…`)
       try {
-        const r = await runScheduler(d.date, { ...schedulerDeps, cr }, { llm: true, autoBook: true })
+        const r = await runScheduler(d.date, { ...schedulerDeps, cr }, { llm: true, autoBook: true, bookedBy: 'catch_up' })
         booked.push({ date: d.date, status: d.status, booked: r.booked ?? 0, failed: r.failed ?? 0 })
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e)
