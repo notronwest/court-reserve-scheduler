@@ -5,6 +5,16 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-22 — Contract Time 48h/24h court checks + owner email ([#137](https://github.com/notronwest/CourtReserve-Scheduler/issues/137))
+
+New hourly job (`ts/src/jobs/contractTime.ts`, `cli.ts contract-time`, `com.whitemountain.contract-time`).
+Rules and part-filled-court answer are in CLAUDE.md "Contract Time checks". Built against courtreserve-api
+#922's two routes. **Ships dry**: acts only with `--live` AND `state/contract-time-approved.json`. Open
+before live: courtreserve-api migration 0096 + restart on the mini; the words card for Ron; the
+`scheduler-contract-time` heartbeat job registered in daemon; the watched dry run on the mini (also the
+first check of the owner-field markup). **Not live until `./setup.sh` runs on the club Mac mini.**
+
+---
 ## 2026-11-19 — the gap sweep stops booking back sessions you deleted ([#118](https://github.com/notronwest/CourtReserve-Scheduler/issues/118))
 
 The daily run, catch-up and the 8:45 sweep record every standing session they book in

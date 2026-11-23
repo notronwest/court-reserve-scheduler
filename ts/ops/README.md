@@ -11,6 +11,7 @@ through the `courtreserve-api` HTTP service — nothing here drives a browser.
 | `com.whitemountain.scheduler` | `run-scheduler.sh` → `cli.ts schedule <14d-out>` | daily 8:00 AM |
 | `com.whitemountain.catch-up` | `run-catch-up.sh` → `cli.ts catch-up --book` | daily 8:30 AM |
 | `com.whitemountain.pattern-gaps` | `run-pattern-gaps.sh` → `cli.ts pattern-gaps --fix` | daily 8:45 AM |
+| `com.whitemountain.contract-time` | `run-contract-time.sh` → `cli.ts contract-time` (dry until `--live` + approval file) | hourly |
 | `com.whitemountain.fetch-history` | `run-fetch-history.sh` → `jobs/fetchHistory.ts` | Mondays 7:00 AM |
 | `com.whitemountain.check-waitlists` | `run-check-waitlists.sh` → `jobs/checkWaitlists.ts` | 9/11/13/15/17 daily |
 | `com.whitemountain.checkin` | `run-checkin.sh` → `jobs/checkinPast.ts --execute --days 8` | Mondays 6:00 AM |
