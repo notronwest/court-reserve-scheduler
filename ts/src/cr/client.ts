@@ -13,6 +13,9 @@ import type {
   RosterEntry,
   StandingLedgerPayload,
   RecordStandingBookingRequest,
+  ContractOwner,
+  ContractOwnerNoticeRequest,
+  ContractOwnerNoticeResult,
 } from './types'
 import type { FixedEvent } from '../policy'
 
@@ -168,6 +171,24 @@ export class CourtReserveClient {
       )
     }
     return items
+  }
+
+  /**
+   * Who owns a Contract Time event: the "Contract Time Owner" field read off its edit page and
+   * resolved to ONE member (courtreserve-api #920). Read-only; the service keeps it off its MCP
+   * surface because it returns an email. Anything but `status: 'ok'` means no recipient.
+   */
+  async contractOwner(eventId: number): Promise<ContractOwner> {
+    const data = await this.request<ContractOwner>('GET', `/events/${eventId}/contract-owner`)
+    if (!data || typeof data !== 'object') {
+      throw new Error(`courtreserve-api GET /events/${eventId}/contract-owner -> empty payload`)
+    }
+    return data
+  }
+
+  /** Email the Contract Time owner. Idempotent per (event, date, checkpoint) on the service side. */
+  sendContractOwnerNotice(eventId: number, req: ContractOwnerNoticeRequest): Promise<ContractOwnerNoticeResult> {
+    return this.request<ContractOwnerNoticeResult>('POST', `/events/${eventId}/contract-owner/notice`, req)
   }
 
   /** Move one member between two occurrences of one event. See MoveRegistrantRequest. */

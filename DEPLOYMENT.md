@@ -1,7 +1,7 @@
 # Deployment — court-reserve-scheduler
 
 No cloud host and no web frontend. This is a **node/tsx** system installed on
-**one always-on Mac** as seven launchd agents: a daily auto-booker, a daily
+**one always-on Mac** as eight launchd agents: a daily auto-booker, a daily
 catch-up re-booker, a daily standing-session gap filler, a daily waitlist
 checker, a weekly history fetch, a weekly past-event check-in, and a persistent
 Discord listener. "Deploying" is `./setup.sh` on that machine.
@@ -56,6 +56,16 @@ targets:
     config_scope: same ts/.env; reads the standing patterns through courtreserve-api GET /fixed-events (live only — a cached or seeded list books nothing); keeps its memory of what earlier runs saw in state/pattern-gaps-seen.json (daemon D-0315) — a session seen once and later deleted or narrowed by hand is never put back. Deleting that file is safe and deliberate-only: the next run records the calendar as it stands and books nothing
     verify: ~/Library/Logs/court_reserve/launchd_pattern_gaps.log — one line per gap with what was done; "Done: 14 days, N gap(s) — X filled, Y still open" (the first run with no memory adds "[first run with memory: calendar recorded as it stands, nothing booked]")
     rollback: launchctl unload the plist
+  - name: contract-time
+    kind: mac-mini-launchd
+    trigger: launchd com.whitemountain.contract-time — hourly (StartInterval 3600; installed/reloaded by ./setup.sh)
+    source: ts/ops/run-contract-time.sh → ts/src/cli.ts contract-time
+    env: PROD
+    url: n/a — for every "Contract Time" occurrence in the next 72h: at 48h emails the owner if a court is not full; at 24h gives back courts that would hold nobody (a part-filled court is kept and the owner told it is under 4); three releases in a row alerts Ron (nothing else); heartbeats daemon job scheduler-contract-time on exit 0 (the heartbeat job must be registered in daemon)
+    host: same machine
+    config_scope: same ts/.env; calls courtreserve-api GET /events/{id}/contract-owner and POST /events/{id}/contract-owner/notice (courtreserve-api #922 — needs its migration 0096 applied and the service restarted FIRST); ledger in state/contract-time-ledger.json. DRY by default: it emails and releases only with --live in run-contract-time.sh AND state/contract-time-approved.json present (Ron's press on the words card). Shipped dry
+    verify: ~/Library/Logs/court_reserve/launchd_contract_time.log — one line per occurrence with owner, signed up, courts and what it did or would do; "Done: N occurrence(s), 0 failure(s) [dry run]"
+    rollback: launchctl unload the plist (courts already given back are not undone by it)
   - name: check-waitlists
     kind: mac-mini-launchd
     trigger: launchd com.whitemountain.check-waitlists — 9:00, 11:00, 13:00, 15:00, 17:00 daily
@@ -116,6 +126,7 @@ targets:
 | `scheduler` | launchd | daily 8:00 AM |
 | `catch-up` | launchd | daily 8:30 AM — re-books what 8:00 missed |
 | `pattern-gaps` | launchd | daily 8:45 AM — is every STANDING session on the calendar? books what it can, alarms on the rest |
+| `contract-time` | launchd | hourly — Contract Time 48h/24h court checks + owner email (dry until approved) |
 | `check-waitlists` | launchd | 9:00 · 11:00 · 13:00 · 15:00 · 17:00 daily |
 | `fetch-history` | launchd | Mondays 7:00 AM |
 | `checkin` | launchd | Mondays 6:00 AM |

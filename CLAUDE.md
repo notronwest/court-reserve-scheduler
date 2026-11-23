@@ -25,6 +25,7 @@ path (`ts/ops/rollback.sh`), kept working but not what runs.
 | `com.whitemountain.catch-up` | Daily 8:30 AM | Re-books any date in today..today+14 the 8:00 run left empty or never finished; posts to Discord only when it found something |
 | `com.whitemountain.pattern-gaps` | Daily 8:45 AM | Asks per SESSION whether every standing pattern has its occurrence in the next 14 days; books what it can from a **live** read, alarms on the rest |
 | `com.whitemountain.listener` | Always-on | Polls Discord every 3s — handles `!book`/`!move`/`!schedule`/`!help` and waitlist expansions |
+| `com.whitemountain.contract-time` | Hourly | **Contract Time 48h/24h court checks** (see below): emails the owner when a court is not full 48h out, gives back empty courts 24h out. **Dry until Ron presses the words card** |
 | `com.whitemountain.fetch-history` | Mondays 7:00 AM | Fetches 3 months of attendance history |
 | `com.whitemountain.check-waitlists` | 9/11/13/15/17 daily | **Heals session sizes** (every play session's cap matches its court count — see below), alerts on waitlists that can be expanded to another court, **and removes duplicate sessions** (see below) |
 | `com.whitemountain.checkin` | Mondays 6:00 AM | Checks in players on past events so history stays accurate |
@@ -203,6 +204,19 @@ uncharacterised field (`cr_profile.json` `unmapped.fields`) — writing the 4 ne
 that field mapped first, which is filed for Mr. Robot. **Nothing enforces the 4 today.**
 The heal prints it in its report so a reader can see the rule; it does not check against
 it, and the table could not violate it anyway, its smallest value being 5.
+
+## Contract Time checks (`ts/src/jobs/contractTime.ts`, #137)
+
+Any event whose name contains "Contract Time". A court is **full at 4**. **48h out**: a court that is
+not full is at risk — the owner (the event's "Contract Time Owner" field, read through
+`courtreserve-api GET /events/{id}/contract-owner`) is emailed via `POST …/contract-owner/notice`.
+**24h out**: a court that would hold **nobody** is given back (kept = ceil(registrants/4); 0 registrants
+→ the occurrence is cancelled); a part-filled court is **kept** and the email says it is under 4
+(Ron, 2026-11-22). The release is re-read and must show the courts and cap, or nothing is emailed. A
+release is **withheld** (and Ron alerted) when the 48h warning was never sent. Empty/ambiguous owner →
+alert, no email. Three occurrences in a row with a release → one alert to Ron; the job ends nothing.
+Ledger: `state/contract-time-ledger.json`. **Dry unless `--live` AND `state/contract-time-approved.json`
+exists** (the record of Ron's press on the words card). `cli.ts contract-time` is the dry run.
 
 ## Hard Constraints (policy.json)
 

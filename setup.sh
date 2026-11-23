@@ -297,6 +297,8 @@ install_plist "com.whitemountain.checkin"
 # 8:45, last of the three morning jobs: does every STANDING session actually exist?
 # catch-up measures a day's court-hours and cannot see one session missing (#…/2026-10-13).
 install_plist "com.whitemountain.pattern-gaps"
+# Hourly Contract Time 48h/24h court checks + owner email (#137). DRY until Ron presses the words card.
+install_plist "com.whitemountain.contract-time"
 
 # ── 8. Court Reserve login (first time) ──────────────────────────────────────
 step "8. Court Reserve browser login"

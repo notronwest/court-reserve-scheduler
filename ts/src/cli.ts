@@ -9,6 +9,8 @@ import { runCatchUp } from './jobs/catchUp'
 import { fileReportedMemory, fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
 import { gapCounts } from './discord/notify'
 import { runCapacityHeal } from './jobs/capacityDrift'
+import { approvalPath, fileContractMemory, runContractTime } from './jobs/contractTime'
+import { existsSync } from 'node:fs'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -216,6 +218,29 @@ async function main(): Promise<void> {
       break
     }
 
+    case 'contract-time': {
+      // The 48h / 24h court checks on Contract Time events, and the email to the owner
+      // (scheduler#137). DRY by default: it acts only with --live AND the approval file that
+      // records Ron's press on the words card. Hourly under launchd.
+      const log = (m: string): void => console.log(`${new Date().toISOString()}  ${m}`)
+      const approved = existsSync(approvalPath())
+      if (flags.has('--live') && !approved) {
+        log(`--live given but ${approvalPath()} does not exist — the words card has not been pressed. Running DRY.`)
+      }
+      const live = flags.has('--live') && approved
+      const rest = new DiscordRest({
+        botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+        channelId: process.env.DISCORD_CHANNEL_ID ?? '',
+        webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
+      })
+      const result = await runContractTime(makeCr(), { live, rest, memory: fileContractMemory(undefined, log), log })
+      console.log(`Done: ${result.rows.length} occurrence(s), ${result.failures} failure(s)` + (live ? '' : '  [dry run]'))
+      // A failed read, release or send is something a person must look at: exit non-zero so the
+      // wrapper withholds the heartbeat and the watchdog alarms.
+      if (result.failures) process.exit(1)
+      break
+    }
+
     default:
       console.error('commands:')
       console.error('  health                      — is the courtreserve-api service up?')
@@ -225,6 +250,7 @@ async function main(): Promise<void> {
       console.error('  catch-up [--book] [--book-thin] — flag/re-book empty or missed dates in the 14-day horizon')
       console.error('  pattern-gaps [--fix]        — is every STANDING session on the calendar? (--fix books what it can)')
       console.error('  capacity [--fix] [--days N] — does every play session hold the right number of people? (--fix writes the table back)')
+      console.error('  contract-time [--live]      — Contract Time 48h/24h court checks + owner email (dry unless --live and approved)')
       process.exit(1)
   }
 }

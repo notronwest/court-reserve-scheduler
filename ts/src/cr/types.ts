@@ -210,3 +210,35 @@ export interface RecordStandingBookingRequest {
   cr_occurrence_id?: string | null
   booked_by: 'daily' | 'catch_up' | 'gap_sweep'
 }
+
+/**
+ * `GET /events/{id}/contract-owner` (courtreserve-api #920). One match → `ok` with the owner's
+ * name, member id and email. Anything else — the field empty, the name matching nobody or
+ * several people, or a member with no email on file — is NOT `ok`, and nothing is sent.
+ */
+export interface ContractOwner {
+  owner_name: string | null
+  member_id?: number | null
+  email?: string | null
+  status?: 'ok' | 'empty' | 'ambiguous' | 'not_found' | 'no_email'
+  candidates?: unknown[]
+}
+
+export type ContractCheckpoint = '48h' | '24h'
+
+/** `POST /events/{id}/contract-owner/notice` — the service resolves the recipient and writes the words. */
+export interface ContractOwnerNoticeRequest {
+  occurrence_date: string // YYYY-MM-DD
+  checkpoint: ContractCheckpoint
+  players_signed_up: number
+  courts: number
+  courts_at_risk: number
+  courts_released: number
+  /** 24h only: courts kept because someone is on them, though they hold fewer than 4. */
+  courts_kept_under_4: number
+}
+
+export interface ContractOwnerNoticeResult {
+  suppressed?: boolean
+  [key: string]: unknown
+}
