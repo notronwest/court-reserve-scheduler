@@ -12,6 +12,12 @@
 time cannot be read is skipped and named in the Discord alert; the rest of the day books. Rows were not
 repaired by SQL. **Open:** deploy on the mini, re-run catch-up, confirm Dec 7 reads back; the
 courtreserve-api Contract Time writer should write `HH:MM` (to be filed there).
+## 2026-11-23 — a brand-new weekly pattern is missing, not removed ([#140](https://github.com/notronwest/CourtReserve-Scheduler/issues/140))
+
+`beforeLedger` (`ts/src/standingLedger.ts`) now takes the pattern's `created_at`: created on/after the
+ledger start → absent + unrecorded is a gap to book, not `removed`. No `created_at` / unreadable ledger
+stay fail-closed. PR #142. Next: after merge + `./setup.sh`, dry run should list Nov 30–Dec 3 7–10 AM
+Open Play Unleashed as missing; post per-date outcome on #140.
 
 ---
 ## 2026-11-22 — Contract Time 48h/24h court checks + owner email ([#137](https://github.com/notronwest/CourtReserve-Scheduler/issues/137))
