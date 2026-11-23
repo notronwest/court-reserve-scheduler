@@ -31,6 +31,10 @@ export interface FixedEvent {
    *  (D-0056). The retirement switch: the dashboard stamps it rather than deleting the
    *  row. On or before today means retired — see `dropExpired` in `fixedEvents.ts`. */
   until?: string | null
+  /** `courtreserve.fixed_events.created_at`. A pattern created after the booking ledger started
+   *  cannot have been booked before the ledger existed, so its absent sessions are missing, not
+   *  removed (#140). Absent means unknown, and the sweep stays fail-closed. */
+  created_at?: string | null
   /** Cadence, from `courtreserve.fixed_events.every_weeks` (D-0202). 1 or 2; absent/null
    *  reads as weekly. Whether a date is a session is answered ONLY by `onWeekStatus`. */
   every_weeks?: number | null

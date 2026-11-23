@@ -451,7 +451,7 @@ export function scanPatternGaps(
       if (standing && hits.length === 0) {
         if (!standing.view) ledgerStatus = 'ledger_down'
         else if (wasBooked(standing.view, p, ymd)) ledgerStatus = 'removed'
-        else if (beforeLedger(standing.view, ymd)) {
+        else if (beforeLedger(standing.view, ymd, p.created_at)) {
           ledgerStatus = 'removed'
           beforeLedgerDate = true
         }

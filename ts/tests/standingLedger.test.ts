@@ -68,6 +68,34 @@ describe('the ledger rules in the scan', () => {
     expect(gaps.map((g) => [g.status, g.before_ledger])).toEqual([['removed', true]])
   })
 
+  it('a pattern created after the ledger started, absent and never recorded → missing, booked if a court is free (#140)', () => {
+    const v = view([], '2026-10-10')
+    const fresh = { ...pattern, created_at: '2026-10-14T16:53:00Z' }
+    const gaps = scanPatternGaps([fresh], [], [MON], undefined, {}, { view: v, today: TODAY })
+    expect(gaps.map((g) => [g.status, g.before_ledger])).toEqual([['no_court', undefined]])
+  })
+
+  it('a pattern older than the ledger, same date → still removed (#140)', () => {
+    const v = view([], '2026-10-10')
+    const old = { ...pattern, created_at: '2026-09-01T00:00:00Z' }
+    const gaps = scanPatternGaps([old], [], [MON], undefined, {}, { view: v, today: TODAY })
+    expect(gaps.map((g) => [g.status, g.before_ledger])).toEqual([['removed', true]])
+  })
+
+  it('no created_at, or an unreadable ledger → books nothing (#140)', () => {
+    const none = scanPatternGaps([pattern], [], [MON], undefined, {}, { view: view([], '2026-10-10'), today: TODAY })
+    expect(none.map((g) => g.status)).toEqual(['removed'])
+    const fresh = { ...pattern, created_at: '2026-10-14T16:53:00Z' }
+    const down = scanPatternGaps([fresh], [], [MON], undefined, {}, { view: null, today: TODAY })
+    expect(down.map((g) => g.status)).toEqual(['ledger_down'])
+  })
+
+  it('a fresh pattern whose session WAS recorded and then deleted is still removed (D-0315, #140)', () => {
+    const fresh = { ...pattern, created_at: '2026-10-14T16:53:00Z' }
+    const gaps = scanPatternGaps([fresh], [], [MON], undefined, {}, { view: view([row('2026-10-19')], '2026-10-10'), today: TODAY })
+    expect(gaps.map((g) => g.status)).toEqual(['removed'])
+  })
+
   it('an empty ledger vouches for nothing', () => {
     expect(beforeLedger(view([], null), '2030-01-01')).toBe(true)
   })

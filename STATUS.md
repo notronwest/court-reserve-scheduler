@@ -5,6 +5,14 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-23 — a brand-new weekly pattern is missing, not removed ([#140](https://github.com/notronwest/CourtReserve-Scheduler/issues/140))
+
+`beforeLedger` (`ts/src/standingLedger.ts`) now takes the pattern's `created_at`: created on/after the
+ledger start → absent + unrecorded is a gap to book, not `removed`. No `created_at` / unreadable ledger
+stay fail-closed. PR #142. Next: after merge + `./setup.sh`, dry run should list Nov 30–Dec 3 7–10 AM
+Open Play Unleashed as missing; post per-date outcome on #140.
+
+---
 ## 2026-11-22 — Contract Time 48h/24h court checks + owner email ([#137](https://github.com/notronwest/CourtReserve-Scheduler/issues/137))
 
 New hourly job (`ts/src/jobs/contractTime.ts`, `cli.ts contract-time`, `com.whitemountain.contract-time`).
