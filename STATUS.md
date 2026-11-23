@@ -5,6 +5,15 @@
 > and the GitHub issues/PRs linked below.
 
 ---
+## 2026-11-23 — a start time with seconds no longer kills the morning run ([#139](https://github.com/notronwest/CourtReserve-Scheduler/issues/139))
+
+`resolveFixedEvents` (`ts/src/fixedEvents.ts`) now reduces every row's start/end to `HH:MM` on every source
+(live, cache, seed), so the booker, catch-up, 8:45 sweep and the ledger key all see one spelling. A row whose
+time cannot be read is skipped and named in the Discord alert; the rest of the day books. Rows were not
+repaired by SQL. **Open:** deploy on the mini, re-run catch-up, confirm Dec 7 reads back; the
+courtreserve-api Contract Time writer should write `HH:MM` (to be filed there).
+
+---
 ## 2026-11-22 — Contract Time 48h/24h court checks + owner email ([#137](https://github.com/notronwest/CourtReserve-Scheduler/issues/137))
 
 New hourly job (`ts/src/jobs/contractTime.ts`, `cli.ts contract-time`, `com.whitemountain.contract-time`).

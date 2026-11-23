@@ -117,6 +117,43 @@ export function dropExpired(
   return { kept, expired }
 }
 
+/**
+ * Reduce a clock value to `HH:MM`, or null when it is not a clock time.
+ *
+ * Postgres `time` columns serialise as `16:00:00`, but `NaiveDateTime.fromYMDHM`
+ * accepts only `HH:MM` — one such row killed the 8:00 booker and the 8:30 catch-up
+ * on 2026-11-23. Normalising where rows are resolved means every consumer and the
+ * standing-ledger key see one spelling of a start time.
+ */
+export function normalizeClock(v: unknown): string | null {
+  const m = /^\s*(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*$/.exec(String(v ?? ''))
+  if (!m) return null
+  const h = +m[1]
+  const min = +m[2]
+  if (h > 23 || min > 59 || (m[3] !== undefined && +m[3] > 59)) return null
+  return `${String(h).padStart(2, '0')}:${m[2]}`
+}
+
+/**
+ * Normalise every row's start/end to `HH:MM`. A row whose times cannot be read is
+ * set aside (returned in `unreadable`) rather than passed on — one bad row must cost
+ * that slot, never the whole day's run.
+ */
+export function normalizeClockTimes(events: FixedEvent[]): {
+  kept: FixedEvent[]
+  unreadable: FixedEvent[]
+} {
+  const kept: FixedEvent[] = []
+  const unreadable: FixedEvent[] = []
+  for (const fe of events) {
+    const start = normalizeClock(fe.start_time)
+    const end = normalizeClock(fe.end_time)
+    if (start === null || end === null) unreadable.push(fe)
+    else kept.push({ ...fe, start_time: start, end_time: end })
+  }
+  return { kept, unreadable }
+}
+
 /** Shared tail: apply the `until` cutoff and describe what came back. */
 function finish(
   allEvents: FixedEvent[],
@@ -129,7 +166,8 @@ function finish(
   // `until` log, not the unusable-cadence alert, not the recommender. One line per
   // resolve, and deliberately NOT in `alert` — a Concord row is the normal state of
   // the table, not a failure, and alerting on it would post to Discord every morning.
-  const { kept: ours, elsewhere } = dropOtherPlaces(allEvents)
+  const { kept: readable, unreadable } = normalizeClockTimes(allEvents)
+  const { kept: ours, elsewhere } = dropOtherPlaces(readable)
   if (elsewhere.length > 0) {
     log(
       `fixed-events: ${elsewhere.length} pattern(s) at another place skipped ` +
@@ -163,7 +201,16 @@ function finish(
         unplaceable.map((e) => `${e.name} ${e.day_of_week} ${e.start_time}`).join(', ')
       : undefined
 
-  const alert = [readAlert, emptyAlert, cadenceAlert].filter(Boolean).join(' · ') || undefined
+  const clockAlert =
+    unreadable.length > 0
+      ? `${unreadable.length} standing pattern(s) have an unreadable start/end time and ` +
+        `will NOT be booked: ` +
+        unreadable
+          .map((e) => `${e.name} ${e.day_of_week} ${JSON.stringify(e.start_time)}-${JSON.stringify(e.end_time)}`)
+          .join(', ')
+      : undefined
+
+  const alert = [readAlert, emptyAlert, cadenceAlert, clockAlert].filter(Boolean).join(' · ') || undefined
   return { events: kept, source, expired, elsewhere, alert }
 }
 
