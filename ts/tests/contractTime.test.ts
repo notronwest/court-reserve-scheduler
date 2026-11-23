@@ -167,6 +167,27 @@ describe('runContractTime', () => {
     expect(f.sent[0].req).toMatchObject({ courts_released: 2 })
   })
 
+  it('a notice that fails after a full cancel is still sent on the next run', async () => {
+    const f = fake([occ(1, in20h, [1, 2])], 0)
+    f.ledger['1'] = { event_id: EVENT, date: '2026-11-24', n48: { at: 'x' } }
+    const send = f.cr.sendContractOwnerNotice.bind(f.cr)
+    let fail = true
+    ;(f.cr as unknown as Record<string, unknown>).sendContractOwnerNotice = async (id: number, req: Record<string, unknown>) => {
+      if (fail) throw new Error('mail down')
+      return send(id, req as never)
+    }
+    const r1 = await run(f)
+    expect(f.cancels).toHaveLength(1)
+    expect(f.sent).toHaveLength(0)
+    expect(r1.failures).toBeGreaterThan(0)
+    fail = false
+    await run(f)
+    expect(f.sent).toHaveLength(1)
+    expect(f.sent[0].req).toMatchObject({ checkpoint: '24h', courts_released: 2, courts: 2, players_signed_up: 0 })
+    await run(f)
+    expect(f.sent).toHaveLength(1)
+  })
+
   it('24h release is withheld, and Ron told once, when no 48h warning went out', async () => {
     const f = fake([occ(1, in20h, [1, 2])], 4)
     await run(f)

@@ -130,7 +130,17 @@ export interface ContractEntry {
   /** Set once the job has looked at the occurrence inside its 24h window — what lets a
    *  non-release break the streak. */
   seen24?: true
-  w24?: { at: string; released: number; kept: number; emailed: boolean }
+  w24?: {
+    at: string
+    released: number
+    kept: number
+    emailed: boolean
+    /** What the notice needs, kept so it can still be sent once a full cancel has taken the
+     *  occurrence off the feed. */
+    courts?: number
+    players?: number
+    kept_under_4?: number
+  }
   alerts?: string[]
   streak_alerted?: true
 }
@@ -273,6 +283,7 @@ export async function runContractTime(cr: CourtReserveClient, opts: ContractTime
     return owners.get(eventId) as ContractOwner | Error
   }
 
+  const feedKeys = new Set<string>()
   for (const occ of occurrences) {
     const date = occ.start.formatYmd()
     const hoursOut = occ.start.diffHours(now)
@@ -292,6 +303,7 @@ export async function runContractTime(cr: CourtReserveClient, opts: ContractTime
     }
     rows.push(row)
     const key = String(occ.occurrence_id)
+    feedKeys.add(key)
     const entry: ContractEntry = ledger[key] ?? { event_id: occ.event_id, date }
     const fail = (msg: string): void => {
       row.error = msg
@@ -365,13 +377,13 @@ export async function runContractTime(cr: CourtReserveClient, opts: ContractTime
     try {
       if (plan.action === 'release' && !retryEmail24) {
         const note = await releaseCourts(cr, occ, plan, date)
-        entry.w24 = { at: stamp(), released: plan.released, kept: plan.kept, emailed: false }
+        entry.w24 = { at: stamp(), released: plan.released, kept: plan.kept, emailed: false, courts: plan.courts, players: plan.registrants, kept_under_4: plan.kept_under_4 }
         ledger[key] = entry
         opts.memory.save(ledger)
         row.outcome += ` — released and re-read OK${note}`
       }
       if (plan.checkpoint === '24h' && !entry.w24 && plan.action === 'notice_under_4') {
-        entry.w24 = { at: stamp(), released: 0, kept: plan.kept, emailed: false }
+        entry.w24 = { at: stamp(), released: 0, kept: plan.kept, emailed: false, courts: plan.courts, players: plan.registrants, kept_under_4: plan.kept_under_4 }
       }
       const sentCount = entry.w24 ?? { released: plan.released, kept: plan.kept }
       const result = await cr.sendContractOwnerNotice(occ.event_id, {
@@ -397,6 +409,43 @@ export async function runContractTime(cr: CourtReserveClient, opts: ContractTime
       await alert(entry, `act:${plan.checkpoint}`, `Contract Time check failed — ${occ.name} ${date}`, msg)
     }
     opts.memory.save(ledger)
+  }
+
+  // A full release cancels the occurrence, so it is gone from the feed and the loop above never
+  // sees it again. Its 24h notice, if the send failed, is owed from the ledger.
+  if (live) {
+    const today = now.formatYmd()
+    for (const [key, entry] of Object.entries(ledger)) {
+      const w = entry.w24
+      if (feedKeys.has(key) || !w || w.emailed || entry.date < today) continue
+      const owner = await ownerOf(entry.event_id)
+      if (owner instanceof Error || (owner.status ?? (owner.email ? 'ok' : 'empty')) !== 'ok') {
+        const why = owner instanceof Error ? `read failed: ${owner.message}` : `owner field is ${owner.status ?? 'empty'}`
+        if (owner instanceof Error) failures++
+        await alert(entry, 'owner:24h', `Contract Time owner can't be emailed — event ${entry.event_id} ${entry.date}`, `${why}. The 24h notice for a released court is still owed. Fix the "Contract Time Owner" field on the event.`)
+        continue
+      }
+      try {
+        const result = await cr.sendContractOwnerNotice(entry.event_id, {
+          occurrence_date: entry.date,
+          checkpoint: '24h',
+          players_signed_up: w.players ?? 0,
+          courts: w.courts ?? w.released + w.kept,
+          courts_at_risk: 0,
+          courts_released: w.released,
+          courts_kept_under_4: w.kept_under_4 ?? 0,
+        })
+        w.emailed = true
+        if (result?.suppressed) {
+          failures++
+          await alert(entry, 'suppressed:24h', `Contract Time owner email suppressed — event ${entry.event_id} ${entry.date}`, `The mail service would not deliver to ${owner.owner_name ?? 'the owner'}. Contact them another way.`)
+        }
+      } catch (e) {
+        failures++
+        await alert(entry, 'act:24h', `Contract Time notice failed — event ${entry.event_id} ${entry.date}`, e instanceof Error ? e.message : String(e))
+      }
+      opts.memory.save(ledger)
+    }
   }
 
   // Three in a row — tell Ron, do nothing else.
