@@ -63,9 +63,17 @@ export function wasBooked(view: StandingLedgerView, p: Pick<FixedEvent, 'name' |
   return view.booked.has(rowKey(patternKey(p), ymd, p.start_time))
 }
 
-/** Is this date one the ledger cannot vouch for? An empty ledger cannot vouch for any. */
-export function beforeLedger(view: StandingLedgerView, ymd: string): boolean {
+/**
+ * Is this date one the ledger cannot vouch for? An empty ledger cannot vouch for any.
+ *
+ * A pattern created ON OR AFTER the ledger started is the exception: nothing could have booked
+ * it before it existed, so an unrecorded absence is missing, not removed by a person (#140).
+ * No `created_at` (or an unparseable one) keeps the fail-closed answer.
+ */
+export function beforeLedger(view: StandingLedgerView, ymd: string, createdAt?: string | null): boolean {
   if (!view.startedOn) return true
+  const created = createdAt && /^\d{4}-\d{2}-\d{2}/.test(String(createdAt)) ? String(createdAt).slice(0, 10) : null
+  if (created && created >= view.startedOn) return false
   const cutoff = NaiveDateTime.parseDate(view.startedOn).addHours(24 * LEDGER_LEAD_DAYS).formatYmd()
   return ymd < cutoff
 }
