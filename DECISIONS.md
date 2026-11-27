@@ -5621,8 +5621,8 @@ unpriced Contract Time event. Writing a fee, charge, invoice or payment from thi
    waitlist (a balanced court of 4) AND a court is free for that whole session, the 24-hour check
    adds that court to the contract for that one session, raises both halves' limits by 2 so the
    waitlisted move in, and tells the holder. It grows by at most one court per check, never takes a
-   court anything else holds, and never grows and gives back in the same check. Proposed, pending
-   the owner's answer on whether the added court is charged (ledger, 2026-11-27).
+   court anything else holds, and never grows and gives back in the same check. The added court is
+   **free** to the holder (owner, 2026-11-27: "Free") — no fee, no adjustment on any account.
 
 **Why.** Mixed play needs even numbers of men and women, and the booking system's only way to hold
 that is two events with a gender limit each. Treating each event as its own contract double-charges
