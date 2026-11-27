@@ -5612,6 +5612,18 @@ unpriced Contract Time event. Writing a fee, charge, invoice or payment from thi
    both halves, each capped at half the players, both owned by the holder and linked to the one
    contract record, and the card shows them as one contract.
 
+6. **Which half lists an odd court does not matter — but one must.** With an odd number of courts
+   (3), one half's event lists the extra court; nothing reads meaning into which. Every rule above
+   uses the contract's total.
+7. **A session can grow by one court at the 24-hour check.** Owner, 2026-11-27: "if it grows to 2
+   on the waitlist for each event we can add a court -- unless the other court is in use --
+   probably conducted during the 24 hour check". When BOTH halves have at least 2 on their
+   waitlist (a balanced court of 4) AND a court is free for that whole session, the 24-hour check
+   adds that court to the contract for that one session, raises both halves' limits by 2 so the
+   waitlisted move in, and tells the holder. It grows by at most one court per check, never takes a
+   court anything else holds, and never grows and gives back in the same check. Proposed, pending
+   the owner's answer on whether the added court is charged (ledger, 2026-11-27).
+
 **Why.** Mixed play needs even numbers of men and women, and the booking system's only way to hold
 that is two events with a gender limit each. Treating each event as its own contract double-charges
 the fee, sends the holder two contradictory setup emails, and makes the court checks judge 1 court
