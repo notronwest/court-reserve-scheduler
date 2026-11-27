@@ -155,6 +155,11 @@ export function fileContractMemory(dir: string = fixedEventsStateDir(), log: (m:
   return fileLedgerMemory<ContractLedger>('contract-time-ledger.json', dir, log)
 }
 
+/** `{"event_ids": [..]}` — events held out of the checks (see ContractTimeOptions.held). */
+export function heldPath(dir: string = fixedEventsStateDir()): string {
+  return `${dir}/contract-time-held.json`
+}
+
 /** Ron's press on the words card is recorded by this file existing. */
 export function approvalPath(dir: string = fixedEventsStateDir()): string {
   return `${dir}/contract-time-approved.json`
@@ -205,6 +210,9 @@ export interface ContractTimeOptions {
   log: (m: string) => void
   now?: NaiveDateTime
   knownCourts?: ReadonlySet<number>
+  /** Events held out of the checks entirely: the halves of a mixed Contract Time (D-0352), which
+   *  must be judged together, until the pairing lands (scheduler#147). Listed, never acted on. */
+  held?: ReadonlySet<number>
 }
 
 export interface ContractTimeResult {
@@ -304,6 +312,10 @@ export async function runContractTime(cr: CourtReserveClient, opts: ContractTime
     rows.push(row)
     const key = String(occ.occurrence_id)
     feedKeys.add(key)
+    if (opts.held?.has(occ.event_id)) {
+      row.outcome = 'HELD — half of a mixed Contract Time; judged with its other half once paired, nothing done'
+      continue
+    }
     const entry: ContractEntry = ledger[key] ?? { event_id: occ.event_id, date }
     const fail = (msg: string): void => {
       row.error = msg

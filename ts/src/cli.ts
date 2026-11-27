@@ -9,8 +9,8 @@ import { runCatchUp } from './jobs/catchUp'
 import { fileReportedMemory, fileSeenMemory, needsAttention, runPatternGaps } from './jobs/patternGaps'
 import { gapCounts } from './discord/notify'
 import { runCapacityHeal } from './jobs/capacityDrift'
-import { approvalPath, fileContractMemory, runContractTime } from './jobs/contractTime'
-import { existsSync } from 'node:fs'
+import { heldPath, approvalPath, fileContractMemory, runContractTime } from './jobs/contractTime'
+import { existsSync, readFileSync } from 'node:fs'
 
 const baseUrl = process.env.CRAPI_URL ?? 'http://localhost:8787'
 const apiKey = process.env.CRAPI_KEY ?? ''
@@ -233,7 +233,14 @@ async function main(): Promise<void> {
         channelId: process.env.DISCORD_CHANNEL_ID ?? '',
         webhookUrl: process.env.DISCORD_WEBHOOK_URL ?? '',
       })
-      const result = await runContractTime(makeCr(), { live, rest, memory: fileContractMemory(undefined, log), log })
+      // Mixed Contract Time halves held out until they are judged together (D-0352). A held file that
+      // cannot be read stops the run: acting on a half because the hold was unreadable is the harm.
+      let held: Set<number> = new Set()
+      if (existsSync(heldPath())) {
+        held = new Set((JSON.parse(readFileSync(heldPath(), 'utf8')).event_ids as unknown[]).map(Number))
+        log(`holding ${held.size} event(s) out of the checks: ${[...held].join(', ')}`)
+      }
+      const result = await runContractTime(makeCr(), { live, rest, memory: fileContractMemory(undefined, log), log, held })
       console.log(`Done: ${result.rows.length} occurrence(s), ${result.failures} failure(s)` + (live ? '' : '  [dry run]'))
       // A failed read, release or send is something a person must look at: exit non-zero so the
       // wrapper withholds the heartbeat and the watchdog alarms.
