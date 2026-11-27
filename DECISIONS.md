@@ -5587,6 +5587,43 @@ D-0115 rather than editing it, per the register's rule.
 form, page or record. A card that flags a contract-time request "incomplete" for lacking a total. An
 unpriced Contract Time event. Writing a fee, charge, invoice or payment from this feature.
 
+### D-0352 — A mixed Contract Time is ONE contract held as two linked events, men's and women's: one fee, one set of emails, fullness counted together, give-backs shrink both halves evenly
+
+*2026-11-27 · scope: `courtreserve_api/contract_time*, courtreserve_api/contract_owner_notice*, ts/src/jobs/contractTime*` · source: owner, in session 2026-11-27 — on a holder whose men's and women's events were being treated as two contracts: "That is actually one contract time but its a Mixed contract time -- the idea is that we want even numbers of Men and Women for those events so we have two separate events allowing Men and Women to register separately. Can you work this concept into the architecture?" Then, asked four questions, chose: count everyone together for fullness; shrink both halves evenly on a give-back; a Mixed checkbox on new requests that creates both halves; one $100 fee for the one contract. Amends D-0341 (fee and emails are per contract, and a mixed contract is one contract). Multi-repo; the table is the build cards' review — each card names the repo-local slice it touches.*
+
+**Decision.**
+
+1. **One mixed Contract Time = one contract, two events.** The men's half and the women's half are
+   separate booking-system events (each gender-restricted, so men and women register separately and
+   the numbers stay even), linked to ONE contract record. Everything that is "per contract" is done
+   once: the one-time fee, the holder's setup email, the group welcome, the three-weeks-of-give-backs
+   count. A half is never treated as a contract of its own.
+2. **Each half holds half the players.** A mixed contract of N courts is full at 4N players: 2N men
+   and 2N women. The courts are listed across the two events in the booking system, but they belong
+   to the contract, not to a half.
+3. **Fullness is counted together.** The 48- and 24-hour checks add the men's and women's sign-ups
+   for the session and compare the total with 4 per court across ALL the contract's courts.
+   6 women and 2 men on 3 courts is 8 players: 2 courts full, 1 at risk.
+4. **A give-back shrinks both halves evenly.** At 24 hours, a court with nobody on it (counted
+   together, per rule 3 and D-0341's "only empty courts go back") is given back, and BOTH halves'
+   player limits drop by 2 so the contract stays balanced. The holder gets one notice for the
+   contract, not one per half.
+5. **New requests can be Mixed.** The request form carries a Mixed checkbox. Ticked, setup creates
+   both halves, each capped at half the players, both owned by the holder and linked to the one
+   contract record, and the card shows them as one contract.
+
+**Why.** Mixed play needs even numbers of men and women, and the booking system's only way to hold
+that is two events with a gender limit each. Treating each event as its own contract double-charges
+the fee, sends the holder two contradictory setup emails, and makes the court checks judge 1 court
+of men against 2 courts of women — releasing a court the whole group was sharing.
+
+**Forbids.**
+- Charging the one-time fee, or sending a setup or welcome email, once per half.
+- Judging a half's fullness, or releasing a court, from one half's sign-ups alone.
+- A give-back that changes one half's limit and not the other's.
+- A mixed contract whose two halves are not linked to one contract record (two orphaned events are
+  two contracts to every check above).
+
 ## Proposed (not binding yet)
 
 - D-0087 — An adopted edit is one row per Court Reserve event updated in place, never a second insert; on a recurring event courts and capacity are pattern facts, not event facts (2026-10-09)
