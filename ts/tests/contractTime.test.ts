@@ -135,6 +135,17 @@ describe('runContractTime', () => {
     expect(f.sent).toHaveLength(1)
   })
 
+  it('a held event (half of a mixed Contract Time) is listed but never emailed or released', async () => {
+    const f = fake([occ(1, in20h, [1, 2])], 0)
+    f.ledger['1'] = { event_id: EVENT, date: '2026-11-24', n48: { at: 'x' } }
+    const r = await runContractTime(f.cr, { live: true, rest: f.rest as never, memory: f.memory, log: () => {}, now: NOW, held: new Set([EVENT]) })
+    expect(f.cancels).toHaveLength(0)
+    expect(f.setCourts).toHaveLength(0)
+    expect(f.sent).toHaveLength(0)
+    expect(r.rows[0].outcome).toMatch(/^HELD/)
+    expect(r.failures).toBe(0)
+  })
+
   it('48h with 8 of 8 → no email', async () => {
     const f = fake([occ(1, in40h, [1, 2])], 8)
     await run(f)
